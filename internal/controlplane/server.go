@@ -264,7 +264,6 @@ var staticFileNames = []string{
 	"dashboard.js",
 	"workflows.js",
 	"agent-test.html",
-	"agent-test.js",
 	"agent-run.html",
 	"agent-run.js",
 	"api-cases.html",
