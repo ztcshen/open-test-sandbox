@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -146,12 +147,49 @@ func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 	if len(caseRuns) != 1 || caseRuns[0].CaseID != "case.alpha" {
 		t.Fatalf("case runs = %#v", caseRuns)
 	}
+	var requestSummary struct {
+		Method  string `json:"method"`
+		Path    string `json:"path"`
+		HasBody bool   `json:"hasBody"`
+	}
+	if err := json.Unmarshal([]byte(caseRuns[0].RequestSummaryJSON), &requestSummary); err != nil {
+		t.Fatalf("decode request summary: %v", err)
+	}
+	if requestSummary.Method != "POST" || requestSummary.Path != "/v1/items" || !requestSummary.HasBody {
+		t.Fatalf("request summary = %#v", requestSummary)
+	}
+	var assertionSummary struct {
+		Status     string `json:"status"`
+		ErrorCount int    `json:"errorCount"`
+	}
+	if err := json.Unmarshal([]byte(caseRuns[0].AssertionSummaryJSON), &assertionSummary); err != nil {
+		t.Fatalf("decode assertion summary: %v", err)
+	}
+	if assertionSummary.Status != "passed" || assertionSummary.ErrorCount != 0 {
+		t.Fatalf("assertion summary = %#v", assertionSummary)
+	}
 	records, err := s.ListEvidence(context.Background(), "case-run-003")
 	if err != nil {
 		t.Fatalf("list evidence: %v", err)
 	}
 	if len(records) != 5 {
 		t.Fatalf("evidence records = %#v", records)
+	}
+	var responseSummary string
+	for _, record := range records {
+		if record.Kind == "response" {
+			responseSummary = record.Summary
+		}
+	}
+	var response struct {
+		StatusCode int `json:"statusCode"`
+		BodyBytes  int `json:"bodyBytes"`
+	}
+	if err := json.Unmarshal([]byte(responseSummary), &response); err != nil {
+		t.Fatalf("decode response evidence summary: %v", err)
+	}
+	if response.StatusCode != http.StatusOK || response.BodyBytes == 0 {
+		t.Fatalf("response evidence summary = %#v", response)
 	}
 }
 

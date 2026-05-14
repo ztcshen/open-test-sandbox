@@ -303,6 +303,10 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 	defer s.Close()
 
 	now := time.Now().UTC()
+	requestSummary, assertionSummary, err := apiCaseRunSummaries(result.EvidencePath)
+	if err != nil {
+		return err
+	}
 	if _, err := s.CreateRun(ctx, store.Run{
 		ID:           result.RunID,
 		ProfileID:    profileID,
@@ -322,8 +326,8 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 		RunID:                result.RunID,
 		CaseID:               result.CaseID,
 		Status:               result.Status,
-		RequestSummaryJSON:   "{}",
-		AssertionSummaryJSON: "{}",
+		RequestSummaryJSON:   requestSummary,
+		AssertionSummaryJSON: assertionSummary,
 		StartedAt:            now,
 		FinishedAt:           now,
 		CreatedAt:            now,
@@ -338,6 +342,10 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 			}
 			return err
 		}
+		summary, err := evidenceSummary(path, strings.TrimSuffix(name, ".json"))
+		if err != nil {
+			return err
+		}
 		if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
 			ID:        result.RunID + "." + name,
 			RunID:     result.RunID,
@@ -345,12 +353,114 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 			Kind:      strings.TrimSuffix(name, ".json"),
 			URI:       path,
 			MediaType: "application/json",
+			Summary:   summary,
 			CreatedAt: now,
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+type requestSummary struct {
+	Method      string `json:"method"`
+	Path        string `json:"path"`
+	HeaderCount int    `json:"headerCount"`
+	HasBody     bool   `json:"hasBody"`
+}
+
+type assertionSummary struct {
+	Status     string `json:"status"`
+	ErrorCount int    `json:"errorCount"`
+}
+
+type responseSummary struct {
+	StatusCode  int `json:"statusCode"`
+	HeaderCount int `json:"headerCount"`
+	BodyBytes   int `json:"bodyBytes"`
+}
+
+func apiCaseRunSummaries(evidencePath string) (string, string, error) {
+	request, err := requestSummaryJSON(filepath.Join(evidencePath, "request.json"))
+	if err != nil {
+		return "", "", err
+	}
+	assertions, err := assertionSummaryJSON(filepath.Join(evidencePath, "assertions.json"))
+	if err != nil {
+		return "", "", err
+	}
+	return request, assertions, nil
+}
+
+func evidenceSummary(path string, kind string) (string, error) {
+	switch kind {
+	case "request":
+		return requestSummaryJSON(path)
+	case "response":
+		return responseSummaryJSON(path)
+	case "assertions":
+		return assertionSummaryJSON(path)
+	default:
+		return "", nil
+	}
+}
+
+func requestSummaryJSON(path string) (string, error) {
+	var request apicase.Request
+	if err := readJSONFile(path, &request); err != nil {
+		return "", err
+	}
+	return compactJSON(requestSummary{
+		Method:      strings.ToUpper(request.Method),
+		Path:        request.Path,
+		HeaderCount: len(request.Headers),
+		HasBody:     request.Body != nil,
+	})
+}
+
+func responseSummaryJSON(path string) (string, error) {
+	var response apicase.ResponseEvidence
+	if err := readJSONFile(path, &response); err != nil {
+		return "", err
+	}
+	return compactJSON(responseSummary{
+		StatusCode:  response.StatusCode,
+		HeaderCount: len(response.Headers),
+		BodyBytes:   len([]byte(response.Body)),
+	})
+}
+
+func assertionSummaryJSON(path string) (string, error) {
+	var assertions apicase.AssertionEvidence
+	if err := readJSONFile(path, &assertions); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return compactJSON(assertionSummary{Status: "not-run"})
+		}
+		return "", err
+	}
+	return compactJSON(assertionSummary{
+		Status:     assertions.Status,
+		ErrorCount: len(assertions.Errors),
+	})
+}
+
+func readJSONFile(path string, target any) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	return nil
+}
+
+func compactJSON(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func runServe(args []string) error {
