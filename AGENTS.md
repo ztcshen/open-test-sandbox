@@ -7,8 +7,7 @@ profile-driven, and local-first.
 
 - Do not hardcode a concrete business domain into core packages.
 - Source code and default core assets must not contain source-domain terms.
-  Put domain-specific names and language only in profile/config bundles or
-  migration-only documents.
+  Put domain-specific names and language only in profile/config bundles.
 - Keep template configuration as reviewable files first; databases are indexes
   and runtime stores.
 - SQLite is the default local Store.
@@ -22,8 +21,8 @@ profile-driven, and local-first.
 - `cmd/otsandbox/`: CLI entrypoint.
 - `internal/`: future core packages.
 - `profiles/`: future profile bundles.
-- `docs/`: public docs and migration notes.
-- `tools/migration/`: one-time and repeatable migration helpers.
+- `docs/`: public docs.
+- `tools/guardrails/`: local quality gates and repository checks.
 
 ## Naming
 

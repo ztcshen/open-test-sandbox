@@ -24,16 +24,20 @@ generic, profile-driven, and local-first.
 - Evidence query CLI.
 - Baseline gate CLI.
 - Release hygiene pass.
+- Review feedback: source-transfer notes removed from repo, and source-domain
+  checks live under neutral guardrails.
 
 ## Open Task Queue
 
-### Task 1: First Review Feedback
+### Task 1: Expand Profile-Driven Frontend Pages
 
 Goal:
-- Collect review feedback from a fresh checkout or external reviewer and turn it
-  into the next small implementation queue.
+- Continue adapting frontend pages from the reference control plane while
+  keeping domain text in profile/config bundles only.
 
 Acceptance:
-- Any issue found by review maps to a small, testable slice.
+- Copied frontend source is scrubbed of source-domain terms before entering
+  core/default assets.
+- The React build and at least one headless page smoke pass.
 - Core/profile separation remains intact.
 - `go test ./...` and the source-domain scan pass after each slice.

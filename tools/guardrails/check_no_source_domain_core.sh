@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT_DIR"
 
-DENYLIST="tools/migration/source-domain-terms.txt"
+DENYLIST="tools/guardrails/source-domain-terms.txt"
 
 if [[ ! -f "$DENYLIST" ]]; then
   echo "missing source-domain denylist: $DENYLIST" >&2
@@ -39,7 +39,7 @@ if [[ ${#existing[@]} -eq 0 ]]; then
 fi
 
 if rg -n -i -f "$DENYLIST" "${existing[@]}"; then
-  echo "core contains source-domain terms; move them behind a profile or migration doc" >&2
+  echo "core contains source-domain terms; move them behind a profile or config bundle" >&2
   exit 1
 fi
 
