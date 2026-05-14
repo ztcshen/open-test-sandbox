@@ -162,6 +162,50 @@ func TestEvidenceImportCommandCanEmitJSONReport(t *testing.T) {
 	}
 }
 
+func TestEvidenceListCommandPrintsStoreRecords(t *testing.T) {
+	storePath := createStoredCaseRun(t, "case-run-004")
+
+	out := runCLI(t, "evidence", "list", "--store-url", storePath)
+
+	for _, want := range []string{"Run: case-run-004", "Case Run: case-run-004.case", "Case: case.alpha", "Evidence: response"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("evidence list output missing %q: %q", want, out)
+		}
+	}
+}
+
+func TestEvidenceListCommandCanEmitJSON(t *testing.T) {
+	storePath := createStoredCaseRun(t, "case-run-005")
+
+	out := runCLI(t, "evidence", "list", "--store-url", storePath, "--json")
+
+	var report struct {
+		Runs []struct {
+			ID              string `json:"id"`
+			APICaseRunCount int    `json:"apiCaseRunCount"`
+			EvidenceCount   int    `json:"evidenceCount"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode evidence list json: %v\n%s", err, out)
+	}
+	if len(report.Runs) != 1 || report.Runs[0].ID != "case-run-005" {
+		t.Fatalf("json runs = %#v", report.Runs)
+	}
+	if report.Runs[0].APICaseRunCount != 1 || report.Runs[0].EvidenceCount != 5 {
+		t.Fatalf("json run counts = %#v", report.Runs[0])
+	}
+}
+
+func TestEvidenceListCommandRejectsMissingRun(t *testing.T) {
+	storePath := createStoredCaseRun(t, "case-run-006")
+
+	out := runCLIFails(t, "evidence", "list", "--store-url", storePath, "--run", "case-run-missing")
+	if !strings.Contains(out, "run not found") || !strings.Contains(out, "case-run-missing") {
+		t.Fatalf("missing run output = %q", out)
+	}
+}
+
 func TestCaseRunDryRunCommandWritesEvidence(t *testing.T) {
 	dir := t.TempDir()
 	casePath := filepath.Join(dir, "case.json")
@@ -296,6 +340,24 @@ func runCLIFails(t *testing.T, args ...string) string {
 		t.Fatalf("go run . %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
 	}
 	return string(out)
+}
+
+func createStoredCaseRun(t *testing.T, runID string) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"created"}`)
+	}))
+	t.Cleanup(server.Close)
+
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	storePath := filepath.Join(dir, "store.sqlite")
+	evidenceDir := filepath.Join(dir, "evidence")
+
+	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", runID, "--evidence-dir", evidenceDir, "--store-url", storePath, "--profile", "sample")
+	return storePath
 }
 
 func writeAPICaseFile(t *testing.T, path string) {

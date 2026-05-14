@@ -20,6 +20,7 @@ type Store interface {
 
 	CreateRun(context.Context, Run) (Run, error)
 	GetRun(context.Context, string) (Run, error)
+	ListRuns(context.Context) ([]Run, error)
 
 	RecordAPICaseRun(context.Context, APICaseRun) (APICaseRun, error)
 	ListAPICaseRuns(context.Context, string) ([]APICaseRun, error)

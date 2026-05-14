@@ -87,6 +87,7 @@ Usage:
   otsandbox profile inspect --profile PATH
   otsandbox profile import --from PATH [--store-url PATH]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
+  otsandbox evidence list [--store-url PATH] [--run ID] [--json]
   otsandbox workflow plan --profile PATH --workflow ID
   otsandbox template render --profile PATH --template ID [--fixture ID]
   otsandbox case run --case PATH [--base-url URL] [--dry-run] [--evidence-dir PATH]
@@ -327,8 +328,118 @@ func runEvidence(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "import":
 		return runEvidenceImport(ctx, args[1:])
+	case "list":
+		return runEvidenceList(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown evidence command: %s", args[0])
+	}
+}
+
+func runEvidenceList(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("evidence list", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	runID := flags.String("run", "", "Run id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	if err != nil {
+		return err
+	}
+	s, err := sqlite.Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	report, err := evidenceList(ctx, s, *runID)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	printEvidenceList(report)
+	return nil
+}
+
+type evidenceListReport struct {
+	Runs []evidenceRunReport `json:"runs"`
+}
+
+type evidenceRunReport struct {
+	ID              string                 `json:"id"`
+	ProfileID       string                 `json:"profileId"`
+	WorkflowID      string                 `json:"workflowId"`
+	Status          string                 `json:"status"`
+	EvidenceRoot    string                 `json:"evidenceRoot"`
+	APICaseRunCount int                    `json:"apiCaseRunCount"`
+	EvidenceCount   int                    `json:"evidenceCount"`
+	APICaseRuns     []store.APICaseRun     `json:"apiCaseRuns"`
+	EvidenceRecords []store.EvidenceRecord `json:"evidenceRecords"`
+}
+
+func evidenceList(ctx context.Context, s store.Store, runID string) (evidenceListReport, error) {
+	runs, err := evidenceListRuns(ctx, s, runID)
+	if err != nil {
+		return evidenceListReport{}, err
+	}
+	report := evidenceListReport{Runs: make([]evidenceRunReport, 0, len(runs))}
+	for _, run := range runs {
+		caseRuns, err := s.ListAPICaseRuns(ctx, run.ID)
+		if err != nil {
+			return evidenceListReport{}, err
+		}
+		records, err := s.ListEvidence(ctx, run.ID)
+		if err != nil {
+			return evidenceListReport{}, err
+		}
+		report.Runs = append(report.Runs, evidenceRunReport{
+			ID:              run.ID,
+			ProfileID:       run.ProfileID,
+			WorkflowID:      run.WorkflowID,
+			Status:          run.Status,
+			EvidenceRoot:    run.EvidenceRoot,
+			APICaseRunCount: len(caseRuns),
+			EvidenceCount:   len(records),
+			APICaseRuns:     caseRuns,
+			EvidenceRecords: records,
+		})
+	}
+	return report, nil
+}
+
+func evidenceListRuns(ctx context.Context, s store.Store, runID string) ([]store.Run, error) {
+	if strings.TrimSpace(runID) == "" {
+		return s.ListRuns(ctx)
+	}
+	run, err := s.GetRun(ctx, runID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("run not found: %s", runID)
+		}
+		return nil, err
+	}
+	return []store.Run{run}, nil
+}
+
+func printEvidenceList(report evidenceListReport) {
+	for _, run := range report.Runs {
+		fmt.Printf("Run: %s\n", run.ID)
+		fmt.Printf("Profile: %s\n", run.ProfileID)
+		fmt.Printf("Status: %s\n", run.Status)
+		for _, caseRun := range run.APICaseRuns {
+			fmt.Printf("Case Run: %s\n", caseRun.ID)
+			fmt.Printf("Case: %s\n", caseRun.CaseID)
+			fmt.Printf("Case Status: %s\n", caseRun.Status)
+		}
+		for _, record := range run.EvidenceRecords {
+			fmt.Printf("Evidence: %s %s\n", record.Kind, record.URI)
+		}
 	}
 }
 

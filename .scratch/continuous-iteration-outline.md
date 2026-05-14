@@ -21,22 +21,11 @@ generic, profile-driven, and local-first.
 - Machine-readable Evidence import report.
 - Workflow planning command.
 - Request template rendering preview.
+- Evidence query CLI.
 
 ## Open Task Queue
 
-### Task 1: Evidence Query CLI
-
-Status: open
-
-Goal:
-- List runs, case runs, and Evidence records from the local Store.
-
-Acceptance:
-- Query commands read from SQLite by default.
-- Text output is useful for humans and can be requested as JSON.
-- Missing records return not-found errors without panics.
-
-### Task 2: Baseline Gate CLI
+### Task 1: Baseline Gate CLI
 
 Status: open
 
@@ -48,7 +37,7 @@ Acceptance:
 - Gate state is profile-id and subject-id based.
 - No domain-specific subject names appear in core.
 
-### Task 3: Release Hygiene
+### Task 2: Release Hygiene
 
 Status: open
 

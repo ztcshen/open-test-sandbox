@@ -249,6 +249,20 @@ from runs where id = %s;`, sqlString(id)), &rows); err != nil {
 	return rows[0].toStore(), nil
 }
 
+func (s *Store) ListRuns(ctx context.Context) ([]store.Run, error) {
+	var rows []runRow
+	if err := s.query(ctx, `
+select id, profile_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at
+from runs order by created_at, id;`, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]store.Run, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.toStore())
+	}
+	return out, nil
+}
+
 func (s *Store) RecordAPICaseRun(ctx context.Context, r store.APICaseRun) (store.APICaseRun, error) {
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = utcNow()
