@@ -711,6 +711,136 @@ func TestServerSavesWorkflowRunToStore(t *testing.T) {
 	}
 }
 
+func TestServerExposesTestKitRunContracts(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/test-kit/run", "application/json", strings.NewReader(`{
+		"caseId":"case.alpha",
+		"workflowId":"workflow.alpha",
+		"stepId":"step.alpha",
+		"dryRun":true
+	}`))
+	if err != nil {
+		t.Fatalf("post test kit run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("test kit run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode test kit run: %v", err)
+	}
+	if result["ok"] != true || result["caseId"] != "case.alpha" || result["stepId"] != "step.alpha" {
+		t.Fatalf("test kit run result = %#v", result)
+	}
+
+	runs := decodeJSONResponse(t, server.URL+"/api/runs", http.StatusOK)
+	workflowRuns := runs["workflowRuns"].([]any)
+	if len(workflowRuns) != 1 || workflowRuns[0].(map[string]any)["workflowId"] != "workflow.alpha" {
+		t.Fatalf("test kit run should be indexed in store: %#v", runs)
+	}
+}
+
+func TestServerExposesTestKitBatchContract(t *testing.T) {
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+			{ID: "case.beta", DisplayName: "Case Beta", NodeID: "node.alpha"},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/test-kit/run-batch", "application/json", strings.NewReader(`{
+		"caseIds":["case.alpha","case.beta"],
+		"dryRun":true
+	}`))
+	if err != nil {
+		t.Fatalf("post test kit batch: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("test kit batch status = %d body=%s", resp.StatusCode, raw)
+	}
+	var payload struct {
+		OK      bool             `json:"ok"`
+		Results []map[string]any `json:"results"`
+		Summary struct {
+			CaseCount int `json:"caseCount"`
+			Passed    int `json:"passed"`
+		} `json:"summary"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode test kit batch: %v", err)
+	}
+	if !payload.OK || len(payload.Results) != 2 || payload.Summary.CaseCount != 2 || payload.Summary.Passed != 2 {
+		t.Fatalf("test kit batch payload = %#v", payload)
+	}
+}
+
+func TestServerExposesInterfaceNodeCoverage(t *testing.T) {
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+			{ID: "case.beta", DisplayName: "Case Beta"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.alpha", StepID: "step.alpha", NodeID: "node.alpha", CaseID: "case.alpha", Required: true},
+			{WorkflowID: "workflow.alpha", StepID: "step.beta", CaseID: "case.beta", Required: true},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	coverage := decodeJSONResponse(t, server.URL+"/api/interface-node/coverage?workflow=workflow.alpha", http.StatusOK)
+	summary := coverage["summary"].(map[string]any)
+	if summary["totalSteps"] != float64(2) || summary["mappedSteps"] != float64(1) || summary["unmappedSteps"] != float64(1) {
+		t.Fatalf("coverage summary = %#v", summary)
+	}
+	rows := coverage["rows"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("coverage rows = %#v", coverage)
+	}
+	mapped := rows[0].(map[string]any)
+	if mapped["stepId"] != "step.alpha" || mapped["nodeId"] != "node.alpha" || mapped["href"] != "/interface-node.html?id=node.alpha" {
+		t.Fatalf("mapped coverage row = %#v", mapped)
+	}
+
+	gaps := decodeJSONResponse(t, server.URL+"/api/interface-node/coverage-gaps?workflow=workflow.alpha", http.StatusOK)
+	gapSummary := gaps["summary"].(map[string]any)
+	if gapSummary["gapCount"] != float64(1) {
+		t.Fatalf("coverage gaps = %#v", gaps)
+	}
+}
+
 func TestServerExposesEmptyWorkbenchAuxiliaryAPIs(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
 	defer server.Close()

@@ -183,12 +183,40 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			"error": "api case execution is not wired to the control plane yet",
 		})
 	})
+	mux.HandleFunc("/api/test-kit/run", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleTestKitRun(w, r, bundle, runtime)
+	})
+	mux.HandleFunc("/api/test-kit/run-batch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleTestKitRunBatch(w, r, bundle)
+	})
 	mux.HandleFunc("/api/interface-nodes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 		writeJSON(w, interfaceNodesPayloadFromBundle(bundle, r.URL.Query().Get("serviceId")))
+	})
+	mux.HandleFunc("/api/interface-node/coverage", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, interfaceNodeCoveragePayloadFromBundle(bundle, r.URL.Query().Get("workflow")))
+	})
+	mux.HandleFunc("/api/interface-node/coverage-gaps", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, interfaceNodeCoverageGapsPayloadFromBundle(bundle, r.URL.Query().Get("workflow")))
 	})
 	mux.HandleFunc("/api/interface-node", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
