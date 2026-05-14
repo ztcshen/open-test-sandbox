@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>接口节点运行历史 · Open Test Sandbox</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/assets/react/controlPlane.css">
+  </head>
+  <body>
+    <main class="app interface-node-page interface-node-history-page" data-template-id="TPL-INTERFACE-NODE-RUN-HISTORY-V1" data-interface-node-mode="history">
+      <div class="template-watermark" aria-label="模板编号">TPL-INTERFACE-NODE-RUN-HISTORY-V1</div>
+      <section class="topbar interface-node-topbar">
+        <div>
+          <p class="viewer-eyebrow">Interface Node History</p>
+          <h1 id="interfaceNodeTitle">接口节点运行历史</h1>
+          <p id="interfaceNodeSummary">loading</p>
+        </div>
+        <div id="interfaceNodeStats" class="dashboard-top-stats" aria-label="接口节点摘要"></div>
+        <div class="actions">
+          <span id="interfaceNodeStatus" class="environment-status-pill" role="status">ready</span>
+          <a id="interfaceNodeServiceLink" class="button-link" href="/environment-nodes.html">环境节点</a>
+          <a id="interfaceNodeMainLink" class="button-link" href="/interface-node.html">用例概览</a>
+          <a id="interfaceNodeHistoryLink" class="button-link" href="/interface-node-history.html">运行历史</a>
+          <a id="interfaceNodeFieldsLink" class="button-link" href="/interface-node-fields.html">字段契约</a>
+          <button id="refreshInterfaceNodeBtn" type="button" title="刷新状态">↻</button>
+        </div>
+      </section>
+
+      <section id="interfaceNodeContent" class="interface-node-layout interface-node-history-layout" aria-label="接口节点运行历史"></section>
+    </main>
+    <script src="/interface-run-template.js"></script>
+    <script src="/interface-node.js"></script>
+  </body>
+</html>

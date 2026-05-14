@@ -209,6 +209,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/interface-nodes.js", want: "/api/interface-nodes"},
 		{path: "/interface-node.html", want: "interface-node-page"},
 		{path: "/interface-node.js", want: "/api/interface-node"},
+		{path: "/interface-node-history.html", want: "interface-node-history-page"},
+		{path: "/interface-node-fields.html", want: "interface-node-field-page"},
 		{path: "/environment-nodes.html", want: "TPL-ENVIRONMENT-NODE-LIST-V1"},
 		{path: "/environment-nodes.js", want: "/api/dashboard"},
 		{path: "/environment-node.html", want: "TPL-ENVIRONMENT-NODE-DETAIL-V1"},

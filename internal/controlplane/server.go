@@ -155,6 +155,8 @@ var staticFileNames = []string{
 	"interface-nodes.js",
 	"interface-node.html",
 	"interface-node.js",
+	"interface-node-history.html",
+	"interface-node-fields.html",
 	"environment-nodes.html",
 	"environment-nodes.js",
 	"environment-node.html",

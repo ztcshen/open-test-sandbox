@@ -42,6 +42,8 @@ generic, profile-driven, and local-first.
   served from the profile-backed interface-node API.
 - Frontend interface-node detail slice: reference interface-node detail page is
   served with a profile-backed detail API.
+- Frontend interface-node auxiliary slice: reference interface-node history and
+  field contract pages are served from generic static assets.
 
 ## Open Task Queue
 
