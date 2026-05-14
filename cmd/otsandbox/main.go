@@ -75,7 +75,7 @@ Usage:
   otsandbox profile inspect --profile PATH
   otsandbox profile import --from PATH [--store-url PATH]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
-  otsandbox case run --case PATH --dry-run [--evidence-dir PATH]
+  otsandbox case run --case PATH [--base-url URL] [--dry-run] [--evidence-dir PATH]
   otsandbox serve [--profile PATH] [--host HOST] [--port PORT]
   otsandbox help`)
 }
@@ -263,6 +263,7 @@ func runCaseRun(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("case run", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	casePath := flags.String("case", "", "API case file path")
+	baseURL := flags.String("base-url", "", "Base URL for live request execution")
 	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "cases"), "Evidence output directory")
 	runID := flags.String("run-id", "", "Run id")
 	dryRun := flags.Bool("dry-run", false, "Render evidence without sending a request")
@@ -271,6 +272,7 @@ func runCaseRun(ctx context.Context, args []string) error {
 	}
 	result, err := apicase.Run(ctx, apicase.RunOptions{
 		CasePath:    *casePath,
+		BaseURL:     *baseURL,
 		EvidenceDir: *evidenceDir,
 		RunID:       *runID,
 		DryRun:      *dryRun,

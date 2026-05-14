@@ -3,6 +3,9 @@ package apicase_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,6 +45,47 @@ func TestDryRunWritesEvidenceBundle(t *testing.T) {
 	readJSONFile(t, filepath.Join(result.EvidencePath, "request.json"), &request)
 	if request.Method != "POST" || request.Path != "/v1/items" || request.Body["id"] != "item-001" {
 		t.Fatalf("request = %#v", request)
+	}
+}
+
+func TestRunExecutesHTTPCaseAndWritesResponseEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/items" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprint(w, `{"status":"created"}`)
+	}))
+	defer server.Close()
+
+	casePath := filepath.Join(t.TempDir(), "case.json")
+	writeCaseFile(t, casePath)
+	evidenceDir := filepath.Join(t.TempDir(), "evidence")
+
+	result, err := apicase.Run(context.Background(), apicase.RunOptions{
+		CasePath:    casePath,
+		EvidenceDir: evidenceDir,
+		RunID:       "run-002",
+		BaseURL:     server.URL,
+	})
+	if err != nil {
+		t.Fatalf("run api case: %v", err)
+	}
+	if result.Status != "passed" {
+		t.Fatalf("result = %#v", result)
+	}
+	for _, name := range []string{"response.json", "assertions.json"} {
+		if _, err := os.Stat(filepath.Join(result.EvidencePath, name)); err != nil {
+			t.Fatalf("expected evidence file %s: %v", name, err)
+		}
+	}
+	var assertions struct {
+		Status string `json:"status"`
+	}
+	readJSONFile(t, filepath.Join(result.EvidencePath, "assertions.json"), &assertions)
+	if assertions.Status != "passed" {
+		t.Fatalf("assertions = %#v", assertions)
 	}
 }
 

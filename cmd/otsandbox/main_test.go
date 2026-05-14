@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -85,6 +88,27 @@ func TestCaseRunDryRunCommandWritesEvidence(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(evidenceDir, "case-run-001", "summary.json")); err != nil {
 		t.Fatalf("summary evidence missing: %v", err)
+	}
+}
+
+func TestCaseRunCommandExecutesHTTPCase(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"created"}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	evidenceDir := filepath.Join(dir, "evidence")
+
+	out := runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-002", "--evidence-dir", evidenceDir)
+	if !strings.Contains(out, "Case Run: case-run-002") || !strings.Contains(out, "Status: passed") {
+		t.Fatalf("case run output = %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(evidenceDir, "case-run-002", "response.json")); err != nil {
+		t.Fatalf("response evidence missing: %v", err)
 	}
 }
 
