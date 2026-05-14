@@ -97,6 +97,18 @@ func New(bundle profile.Bundle) http.Handler {
 		}
 		writeJSON(w, interfaceNodesPayloadFromBundle(bundle, r.URL.Query().Get("serviceId")))
 	})
+	mux.HandleFunc("/api/interface-node", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		payload, ok := interfaceNodeDetailPayloadFromBundle(bundle, r.URL.Query().Get("id"))
+		if !ok {
+			writeJSONStatus(w, http.StatusNotFound, payload)
+			return
+		}
+		writeJSON(w, payload)
+	})
 	mux.HandleFunc("/dashboard.html", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -141,6 +153,8 @@ var staticFileNames = []string{
 	"app.js",
 	"interface-nodes.html",
 	"interface-nodes.js",
+	"interface-node.html",
+	"interface-node.js",
 	"environment-nodes.html",
 	"environment-nodes.js",
 	"environment-node.html",
@@ -237,6 +251,60 @@ type interfaceNodeItem struct {
 	PassedCaseCount      int    `json:"passedCaseCount"`
 }
 
+type interfaceNodeDetailPayload struct {
+	OK               bool                       `json:"ok,omitempty"`
+	Error            string                     `json:"error,omitempty"`
+	Requested        string                     `json:"requested,omitempty"`
+	Available        []interfaceNodeItem        `json:"available,omitempty"`
+	Node             interfaceNodeDetail        `json:"node,omitempty"`
+	Admission        interfaceNodeAdmission     `json:"admission,omitempty"`
+	RequestTemplates []interfaceRequestTemplate `json:"requestTemplates,omitempty"`
+	Cases            []interfaceCase            `json:"cases"`
+	Fields           interfaceNodeFields        `json:"fields"`
+	History          map[string]any             `json:"history"`
+	Runs             []map[string]any           `json:"runs"`
+}
+
+type interfaceNodeDetail struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName,omitempty"`
+	ServiceID   string `json:"serviceId,omitempty"`
+	Operation   string `json:"operation,omitempty"`
+	Method      string `json:"method,omitempty"`
+	Path        string `json:"path,omitempty"`
+}
+
+type interfaceNodeAdmission struct {
+	Status            string           `json:"status"`
+	RequiredCaseCount int              `json:"requiredCaseCount"`
+	PassedCaseCount   int              `json:"passedCaseCount"`
+	LatestRunID       string           `json:"latestRunId,omitempty"`
+	Blockers          []map[string]any `json:"blockers"`
+}
+
+type interfaceRequestTemplate struct {
+	ID           string `json:"id"`
+	Name         string `json:"name,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Status       string `json:"status,omitempty"`
+	Method       string `json:"method,omitempty"`
+	Path         string `json:"path,omitempty"`
+	TemplateJSON string `json:"templateJson,omitempty"`
+}
+
+type interfaceCase struct {
+	ID                   string           `json:"id"`
+	Title                string           `json:"title,omitempty"`
+	CaseType             string           `json:"caseType"`
+	RequiredForAdmission bool             `json:"requiredForAdmission"`
+	Dependencies         []map[string]any `json:"dependencies"`
+}
+
+type interfaceNodeFields struct {
+	Request  []map[string]any `json:"request"`
+	Response []map[string]any `json:"response"`
+}
+
 type catalogPayload struct {
 	SchemaVersion string            `json:"schemaVersion"`
 	Source        map[string]string `json:"source"`
@@ -300,7 +368,12 @@ func nonNil[T any](items []T) []T {
 }
 
 func writeJSON(w http.ResponseWriter, value any) {
+	writeJSONStatus(w, http.StatusOK, value)
+}
+
+func writeJSONStatus(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	_ = encoder.Encode(value)
@@ -436,6 +509,117 @@ func interfaceNodesPayloadFromBundle(bundle profile.Bundle, serviceID string) in
 	return interfaceNodesPayload{
 		Source: map[string]string{"kind": "profile", "id": bundle.ID},
 		Items:  items,
+	}
+}
+
+func interfaceNodeDetailPayloadFromBundle(bundle profile.Bundle, id string) (interfaceNodeDetailPayload, bool) {
+	for _, node := range bundle.InterfaceNodes {
+		if node.ID == id {
+			return interfaceNodeDetailPayloadForNode(bundle, node), true
+		}
+	}
+	return interfaceNodeDetailPayload{
+		OK:        false,
+		Error:     "interface node not found",
+		Requested: id,
+		Available: interfaceNodesPayloadFromBundle(bundle, "").Items,
+		Cases:     []interfaceCase{},
+		Fields:    emptyInterfaceNodeFields(),
+		History:   emptyInterfaceNodeHistory(),
+		Runs:      []map[string]any{},
+	}, false
+}
+
+func interfaceNodeDetailPayloadForNode(bundle profile.Bundle, node profile.InterfaceNode) interfaceNodeDetailPayload {
+	templates := requestTemplatesForNode(bundle.RequestTemplates, node.ID)
+	cases := casesForNode(bundle.APICases, bundle.CaseDependencies, node.ID)
+	method, path := "", ""
+	if len(templates) > 0 {
+		method = templates[0].Method
+		path = templates[0].Path
+	}
+	return interfaceNodeDetailPayload{
+		Node: interfaceNodeDetail{
+			ID:          node.ID,
+			DisplayName: node.DisplayName,
+			ServiceID:   node.ServiceID,
+			Operation:   firstNonEmpty(node.DisplayName, node.ID),
+			Method:      method,
+			Path:        path,
+		},
+		Admission: interfaceNodeAdmission{
+			Status:            "pending",
+			RequiredCaseCount: 0,
+			PassedCaseCount:   0,
+			Blockers:          []map[string]any{},
+		},
+		RequestTemplates: templates,
+		Cases:            cases,
+		Fields:           emptyInterfaceNodeFields(),
+		History:          emptyInterfaceNodeHistory(),
+		Runs:             []map[string]any{},
+	}
+}
+
+func requestTemplatesForNode(items []profile.RequestTemplate, nodeID string) []interfaceRequestTemplate {
+	templates := make([]interfaceRequestTemplate, 0)
+	for _, item := range items {
+		if item.NodeID != nodeID {
+			continue
+		}
+		templates = append(templates, interfaceRequestTemplate{
+			ID:           item.ID,
+			Name:         item.DisplayName,
+			Status:       "active",
+			Method:       item.Method,
+			Path:         item.Path,
+			TemplateJSON: item.TemplateJSON,
+		})
+	}
+	return templates
+}
+
+func casesForNode(items []profile.APICase, dependencies []profile.CaseDependency, nodeID string) []interfaceCase {
+	dependenciesByCase := make(map[string][]map[string]any)
+	for _, dependency := range dependencies {
+		dependenciesByCase[dependency.CaseID] = append(dependenciesByCase[dependency.CaseID], map[string]any{
+			"id":               dependency.ID,
+			"fixtureProfileId": dependency.FixtureID,
+			"mappingsJson":     dependency.MappingsJSON,
+		})
+	}
+	cases := make([]interfaceCase, 0)
+	for _, item := range items {
+		if item.NodeID != nodeID {
+			continue
+		}
+		cases = append(cases, interfaceCase{
+			ID:                   item.ID,
+			Title:                item.DisplayName,
+			CaseType:             "success",
+			RequiredForAdmission: false,
+			Dependencies:         nonNil(dependenciesByCase[item.ID]),
+		})
+	}
+	return cases
+}
+
+func emptyInterfaceNodeFields() interfaceNodeFields {
+	return interfaceNodeFields{
+		Request:  []map[string]any{},
+		Response: []map[string]any{},
+	}
+}
+
+func emptyInterfaceNodeHistory() map[string]any {
+	return map[string]any{
+		"latestRunId":         "",
+		"passCount":           0,
+		"failCount":           0,
+		"runCount":            0,
+		"latestFailureReason": "",
+		"totalElapsedMs":      0,
+		"perCase":             []map[string]any{},
 	}
 }
 

@@ -207,6 +207,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/app.js", want: "/api/state"},
 		{path: "/interface-nodes.html", want: "interface-node-directory-page"},
 		{path: "/interface-nodes.js", want: "/api/interface-nodes"},
+		{path: "/interface-node.html", want: "interface-node-page"},
+		{path: "/interface-node.js", want: "/api/interface-node"},
 		{path: "/environment-nodes.html", want: "TPL-ENVIRONMENT-NODE-LIST-V1"},
 		{path: "/environment-nodes.js", want: "/api/dashboard"},
 		{path: "/environment-node.html", want: "TPL-ENVIRONMENT-NODE-DETAIL-V1"},
@@ -330,6 +332,78 @@ func TestServerExposesInterfaceNodesForService(t *testing.T) {
 	}
 	if payload.Items[0].Href == "" || payload.Items[0].AdmissionStatus != "pending" || payload.Items[0].ValidationStatus != "valid" || payload.Items[0].RequiredCaseCount != 0 {
 		t.Fatalf("interface node link/status = %#v", payload.Items[0])
+	}
+}
+
+func TestServerExposesInterfaceNodeDetail(t *testing.T) {
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+		},
+		RequestTemplates: []profile.RequestTemplate{
+			{ID: "template.alpha", DisplayName: "Template Alpha", NodeID: "node.alpha", Method: "POST", Path: "/alpha", TemplateJSON: "{}"},
+		},
+		CaseDependencies: []profile.CaseDependency{
+			{ID: "dependency.alpha", CaseID: "case.alpha", FixtureID: "fixture.alpha", MappingsJSON: "[]"},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/interface-node?id=node.alpha")
+	if err != nil {
+		t.Fatalf("get interface node api: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("interface node status = %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Node struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"displayName"`
+			ServiceID   string `json:"serviceId"`
+			Method      string `json:"method"`
+			Path        string `json:"path"`
+		} `json:"node"`
+		Admission struct {
+			Status            string `json:"status"`
+			RequiredCaseCount int    `json:"requiredCaseCount"`
+			PassedCaseCount   int    `json:"passedCaseCount"`
+		} `json:"admission"`
+		RequestTemplates []map[string]any `json:"requestTemplates"`
+		Cases            []map[string]any `json:"cases"`
+		Fields           struct {
+			Request  []map[string]any `json:"request"`
+			Response []map[string]any `json:"response"`
+		} `json:"fields"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode interface node api: %v", err)
+	}
+	if payload.Node.ID != "node.alpha" || payload.Node.ServiceID != "service.alpha" {
+		t.Fatalf("interface node detail = %#v", payload.Node)
+	}
+	if payload.Node.Method != "POST" || payload.Node.Path != "/alpha" {
+		t.Fatalf("interface node operation = %#v", payload.Node)
+	}
+	if payload.Admission.Status != "pending" || payload.Admission.RequiredCaseCount != 0 || payload.Admission.PassedCaseCount != 0 {
+		t.Fatalf("interface node admission = %#v", payload.Admission)
+	}
+	if len(payload.RequestTemplates) != 1 || payload.RequestTemplates[0]["id"] != "template.alpha" {
+		t.Fatalf("interface node templates = %#v", payload.RequestTemplates)
+	}
+	if len(payload.Cases) != 1 || payload.Cases[0]["id"] != "case.alpha" {
+		t.Fatalf("interface node cases = %#v", payload.Cases)
+	}
+	if payload.Cases == nil || payload.Fields.Request == nil || payload.Fields.Response == nil {
+		t.Fatalf("interface node empty arrays = %#v", payload)
 	}
 }
 

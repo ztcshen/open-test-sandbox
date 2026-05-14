@@ -40,6 +40,8 @@ generic, profile-driven, and local-first.
   empty-state APIs for local workbench panels.
 - Frontend interface-node directory slice: reference interface-node list page is
   served from the profile-backed interface-node API.
+- Frontend interface-node detail slice: reference interface-node detail page is
+  served with a profile-backed detail API.
 
 ## Open Task Queue
 
