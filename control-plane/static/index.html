@@ -9,73 +9,7 @@
     <link rel="stylesheet" href="/assets/react/controlPlane.css">
   </head>
   <body>
-    <main class="app console-page sandbox-workbench-page">
-      <section class="topbar">
-        <div>
-          <h1>Sandbox 测试工作台</h1>
-          <p id="summary">loading</p>
-        </div>
-        <div class="actions">
-          <span id="message" class="console-status-pill" role="status">ready</span>
-          <a class="button-link primary-link" href="/workflows.html">Workflow 目录</a>
-          <a class="button-link primary-link" href="/interface-nodes.html">接口节点</a>
-          <a class="button-link primary-link" href="/agent-test.html">Agent Test Kit</a>
-          <a class="button-link" href="/service-inventory.html">服务目录</a>
-          <a class="button-link" href="/dashboard.html">环境大盘</a>
-          <button id="refreshBtn" type="button" title="刷新">↻</button>
-        </div>
-      </section>
-
-      <section id="sandboxCapabilities" class="sandbox-capability-grid home-capability-grid-density" aria-label="Sandbox 能力"></section>
-
-      <section class="sandbox-workbench-layout">
-        <div class="main-column">
-          <section class="run-history">
-            <div class="section-head">
-              <h2>运行历史</h2>
-              <button id="refreshRunsBtn" type="button" title="刷新运行历史">↻</button>
-            </div>
-            <div id="runHistory" class="run-history-grid"></div>
-          </section>
-        </div>
-
-        <aside class="sandbox-workbench-side">
-          <section class="services">
-            <div class="section-head">
-              <h2>服务拓扑</h2>
-              <a class="button-link" href="/service-inventory.html">查看全部</a>
-            </div>
-            <div id="sandboxTopology" class="sandbox-topology-list"></div>
-          </section>
-
-          <section class="services">
-            <div class="section-head">
-              <h2>证据入口</h2>
-            </div>
-            <div class="sandbox-link-list">
-              <a id="latestWorkflowRunEvidenceLink" href="/workflow-run.html">Latest Workflow Run</a>
-              <a id="latestFailedWorkflowRunEvidenceLink" href="/workflow-run.html">Latest Failed Workflow</a>
-              <a id="latestWorkflowTopologyLink" href="/trace-topology.html">Latest Run Topology</a>
-              <a id="latestFailedWorkflowTopologyLink" href="/trace-topology.html">Latest Failed Topology</a>
-              <a href="/workflows.html">Workflow 目录</a>
-              <a href="/interface-nodes.html">接口节点目录</a>
-              <a href="/agent-test.html">Agent run / Evidence bundle</a>
-              <a href="/case-runs.html">API Case Evidence</a>
-              <a href="/workflow-detail.html?id=sandbox.replay_probe_observability">Replay / Capability probe</a>
-              <a href="/workflow-detail.html?id=sandbox.platform_config_check">Effective config / Apollo</a>
-            </div>
-          </section>
-
-          <section class="services">
-            <div class="section-head">
-              <h2>Service Health</h2>
-              <a class="button-link" href="/dashboard.html">环境大盘</a>
-            </div>
-            <div id="homeServiceHealth" class="home-service-health-list"></div>
-          </section>
-        </aside>
-      </section>
-    </main>
-    <script src="/app.js"></script>
+    <div id="react-sandbox-workbench-root"></div>
+    <script type="module" src="/assets/react/sandboxWorkbench.js"></script>
   </body>
 </html>

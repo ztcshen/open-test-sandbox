@@ -90,6 +90,8 @@ generic, profile-driven, and local-first.
 - Frontend run evidence React slice: Agent run, replay evidence, and trace
   topology recovery/workbench pages are served through source-built React
   bundles.
+- Frontend workbench import React slice: the home workbench is served through a
+  source-built React bundle and exposes the local profile import API.
 
 ## Open Task Queue
 

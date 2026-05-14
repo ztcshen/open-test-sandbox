@@ -21,6 +21,7 @@ await build({
     interfaceNode: resolve(root, "src/interfaceNode.jsx"),
     interfaceNodes: resolve(root, "src/interfaceNodes.jsx"),
     replayEvidence: resolve(root, "src/replayEvidence.jsx"),
+    sandboxWorkbench: resolve(root, "src/sandboxWorkbench.jsx"),
     serviceInventory: resolve(root, "src/serviceInventory.jsx"),
     traceTopology: resolve(root, "src/traceTopology.jsx"),
     workflowDetail: resolve(root, "src/workflowDetail.jsx"),

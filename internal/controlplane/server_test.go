@@ -327,7 +327,7 @@ func TestServerRendersWorkbenchIndexAtRoot(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 	body := string(raw)
-	for _, want := range []string{"sandbox-workbench-page", "/app.js"} {
+	for _, want := range []string{"react-sandbox-workbench-root", "/assets/react/sandboxWorkbench.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("index missing %q: %s", want, body)
 		}
@@ -367,8 +367,7 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		path string
 		want string
 	}{
-		{path: "/index.html", want: "sandbox-workbench-page"},
-		{path: "/app.js", want: "/api/state"},
+		{path: "/index.html", want: "react-sandbox-workbench-root"},
 		{path: "/dashboard.js", want: "/api/dashboard"},
 		{path: "/workflows.js", want: "/api/catalog"},
 		{path: "/agent-test.html", want: "react-agent-test-root"},
@@ -406,6 +405,7 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/assets/react/interfaceNode.js", want: "/api/interface-node"},
 		{path: "/assets/react/interfaceNodes.js", want: "/api/interface-nodes"},
 		{path: "/assets/react/replayEvidence.js", want: "/api/replay/evidence"},
+		{path: "/assets/react/sandboxWorkbench.js", want: "/api/profile/import"},
 		{path: "/assets/react/serviceInventory.js", want: "/api/catalog"},
 		{path: "/assets/react/traceTopology.js", want: "/api/workflow-runs/"},
 		{path: "/assets/react/workflowDetail.js", want: "/api/catalog"},

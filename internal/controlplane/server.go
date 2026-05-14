@@ -274,7 +274,6 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 
 var staticFileNames = []string{
 	"index.html",
-	"app.js",
 	"dashboard.js",
 	"workflows.js",
 	"agent-test.html",
