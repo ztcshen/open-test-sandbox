@@ -701,7 +701,7 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 		WorkflowID:   "",
 		Status:       result.Status,
 		EvidenceRoot: result.EvidencePath,
-		SummaryJSON:  "{}",
+		SummaryJSON:  caseRunSummaryJSON(result),
 		StartedAt:    startedAt,
 		FinishedAt:   finishedAt,
 		CreatedAt:    startedAt,
@@ -748,6 +748,18 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 		}
 	}
 	return nil
+}
+
+func caseRunSummaryJSON(result apicase.RunResult) string {
+	path := filepath.Join(result.EvidencePath, "summary.json")
+	if raw, err := os.ReadFile(path); err == nil && json.Valid(raw) {
+		return strings.TrimSpace(string(raw))
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
 }
 
 func runResultTime(value string, fallback time.Time) time.Time {

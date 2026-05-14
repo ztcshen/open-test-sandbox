@@ -305,6 +305,17 @@ func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 	if !run.FinishedAt.After(run.StartedAt) {
 		t.Fatalf("run timing was not indexed: %#v", run)
 	}
+	var runSummary struct {
+		RunID  string `json:"runId"`
+		CaseID string `json:"caseId"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(run.SummaryJSON), &runSummary); err != nil {
+		t.Fatalf("decode run summary: %v", err)
+	}
+	if runSummary.RunID != "case-run-003" || runSummary.CaseID != "case.alpha" || runSummary.Status != "passed" {
+		t.Fatalf("run summary = %#v", runSummary)
+	}
 	caseRuns, err := s.ListAPICaseRuns(context.Background(), "case-run-003")
 	if err != nil {
 		t.Fatalf("list api case runs: %v", err)
