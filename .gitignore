@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.runtime/
+node_modules/
+test-results/
+coverage/
+*.db
+*.sqlite
+*.sqlite3
