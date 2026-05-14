@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>API Case 工作台 · Open Test Sandbox</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app api-case-page">
+      <section class="topbar">
+        <div>
+          <h1>API Case 工作台</h1>
+          <p id="apiCaseSummary">loading</p>
+        </div>
+        <div class="actions">
+          <span id="apiCaseStatus" class="workflow-step-status-pill" role="status">ready</span>
+          <a class="button-link" href="/">控制台</a>
+          <a class="button-link" href="/dashboard.html">环境大盘</a>
+          <a class="button-link" href="/service-inventory.html">服务清单</a>
+        </div>
+      </section>
+
+      <section class="api-case-shell">
+        <section class="api-case-panel api-case-control-panel">
+          <div class="section-head">
+            <div>
+              <h2 id="apiCaseTitle">API Case</h2>
+              <p id="apiCaseMeta">loading</p>
+            </div>
+          </div>
+          <div id="apiCaseList" class="api-case-list"></div>
+          <div class="api-case-trigger">
+            <p id="apiCaseTriggerSummary">loading</p>
+            <button id="runApiCase" class="primary-action" type="button">运行 Case</button>
+          </div>
+          <div id="apiCaseResult" class="api-case-result">ready</div>
+        </section>
+
+        <section class="api-case-panel">
+          <div class="section-head">
+            <div>
+              <h2>相关服务</h2>
+              <p>由 Catalog 中当前 Case 的 DAG 节点生成。</p>
+            </div>
+          </div>
+          <div id="apiCaseServices" class="api-case-service-list"></div>
+        </section>
+
+        <section class="api-case-panel api-case-graph-panel">
+          <div class="section-head">
+            <div>
+              <h2>Case 服务边界</h2>
+              <p id="apiCaseBoundaryMeta">loading</p>
+            </div>
+          </div>
+          <div id="apiCaseBoundary" class="workflow-graph-nodes"></div>
+          <div id="apiCaseBoundaryEdges" class="workflow-graph-edges"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/api-cases.js"></script>
+  </body>
+</html>

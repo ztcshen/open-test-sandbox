@@ -137,6 +137,23 @@ func New(bundle profile.Bundle) http.Handler {
 			"warnings": []string{},
 		})
 	})
+	mux.HandleFunc("/api/cases/capabilities", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, apiCaseCapabilitiesFromBundle(bundle))
+	})
+	mux.HandleFunc("/api/cases/run", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{
+			"ok":    false,
+			"error": "api case execution is not wired to the control plane yet",
+		})
+	})
 	mux.HandleFunc("/api/interface-nodes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -202,6 +219,8 @@ var staticFileNames = []string{
 	"agent-test.js",
 	"agent-run.html",
 	"agent-run.js",
+	"api-cases.html",
+	"api-cases.js",
 	"case-runs.html",
 	"case-runs.js",
 	"evidence-viewer.html",
@@ -362,6 +381,32 @@ type interfaceCase struct {
 type interfaceNodeFields struct {
 	Request  []map[string]any `json:"request"`
 	Response []map[string]any `json:"response"`
+}
+
+type apiCaseCapabilitiesPayload struct {
+	OK    bool                `json:"ok"`
+	Cases []apiCaseCapability `json:"cases"`
+	Graph map[string][]string `json:"graph,omitempty"`
+}
+
+type apiCaseCapability struct {
+	ID        string              `json:"id"`
+	Title     string              `json:"title,omitempty"`
+	Operation string              `json:"operation,omitempty"`
+	Workflow  map[string]string   `json:"workflow,omitempty"`
+	Graph     apiCaseServiceGraph `json:"graph"`
+}
+
+type apiCaseServiceGraph struct {
+	Nodes []apiCaseServiceNode `json:"nodes"`
+	Edges []catalogEdge        `json:"edges"`
+}
+
+type apiCaseServiceNode struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName,omitempty"`
+	Role        string `json:"role,omitempty"`
+	Href        string `json:"href,omitempty"`
 }
 
 type catalogPayload struct {
@@ -587,6 +632,44 @@ func interfaceNodeDetailPayloadFromBundle(bundle profile.Bundle, id string) (int
 		History:   emptyInterfaceNodeHistory(),
 		Runs:      []map[string]any{},
 	}, false
+}
+
+func apiCaseCapabilitiesFromBundle(bundle profile.Bundle) apiCaseCapabilitiesPayload {
+	nodeByID := make(map[string]profile.InterfaceNode)
+	for _, node := range bundle.InterfaceNodes {
+		nodeByID[node.ID] = node
+	}
+	serviceByID := make(map[string]profile.Service)
+	for _, service := range bundle.Services {
+		serviceByID[service.ID] = service
+	}
+
+	cases := make([]apiCaseCapability, 0, len(bundle.APICases))
+	for _, item := range bundle.APICases {
+		node := nodeByID[item.NodeID]
+		service := serviceByID[node.ServiceID]
+		graph := apiCaseServiceGraph{Nodes: []apiCaseServiceNode{}, Edges: []catalogEdge{}}
+		if node.ServiceID != "" {
+			graph.Nodes = append(graph.Nodes, apiCaseServiceNode{
+				ID:          node.ServiceID,
+				DisplayName: firstNonEmpty(service.DisplayName, node.ServiceID),
+				Role:        firstNonEmpty(service.Kind, "service"),
+				Href:        "/environment-node.html?id=" + node.ServiceID,
+			})
+		}
+		cases = append(cases, apiCaseCapability{
+			ID:        item.ID,
+			Title:     firstNonEmpty(item.DisplayName, item.ID),
+			Operation: firstNonEmpty(node.DisplayName, item.NodeID),
+			Workflow:  map[string]string{},
+			Graph:     graph,
+		})
+	}
+	return apiCaseCapabilitiesPayload{
+		OK:    true,
+		Cases: cases,
+		Graph: map[string][]string{},
+	}
 }
 
 func interfaceNodeDetailPayloadForNode(bundle profile.Bundle, node profile.InterfaceNode) interfaceNodeDetailPayload {

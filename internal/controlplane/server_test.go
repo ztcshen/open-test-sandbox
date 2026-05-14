@@ -209,6 +209,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/agent-test.js", want: "/api/agent-test"},
 		{path: "/agent-run.html", want: "agent-run-detail-page"},
 		{path: "/agent-run.js", want: "/api/agent-test"},
+		{path: "/api-cases.html", want: "api-case-page"},
+		{path: "/api-cases.js", want: "/api/cases/capabilities"},
 		{path: "/case-runs.html", want: "case-runs-page"},
 		{path: "/case-runs.js", want: "/api/case/runs"},
 		{path: "/evidence-viewer.html", want: "viewer-app"},
@@ -654,6 +656,57 @@ func TestServerExposesEmptyAgentTestWorkbench(t *testing.T) {
 	}
 	if payload.Capabilities == nil || payload.Profiles == nil || payload.AgentRuns == nil || payload.ConfigEvents == nil || payload.EscalationEvents == nil || payload.AcceptanceReports == nil || payload.Warnings == nil {
 		t.Fatalf("agent test empty arrays = %#v", payload)
+	}
+}
+
+func TestServerExposesAPICaseCapabilities(t *testing.T) {
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		Services: []profile.Service{
+			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "http"},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/cases/capabilities")
+	if err != nil {
+		t.Fatalf("get api case capabilities: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("api case capabilities status = %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Cases []struct {
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			Operation string `json:"operation"`
+			Graph     struct {
+				Nodes []struct {
+					ID          string `json:"id"`
+					DisplayName string `json:"displayName"`
+					Role        string `json:"role"`
+				} `json:"nodes"`
+			} `json:"graph"`
+		} `json:"cases"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode api case capabilities: %v", err)
+	}
+	if len(payload.Cases) != 1 || payload.Cases[0].ID != "case.alpha" || payload.Cases[0].Operation != "Node Alpha" {
+		t.Fatalf("api case capabilities = %#v", payload.Cases)
+	}
+	if len(payload.Cases[0].Graph.Nodes) != 1 || payload.Cases[0].Graph.Nodes[0].ID != "service.alpha" || payload.Cases[0].Graph.Nodes[0].Role != "http" {
+		t.Fatalf("api case graph = %#v", payload.Cases[0].Graph)
 	}
 }
 

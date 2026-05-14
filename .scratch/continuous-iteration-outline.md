@@ -54,6 +54,8 @@ generic, profile-driven, and local-first.
   clean missing-run recovery state.
 - Frontend agent run detail slice: reference Agent Run page is served with a
   clean missing-run recovery state.
+- Frontend API Case workbench slice: reference API Case page is served with a
+  profile-backed capability API and JSON run placeholder.
 
 ## Open Task Queue
 
