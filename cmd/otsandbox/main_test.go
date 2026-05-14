@@ -72,6 +72,9 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	if index.BundlePath == "" || !strings.HasPrefix(index.BundleDigest, "sha256:") {
 		t.Fatalf("profile index = %#v", index)
 	}
+	if got := sqliteScalar(t, dbPath, "select value from kv where key = 'active_profile_id';"); got != "empty" {
+		t.Fatalf("active profile catalog index = %q", got)
+	}
 }
 
 func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
@@ -815,6 +818,15 @@ func runCLI(t *testing.T, args ...string) string {
 		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func sqliteScalar(t *testing.T, dbPath string, statement string) string {
+	t.Helper()
+	out, err := exec.Command("sqlite3", dbPath, statement).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sqlite scalar failed: %v: %s", err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func runCLIFails(t *testing.T, args ...string) string {

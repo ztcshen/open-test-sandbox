@@ -138,6 +138,8 @@ generic, profile-driven, and local-first.
   workflows, interface nodes, API cases, request templates, bindings,
   fixtures, dependencies, and template/config rows into the generic
   template-config Store tables.
+- CLI profile catalog indexing slice: CLI and API profile imports now share the
+  same profile-to-Store catalog projection path.
 
 ## Open Task Queue
 

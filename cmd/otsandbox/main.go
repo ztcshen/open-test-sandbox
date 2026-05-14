@@ -18,6 +18,7 @@ import (
 	"open-test-sandbox/internal/evidence"
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/profileaudit"
+	"open-test-sandbox/internal/profilecatalog"
 	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
@@ -250,6 +251,9 @@ func runProfileImport(ctx context.Context, args []string) error {
 		SummaryJSON:  string(summary),
 		ImportedAt:   importedAt,
 	}); err != nil {
+		return err
+	}
+	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, importedAt)); err != nil {
 		return err
 	}
 	report := profileImportReport{
