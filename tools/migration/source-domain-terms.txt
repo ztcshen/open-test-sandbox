@@ -1,6 +1,9 @@
 scf
+financing
 融资
+loan
 放款
+repay
 还款
 scf-chain-sandbox
 retail-gateway
