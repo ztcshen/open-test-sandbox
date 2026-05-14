@@ -4,6 +4,15 @@
   "private": true,
   "description": "Local-first integration test sandbox for template-driven workflows, API cases, fixtures, and evidence.",
   "scripts": {
+    "build:frontend": "node control-plane/frontend/build.mjs",
     "test": "go test ./..."
+  },
+  "devDependencies": {
+    "@xyflow/react": "^12.10.2",
+    "esbuild": "^0.28.0",
+    "lucide-react": "^1.14.0",
+    "playwright": "^1.60.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   }
 }
