@@ -34,6 +34,13 @@ func TestStoreMigrateAndStatusCommands(t *testing.T) {
 	}
 }
 
+func TestStoreCommandsRejectUnsupportedBackendURLs(t *testing.T) {
+	out := runCLIFails(t, "store", "status", "--store-url", "postgres://localhost/open_test_sandbox")
+	if !strings.Contains(out, "unsupported store backend") || !strings.Contains(out, "sqlite://") {
+		t.Fatalf("unsupported backend output = %q", out)
+	}
+}
+
 func TestProfileInspectCommand(t *testing.T) {
 	out := runCLI(t, "profile", "inspect", "--profile", "../../profiles/empty")
 	for _, want := range []string{"Profile: empty", "Display Name: Empty Profile", "Workflows: 0", "API Cases: 0", "Request Templates: 0", "Case Dependencies: 0", "Workflow Bindings: 0"} {
@@ -199,6 +206,16 @@ func runCLI(t *testing.T, args ...string) string {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func runCLIFails(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("go run . %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
 	}
 	return string(out)
 }

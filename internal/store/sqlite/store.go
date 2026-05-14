@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -42,6 +43,32 @@ func ConfigFromURL(storeURL string) Config {
 		}
 	}
 	return Config{Path: storeURL}.Resolve()
+}
+
+func ParseConfigFromURL(storeURL string) (Config, error) {
+	if storeURL == "" {
+		return ConfigFromURL(storeURL), nil
+	}
+	if isUnsupportedBackendURL(storeURL) {
+		return Config{}, fmt.Errorf("unsupported store backend %q; supported forms are local paths, sqlite://PATH, and file:PATH", backendScheme(storeURL))
+	}
+	return ConfigFromURL(storeURL), nil
+}
+
+func isUnsupportedBackendURL(storeURL string) bool {
+	scheme := backendScheme(storeURL)
+	if scheme == "" {
+		return false
+	}
+	return scheme != "sqlite" && scheme != "file"
+}
+
+func backendScheme(storeURL string) string {
+	match := regexp.MustCompile(`^([A-Za-z][A-Za-z0-9+.-]*):`).FindStringSubmatch(storeURL)
+	if len(match) != 2 {
+		return ""
+	}
+	return strings.ToLower(match[1])
 }
 
 type Store struct {

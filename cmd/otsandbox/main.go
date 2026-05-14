@@ -92,7 +92,10 @@ func runStore(ctx context.Context, args []string) error {
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
-	cfg := sqlite.ConfigFromURL(*storeURL)
+	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	if err != nil {
+		return err
+	}
 
 	switch args[0] {
 	case "status":
@@ -173,7 +176,11 @@ func runProfileImport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := sqlite.Open(ctx, sqlite.ConfigFromURL(*storeURL))
+	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	if err != nil {
+		return err
+	}
+	s, err := sqlite.Open(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -232,7 +239,10 @@ func runEvidenceImport(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg := sqlite.ConfigFromURL(*storeURL)
+	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	if err != nil {
+		return err
+	}
 	result, err := evidence.ImportLegacyRuntimeSQLite(ctx, evidence.SQLiteImportOptions{
 		SourcePath: *from,
 		ProfileID:  *profileID,
@@ -296,7 +306,11 @@ func runCaseRun(ctx context.Context, args []string) error {
 }
 
 func indexCaseRun(ctx context.Context, storeURL string, profileID string, result apicase.RunResult) error {
-	s, err := sqlite.Open(ctx, sqlite.ConfigFromURL(storeURL))
+	cfg, err := sqlite.ParseConfigFromURL(storeURL)
+	if err != nil {
+		return err
+	}
+	s, err := sqlite.Open(ctx, cfg)
 	if err != nil {
 		return err
 	}
