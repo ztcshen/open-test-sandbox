@@ -475,6 +475,30 @@ values (%s, %s, %s, %s, 'active', %d);`, sqlString(dependency.ID), sqlString(dep
 	return nil
 }
 
+func (s *Store) GetProfileCatalogIndex(ctx context.Context) (store.ProfileCatalogIndex, error) {
+	var rows []profileCatalogIndexRow
+	if err := s.query(ctx, `
+select
+  coalesce((select value from kv where key = 'active_profile_id'), '') as profile_id,
+  coalesce((select updated_at from kv where key = 'active_profile_id'), '') as indexed_at,
+  (select count(*) from node_config) as services,
+  (select count(*) from workflow) as workflows,
+  (select count(*) from interface_node) as interface_nodes,
+  (select count(*) from interface_node_case) as api_cases,
+  (select count(*) from interface_node_request_template) as request_templates,
+  (select count(*) from workflow_interface_node) as workflow_bindings,
+  (select count(*) from interface_node_case_dependency) as case_dependencies,
+  (select count(*) from fixture_profile) as fixtures,
+  (select count(*) from template) as templates,
+  (select count(*) from template_config) as template_configs;`, &rows); err != nil {
+		return store.ProfileCatalogIndex{}, err
+	}
+	if len(rows) == 0 || rows[0].ProfileID == "" {
+		return store.ProfileCatalogIndex{}, store.ErrNotFound
+	}
+	return rows[0].toStore(), nil
+}
+
 func (s *Store) exec(ctx context.Context, statement string) error {
 	out, err := sqliteCommand(ctx, false, s.path, statement)
 	if err != nil {
@@ -635,6 +659,40 @@ func (r profileIndexRow) toStore() store.ProfileIndex {
 		SummaryJSON:  r.SummaryJSON,
 		ImportedAt:   decodeTime(r.ImportedAt),
 		UpdatedAt:    decodeTime(r.UpdatedAt),
+	}
+}
+
+type profileCatalogIndexRow struct {
+	ProfileID        string `json:"profile_id"`
+	IndexedAt        string `json:"indexed_at"`
+	Services         int    `json:"services"`
+	Workflows        int    `json:"workflows"`
+	InterfaceNodes   int    `json:"interface_nodes"`
+	APICases         int    `json:"api_cases"`
+	RequestTemplates int    `json:"request_templates"`
+	WorkflowBindings int    `json:"workflow_bindings"`
+	CaseDependencies int    `json:"case_dependencies"`
+	Fixtures         int    `json:"fixtures"`
+	Templates        int    `json:"templates"`
+	TemplateConfigs  int    `json:"template_configs"`
+}
+
+func (r profileCatalogIndexRow) toStore() store.ProfileCatalogIndex {
+	return store.ProfileCatalogIndex{
+		ProfileID: r.ProfileID,
+		IndexedAt: decodeTime(r.IndexedAt),
+		Counts: store.ProfileCatalogCounts{
+			Services:         r.Services,
+			Workflows:        r.Workflows,
+			InterfaceNodes:   r.InterfaceNodes,
+			APICases:         r.APICases,
+			RequestTemplates: r.RequestTemplates,
+			WorkflowBindings: r.WorkflowBindings,
+			CaseDependencies: r.CaseDependencies,
+			Fixtures:         r.Fixtures,
+			Templates:        r.Templates,
+			TemplateConfigs:  r.TemplateConfigs,
+		},
 	}
 }
 

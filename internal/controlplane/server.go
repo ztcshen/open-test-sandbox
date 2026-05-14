@@ -52,6 +52,13 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			APICases:       nonNil(bundle.APICases),
 		})
 	})
+	mux.HandleFunc("/api/profile/catalog-index", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileCatalogIndex(w, r, runtime)
+	})
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)

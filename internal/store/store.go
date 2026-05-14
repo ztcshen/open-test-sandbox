@@ -34,6 +34,7 @@ type Store interface {
 	UpsertProfileIndex(context.Context, ProfileIndex) (ProfileIndex, error)
 	GetProfileIndex(context.Context, string) (ProfileIndex, error)
 	ReplaceProfileCatalog(context.Context, ProfileCatalog) error
+	GetProfileCatalogIndex(context.Context) (ProfileCatalogIndex, error)
 }
 
 type Run struct {
@@ -104,6 +105,25 @@ type ProfileCatalog struct {
 	WorkflowBindings []CatalogWorkflowBinding
 	CaseDependencies []CatalogCaseDependency
 	Fixtures         []CatalogFixture
+}
+
+type ProfileCatalogIndex struct {
+	ProfileID string
+	IndexedAt time.Time
+	Counts    ProfileCatalogCounts
+}
+
+type ProfileCatalogCounts struct {
+	Services         int
+	Workflows        int
+	InterfaceNodes   int
+	APICases         int
+	RequestTemplates int
+	WorkflowBindings int
+	CaseDependencies int
+	Fixtures         int
+	Templates        int
+	TemplateConfigs  int
 }
 
 type CatalogService struct {

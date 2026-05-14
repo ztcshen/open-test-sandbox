@@ -192,6 +192,14 @@ func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
 	if !ok || item["id"] != "node.alpha" {
 		t.Fatalf("interface node after import = %#v", items)
 	}
+	catalogIndex := decodeJSONResponse(t, server.URL+"/api/profile/catalog-index", http.StatusOK)
+	if catalogIndex["profileId"] != "sample" || catalogIndex["indexedAt"] == "" {
+		t.Fatalf("catalog index identity = %#v", catalogIndex)
+	}
+	catalogCounts, ok := catalogIndex["counts"].(map[string]any)
+	if !ok || catalogCounts["services"] != float64(1) || catalogCounts["workflows"] != float64(1) || catalogCounts["templates"] != float64(1) {
+		t.Fatalf("catalog index counts = %#v", catalogIndex["counts"])
+	}
 	for table, want := range map[string]int{
 		"template":                1,
 		"template_config":         1,
@@ -241,6 +249,17 @@ func TestServerRejectsProfileImportWithoutRuntimeStore(t *testing.T) {
 
 	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "runtime store") {
 		t.Fatalf("missing store payload = %#v", payload)
+	}
+}
+
+func TestServerRejectsCatalogIndexWithoutRuntimeStore(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/profile/catalog-index", http.StatusNotImplemented)
+
+	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "runtime store") {
+		t.Fatalf("missing store catalog index payload = %#v", payload)
 	}
 }
 

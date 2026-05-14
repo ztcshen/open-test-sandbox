@@ -177,6 +177,47 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("loaded profile index = %#v", loadedProfile)
 	}
 
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "empty",
+		IndexedAt: started.Add(3 * time.Minute),
+		Services: []store.CatalogService{
+			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "http"},
+		},
+		Workflows: []store.CatalogWorkflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+		},
+		InterfaceNodes: []store.CatalogInterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
+		},
+		APICases: []store.CatalogAPICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+		},
+		RequestTemplates: []store.CatalogRequestTemplate{
+			{ID: "template.alpha", DisplayName: "Template Alpha", NodeID: "node.alpha", TemplateJSON: `{"method":"GET"}`},
+		},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.alpha", StepID: "step.alpha", NodeID: "node.alpha", CaseID: "case.alpha", Required: true},
+		},
+		CaseDependencies: []store.CatalogCaseDependency{
+			{ID: "dependency.alpha", CaseID: "case.alpha", FixtureID: "fixture.alpha", MappingsJSON: `[]`},
+		},
+		Fixtures: []store.CatalogFixture{
+			{ID: "fixture.alpha", DisplayName: "Fixture Alpha", Kind: "json", DataJSON: `{}`},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog index: %v", err)
+	}
+	catalogIndex, err := s.GetProfileCatalogIndex(ctx)
+	if err != nil {
+		t.Fatalf("get profile catalog index: %v", err)
+	}
+	if catalogIndex.ProfileID != "empty" || catalogIndex.IndexedAt.IsZero() {
+		t.Fatalf("profile catalog index identity = %#v", catalogIndex)
+	}
+	if catalogIndex.Counts.Services != 1 || catalogIndex.Counts.Workflows != 1 || catalogIndex.Counts.APICases != 1 || catalogIndex.Counts.Templates != 2 {
+		t.Fatalf("profile catalog index counts = %#v", catalogIndex.Counts)
+	}
+
 	_, err = s.GetRun(ctx, "missing")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing run error = %v, want ErrNotFound", err)
