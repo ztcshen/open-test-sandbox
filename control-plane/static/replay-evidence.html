@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Replay Evidence · Open Test Sandbox</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/assets/react/controlPlane.css">
+  </head>
+  <body>
+    <main class="app replay-evidence-page">
+      <section class="topbar">
+        <div>
+          <h1>Replay evidence</h1>
+          <p id="replayEvidenceTrace">trace loading</p>
+        </div>
+        <div class="actions">
+          <span id="replayEvidenceStatus" class="workflow-step-status-pill" role="status">loading</span>
+          <a class="button-link" href="/workflow-detail.html?id=sandbox.replay_probe_observability">Replay / Probe</a>
+          <a class="button-link" href="/">控制台</a>
+          <a class="button-link" href="/dashboard.html">环境大盘</a>
+        </div>
+      </section>
+
+      <section class="replay-evidence-shell">
+        <section class="replay-evidence-panel replay-evidence-run-panel">
+          <div class="section-head">
+            <div>
+              <h2>Run</h2>
+              <p id="replayEvidenceRunMeta">loading</p>
+            </div>
+          </div>
+          <div id="replayEvidenceRun" class="replay-evidence-run"></div>
+        </section>
+
+        <section class="replay-evidence-panel replay-evidence-request-panel">
+          <div class="section-head">
+            <div>
+              <h2>Request / response</h2>
+              <p id="replayEvidenceRequestMeta">loading</p>
+            </div>
+          </div>
+          <div id="replayEvidenceRequest" class="replay-evidence-grid"></div>
+        </section>
+
+        <section class="replay-evidence-panel replay-evidence-systems-panel">
+          <div class="section-head">
+            <div>
+              <h2>Systems</h2>
+              <p id="replayEvidenceSystemsMeta">loading</p>
+            </div>
+          </div>
+          <div id="replayEvidenceSystems" class="replay-evidence-systems"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/replay-evidence.js"></script>
+  </body>
+</html>

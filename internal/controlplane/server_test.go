@@ -217,6 +217,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/evidence-viewer.js", want: "open-test-sandbox-evidence"},
 		{path: "/trace-topology.html", want: "trace-topology-page"},
 		{path: "/trace-topology.js", want: "/api/workflow-runs/"},
+		{path: "/replay-evidence.html", want: "replay-evidence-page"},
+		{path: "/replay-evidence.js", want: "/api/replay/evidence"},
 		{path: "/interface-nodes.html", want: "interface-node-directory-page"},
 		{path: "/interface-nodes.js", want: "/api/interface-nodes"},
 		{path: "/interface-node.html", want: "interface-node-page"},

@@ -56,6 +56,8 @@ generic, profile-driven, and local-first.
   clean missing-run recovery state.
 - Frontend API Case workbench slice: reference API Case page is served with a
   profile-backed capability API and JSON run placeholder.
+- Frontend replay evidence slice: reference Replay Evidence page is served with
+  a clean missing-trace recovery state.
 
 ## Open Task Queue
 
