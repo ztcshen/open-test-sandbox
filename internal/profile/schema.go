@@ -33,9 +33,14 @@ type InterfaceNode struct {
 }
 
 type APICase struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName,omitempty"`
-	NodeID      string `json:"nodeId,omitempty"`
+	ID               string         `json:"id"`
+	DisplayName      string         `json:"displayName,omitempty"`
+	NodeID           string         `json:"nodeId,omitempty"`
+	CasePath         string         `json:"casePath,omitempty"`
+	BaseURL          string         `json:"baseUrl,omitempty"`
+	EvidenceDir      string         `json:"evidenceDir,omitempty"`
+	TimeoutSeconds   int            `json:"timeoutSeconds,omitempty"`
+	DefaultOverrides map[string]any `json:"defaultOverrides,omitempty"`
 }
 
 type RequestTemplate struct {

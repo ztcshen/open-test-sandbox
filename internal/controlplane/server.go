@@ -450,11 +450,16 @@ type apiCaseCapabilitiesPayload struct {
 }
 
 type apiCaseCapability struct {
-	ID        string              `json:"id"`
-	Title     string              `json:"title,omitempty"`
-	Operation string              `json:"operation,omitempty"`
-	Workflow  map[string]string   `json:"workflow,omitempty"`
-	Graph     apiCaseServiceGraph `json:"graph"`
+	ID               string              `json:"id"`
+	Title            string              `json:"title,omitempty"`
+	Operation        string              `json:"operation,omitempty"`
+	CasePath         string              `json:"casePath,omitempty"`
+	BaseURL          string              `json:"baseUrl,omitempty"`
+	EvidenceDir      string              `json:"evidenceDir,omitempty"`
+	TimeoutSeconds   int                 `json:"timeoutSeconds,omitempty"`
+	DefaultOverrides map[string]any      `json:"defaultOverrides,omitempty"`
+	Workflow         map[string]string   `json:"workflow,omitempty"`
+	Graph            apiCaseServiceGraph `json:"graph"`
 }
 
 type apiCaseServiceGraph struct {
@@ -509,9 +514,14 @@ type catalogWorkflowPresentation struct {
 }
 
 type catalogAPICase struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName,omitempty"`
-	NodeID      string `json:"nodeId,omitempty"`
+	ID               string         `json:"id"`
+	DisplayName      string         `json:"displayName,omitempty"`
+	NodeID           string         `json:"nodeId,omitempty"`
+	CasePath         string         `json:"casePath,omitempty"`
+	BaseURL          string         `json:"baseUrl,omitempty"`
+	EvidenceDir      string         `json:"evidenceDir,omitempty"`
+	TimeoutSeconds   int            `json:"timeoutSeconds,omitempty"`
+	DefaultOverrides map[string]any `json:"defaultOverrides,omitempty"`
 }
 
 type catalogTopology struct {
@@ -632,9 +642,14 @@ func catalogPayloadFromBundle(bundle profile.Bundle) catalogPayload {
 	apiCases := make([]catalogAPICase, 0, len(bundle.APICases))
 	for _, item := range bundle.APICases {
 		apiCases = append(apiCases, catalogAPICase{
-			ID:          item.ID,
-			DisplayName: item.DisplayName,
-			NodeID:      item.NodeID,
+			ID:               item.ID,
+			DisplayName:      item.DisplayName,
+			NodeID:           item.NodeID,
+			CasePath:         item.CasePath,
+			BaseURL:          item.BaseURL,
+			EvidenceDir:      item.EvidenceDir,
+			TimeoutSeconds:   item.TimeoutSeconds,
+			DefaultOverrides: item.DefaultOverrides,
 		})
 	}
 
@@ -718,11 +733,16 @@ func apiCaseCapabilitiesFromBundle(bundle profile.Bundle) apiCaseCapabilitiesPay
 			})
 		}
 		cases = append(cases, apiCaseCapability{
-			ID:        item.ID,
-			Title:     firstNonEmpty(item.DisplayName, item.ID),
-			Operation: firstNonEmpty(node.DisplayName, item.NodeID),
-			Workflow:  map[string]string{},
-			Graph:     graph,
+			ID:               item.ID,
+			Title:            firstNonEmpty(item.DisplayName, item.ID),
+			Operation:        firstNonEmpty(node.DisplayName, item.NodeID),
+			CasePath:         item.CasePath,
+			BaseURL:          item.BaseURL,
+			EvidenceDir:      item.EvidenceDir,
+			TimeoutSeconds:   item.TimeoutSeconds,
+			DefaultOverrides: item.DefaultOverrides,
+			Workflow:         map[string]string{},
+			Graph:            graph,
 		})
 	}
 	return apiCaseCapabilitiesPayload{

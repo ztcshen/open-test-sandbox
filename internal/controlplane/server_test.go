@@ -60,7 +60,18 @@ func TestServerExposesProfileAssetLists(t *testing.T) {
 			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
 		},
 		APICases: []profile.APICase{
-			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+			{
+				ID:             "case.alpha",
+				DisplayName:    "Case Alpha",
+				NodeID:         "node.alpha",
+				CasePath:       "profiles/sample/cases/case.alpha.json",
+				BaseURL:        "http://127.0.0.1:18080",
+				EvidenceDir:    ".runtime/cases",
+				TimeoutSeconds: 30,
+				DefaultOverrides: map[string]any{
+					"itemId": "item-001",
+				},
+			},
 		},
 	}
 	server := httptest.NewServer(controlplane.New(bundle))
@@ -1119,7 +1130,18 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
 		},
 		APICases: []profile.APICase{
-			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+			{
+				ID:             "case.alpha",
+				DisplayName:    "Case Alpha",
+				NodeID:         "node.alpha",
+				CasePath:       "profiles/sample/cases/case.alpha.json",
+				BaseURL:        "http://127.0.0.1:18080",
+				EvidenceDir:    ".runtime/cases",
+				TimeoutSeconds: 30,
+				DefaultOverrides: map[string]any{
+					"itemId": "item-001",
+				},
+			},
 		},
 	}
 	server := httptest.NewServer(controlplane.New(bundle))
@@ -1136,10 +1158,15 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 
 	var payload struct {
 		Cases []struct {
-			ID        string `json:"id"`
-			Title     string `json:"title"`
-			Operation string `json:"operation"`
-			Graph     struct {
+			ID               string         `json:"id"`
+			Title            string         `json:"title"`
+			Operation        string         `json:"operation"`
+			CasePath         string         `json:"casePath"`
+			BaseURL          string         `json:"baseUrl"`
+			EvidenceDir      string         `json:"evidenceDir"`
+			TimeoutSeconds   int            `json:"timeoutSeconds"`
+			DefaultOverrides map[string]any `json:"defaultOverrides"`
+			Graph            struct {
 				Nodes []struct {
 					ID          string `json:"id"`
 					DisplayName string `json:"displayName"`
@@ -1153,6 +1180,9 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 	}
 	if len(payload.Cases) != 1 || payload.Cases[0].ID != "case.alpha" || payload.Cases[0].Operation != "Node Alpha" {
 		t.Fatalf("api case capabilities = %#v", payload.Cases)
+	}
+	if payload.Cases[0].CasePath != "profiles/sample/cases/case.alpha.json" || payload.Cases[0].BaseURL == "" || payload.Cases[0].EvidenceDir != ".runtime/cases" || payload.Cases[0].TimeoutSeconds != 30 || payload.Cases[0].DefaultOverrides["itemId"] != "item-001" {
+		t.Fatalf("api case run config = %#v", payload.Cases[0])
 	}
 	if len(payload.Cases[0].Graph.Nodes) != 1 || payload.Cases[0].Graph.Nodes[0].ID != "service.alpha" || payload.Cases[0].Graph.Nodes[0].Role != "http" {
 		t.Fatalf("api case graph = %#v", payload.Cases[0].Graph)

@@ -54,3 +54,29 @@ Large bundles can keep assets in deterministic JSON directories next to
 
 The loader reads files in sorted path order and appends them to any assets
 declared directly in the manifest.
+
+## API Case Run Fields
+
+API Case assets can optionally declare local run settings used by the control
+plane workbench:
+
+```json
+{
+  "id": "case.alpha",
+  "displayName": "Create Item",
+  "nodeId": "node.alpha",
+  "casePath": "profiles/sample/cases/case.alpha.json",
+  "baseUrl": "http://127.0.0.1:18080",
+  "evidenceDir": ".runtime/cases",
+  "timeoutSeconds": 30,
+  "defaultOverrides": {
+    "itemId": "item-001"
+  }
+}
+```
+
+- `casePath`: path to the runnable API Case JSON file.
+- `baseUrl`: default target URL for live runs.
+- `evidenceDir`: optional runtime Evidence output directory.
+- `timeoutSeconds`: optional request timeout for the control plane run API.
+- `defaultOverrides`: optional profile-owned defaults passed to the page.
