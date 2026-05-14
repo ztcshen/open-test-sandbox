@@ -166,6 +166,13 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			"warnings": []string{},
 		})
 	})
+	mux.HandleFunc("/api/replay/evidence", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleReplayEvidence(w, r)
+	})
 	mux.HandleFunc("/api/cases/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)

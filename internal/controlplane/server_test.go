@@ -841,6 +841,24 @@ func TestServerExposesInterfaceNodeCoverage(t *testing.T) {
 	}
 }
 
+func TestServerExposesReplayEvidenceContract(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/replay/evidence?traceId=TRACE-1", http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("replay evidence payload = %#v", payload)
+	}
+	run := payload["run"].(map[string]any)
+	evidence := payload["evidence"].(map[string]any)
+	if run["traceId"] != "TRACE-1" || evidence["traceId"] != "TRACE-1" {
+		t.Fatalf("replay evidence trace = %#v", payload)
+	}
+	if evidence["systems"] == nil {
+		t.Fatalf("replay evidence should expose systems array: %#v", payload)
+	}
+}
+
 func TestServerExposesEmptyWorkbenchAuxiliaryAPIs(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
 	defer server.Close()
