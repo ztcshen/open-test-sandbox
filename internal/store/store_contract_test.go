@@ -61,12 +61,18 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if loadedRun.ProfileID != "empty" || loadedRun.WorkflowID != "workflow.smoke" || loadedRun.Status != store.StatusRunning {
 		t.Fatalf("loaded run = %#v", loadedRun)
 	}
+	if loadedRun.SummaryJSON != `{"stepCount":1}` {
+		t.Fatalf("loaded run summary = %q", loadedRun.SummaryJSON)
+	}
 	runs, err := s.ListRuns(ctx)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
 	if len(runs) != 1 || runs[0].ID != "run-001" {
 		t.Fatalf("runs = %#v", runs)
+	}
+	if runs[0].SummaryJSON != `{"stepCount":1}` {
+		t.Fatalf("listed run summary = %q", runs[0].SummaryJSON)
 	}
 
 	caseRun, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
