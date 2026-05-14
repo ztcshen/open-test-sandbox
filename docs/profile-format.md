@@ -38,6 +38,19 @@ bundle contains a `profile.json` manifest.
 Configuration remains file-first. Store records are generated runtime indexes,
 not the source of truth for profile assets.
 
+## Audit
+
+Use `otsandbox profile audit --profile PATH` to check a bundle before or after
+import. The audit verifies basic reference integrity across workflows, API
+Cases, request templates, fixtures, case dependencies, and workflow bindings.
+For example, it reports a workflow binding that points to a missing workflow,
+an API Case that points to a missing interface node, or a case dependency that
+points to a missing fixture.
+
+Add `--store-url PATH` to include the local Store profile index and API Case run
+status in the report. Add `--json` when another tool needs a stable
+machine-readable report.
+
 ## Split Assets
 
 Large bundles can keep assets in deterministic JSON directories next to

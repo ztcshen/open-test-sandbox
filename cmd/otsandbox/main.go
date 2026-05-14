@@ -17,6 +17,7 @@ import (
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/evidence"
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/profileaudit"
 	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
@@ -90,6 +91,7 @@ Usage:
   otsandbox store status [--store-url PATH]
   otsandbox store migrate [--store-url PATH]
   otsandbox profile inspect --profile PATH
+  otsandbox profile audit --profile PATH [--store-url PATH] [--json]
   otsandbox profile import --from PATH [--store-url PATH]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
@@ -160,6 +162,8 @@ func runProfile(args []string) error {
 	switch args[0] {
 	case "inspect":
 		return runProfileInspect(args[1:])
+	case "audit":
+		return runProfileAudit(context.Background(), args[1:])
 	case "import":
 		return runProfileImport(context.Background(), args[1:])
 	default:
@@ -238,6 +242,69 @@ func printProfile(bundle profile.Bundle) {
 	fmt.Printf("Case Dependencies: %d\n", counts.CaseDependencies)
 	fmt.Printf("Workflow Bindings: %d\n", counts.WorkflowBindings)
 	fmt.Printf("Fixtures: %d\n", counts.Fixtures)
+}
+
+func runProfileAudit(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("profile audit", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, err := profile.Load(*profilePath)
+	if err != nil {
+		return err
+	}
+
+	options := profileaudit.Options{
+		Bundle:     bundle,
+		BundlePath: *profilePath,
+	}
+	if strings.TrimSpace(*storeURL) != "" {
+		s, err := openStore(ctx, *storeURL)
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		options.Store = s
+	}
+
+	report, err := profileaudit.Audit(ctx, options)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	printProfileAudit(report)
+	return nil
+}
+
+func printProfileAudit(report profileaudit.Report) {
+	fmt.Printf("Profile Audit: %s\n", report.ProfileID)
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Issues: %d\n", report.IssueCount)
+	for _, item := range report.Issues {
+		fmt.Printf("- [%s] %s %s %s: %s\n", item.Severity, item.Code, item.SubjectType, item.SubjectID, item.Message)
+	}
+	if report.Store == nil {
+		return
+	}
+	fmt.Printf("Store Profile Indexed: %t\n", report.Store.ProfileIndexed)
+	if report.Store.BundleDigest != "" || report.Store.IndexedDigest != "" {
+		fmt.Printf("Store Digest Matches: %t\n", report.Store.DigestMatches)
+	}
+	for _, item := range report.Store.APICases {
+		status := item.LatestStatus
+		if status == "" {
+			status = "not-run"
+		}
+		fmt.Printf("API Case: %s Status: %s Passed: %t\n", item.CaseID, status, item.HasPassed)
+	}
 }
 
 func runWorkflow(args []string) error {

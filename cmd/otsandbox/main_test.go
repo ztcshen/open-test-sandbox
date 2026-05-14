@@ -73,6 +73,87 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
+func TestProfileAuditCommandEmitsJSONWithStoreState(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := filepath.Join(dir, "profile")
+	alphaPath := filepath.Join(dir, "case.alpha.json")
+	betaPath := filepath.Join(dir, "case.beta.json")
+	writeAPICaseFile(t, alphaPath)
+	writeFile(t, betaPath, `{
+  "id": "case.beta",
+  "title": "Read Item",
+  "request": {"method": "GET", "path": "/v1/items/item-001"},
+  "assertions": {"expectedStatusCodes": [200]}
+}`)
+	writeFile(t, filepath.Join(profileDir, "profile.json"), fmt.Sprintf(`{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha"}],
+  "apiCases": [
+    {"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha","casePath":%q},
+    {"id":"case.beta","displayName":"Case Beta","nodeId":"node.alpha","casePath":%q}
+  ],
+  "requestTemplates": [{"id":"template.alpha","nodeId":"node.alpha","method":"POST","path":"/v1/items"}],
+  "caseDependencies": [{"id":"dependency.beta","caseId":"case.beta","fixtureId":"fixture.missing"}],
+  "workflowBindings": [{"workflowId":"workflow.alpha","stepId":"step.one","nodeId":"node.alpha","caseId":"case.beta","required":true}],
+  "fixtures": []
+}`, alphaPath, betaPath))
+
+	storePath := filepath.Join(dir, "store.sqlite")
+	runCLI(t, "profile", "import", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "case", "run", "--case", alphaPath, "--dry-run", "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
+
+	out := runCLI(t, "profile", "audit", "--profile", profileDir, "--store-url", storePath, "--json")
+
+	var report struct {
+		OK         bool `json:"ok"`
+		IssueCount int  `json:"issueCount"`
+		Issues     []struct {
+			Code      string `json:"code"`
+			SubjectID string `json:"subjectId"`
+		} `json:"issues"`
+		Store *struct {
+			ProfileIndexed bool `json:"profileIndexed"`
+			DigestMatches  bool `json:"digestMatches"`
+			APICases       []struct {
+				CaseID       string `json:"caseId"`
+				HasPassed    bool   `json:"hasPassed"`
+				LatestStatus string `json:"latestStatus"`
+			} `json:"apiCases"`
+		} `json:"store,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile audit json: %v\n%s", err, out)
+	}
+	if report.OK || report.IssueCount != 1 || len(report.Issues) != 1 {
+		t.Fatalf("audit report issues = %#v", report)
+	}
+	if report.Issues[0].Code != "case-dependency-fixture-missing" || report.Issues[0].SubjectID != "dependency.beta" {
+		t.Fatalf("audit issue = %#v", report.Issues[0])
+	}
+	if report.Store == nil || !report.Store.ProfileIndexed || !report.Store.DigestMatches {
+		t.Fatalf("audit store state = %#v", report.Store)
+	}
+	caseState := map[string]struct {
+		HasPassed    bool
+		LatestStatus string
+	}{}
+	for _, item := range report.Store.APICases {
+		caseState[item.CaseID] = struct {
+			HasPassed    bool
+			LatestStatus string
+		}{HasPassed: item.HasPassed, LatestStatus: item.LatestStatus}
+	}
+	if !caseState["case.alpha"].HasPassed || caseState["case.alpha"].LatestStatus != "passed" {
+		t.Fatalf("case.alpha state = %#v", caseState["case.alpha"])
+	}
+	if caseState["case.beta"].HasPassed || caseState["case.beta"].LatestStatus != "" {
+		t.Fatalf("case.beta state = %#v", caseState["case.beta"])
+	}
+}
+
 func TestBaselineGateCommandsSetAndGetState(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 
