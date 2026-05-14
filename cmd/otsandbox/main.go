@@ -649,6 +649,11 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 	defer s.Close()
 
 	now := time.Now().UTC()
+	startedAt := runResultTime(result.StartedAt, now)
+	finishedAt := runResultTime(result.FinishedAt, now)
+	if finishedAt.Before(startedAt) {
+		finishedAt = startedAt
+	}
 	requestSummary, assertionSummary, err := apiCaseRunSummaries(result.EvidencePath)
 	if err != nil {
 		return err
@@ -660,10 +665,10 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 		Status:       result.Status,
 		EvidenceRoot: result.EvidencePath,
 		SummaryJSON:  "{}",
-		StartedAt:    now,
-		FinishedAt:   now,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		StartedAt:    startedAt,
+		FinishedAt:   finishedAt,
+		CreatedAt:    startedAt,
+		UpdatedAt:    finishedAt,
 	}); err != nil {
 		return err
 	}
@@ -674,9 +679,9 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 		Status:               result.Status,
 		RequestSummaryJSON:   requestSummary,
 		AssertionSummaryJSON: assertionSummary,
-		StartedAt:            now,
-		FinishedAt:           now,
-		CreatedAt:            now,
+		StartedAt:            startedAt,
+		FinishedAt:           finishedAt,
+		CreatedAt:            startedAt,
 	}); err != nil {
 		return err
 	}
@@ -706,6 +711,17 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 		}
 	}
 	return nil
+}
+
+func runResultTime(value string, fallback time.Time) time.Time {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return fallback
+	}
+	return parsed.UTC()
 }
 
 type requestSummary struct {

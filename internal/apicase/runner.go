@@ -48,10 +48,14 @@ type RunResult struct {
 	Status       string `json:"status"`
 	DryRun       bool   `json:"dryRun"`
 	EvidencePath string `json:"evidencePath"`
+	StartedAt    string `json:"startedAt"`
+	FinishedAt   string `json:"finishedAt"`
+	ElapsedMs    int64  `json:"elapsedMs"`
 	CreatedAt    string `json:"createdAt"`
 }
 
 func Run(ctx context.Context, options RunOptions) (RunResult, error) {
+	started := time.Now().UTC()
 	item, err := Load(options.CasePath)
 	if err != nil {
 		return RunResult{}, err
@@ -73,9 +77,10 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 		RunID:        runID,
 		CaseID:       item.ID,
 		Status:       "passed",
-		DryRun:       true,
+		DryRun:       options.DryRun,
 		EvidencePath: evidencePath,
-		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+		StartedAt:    started.Format(time.RFC3339Nano),
+		CreatedAt:    started.Format(time.RFC3339Nano),
 	}
 	if err := writeJSON(filepath.Join(evidencePath, "case.json"), item); err != nil {
 		return RunResult{}, err
@@ -98,6 +103,9 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 			return RunResult{}, err
 		}
 	}
+	finished := time.Now().UTC()
+	result.FinishedAt = finished.Format(time.RFC3339Nano)
+	result.ElapsedMs = finished.Sub(started).Milliseconds()
 	if err := writeJSON(filepath.Join(evidencePath, "summary.json"), result); err != nil {
 		return RunResult{}, err
 	}

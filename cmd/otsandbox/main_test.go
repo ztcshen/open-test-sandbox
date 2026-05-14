@@ -295,12 +295,18 @@ func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 	if run.ProfileID != "sample" || run.Status != "passed" {
 		t.Fatalf("run = %#v", run)
 	}
+	if !run.FinishedAt.After(run.StartedAt) {
+		t.Fatalf("run timing was not indexed: %#v", run)
+	}
 	caseRuns, err := s.ListAPICaseRuns(context.Background(), "case-run-003")
 	if err != nil {
 		t.Fatalf("list api case runs: %v", err)
 	}
 	if len(caseRuns) != 1 || caseRuns[0].CaseID != "case.alpha" {
 		t.Fatalf("case runs = %#v", caseRuns)
+	}
+	if !caseRuns[0].FinishedAt.After(caseRuns[0].StartedAt) {
+		t.Fatalf("case run timing was not indexed: %#v", caseRuns[0])
 	}
 	var requestSummary struct {
 		Method  string `json:"method"`

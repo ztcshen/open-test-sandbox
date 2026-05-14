@@ -30,6 +30,9 @@ func TestDryRunWritesEvidenceBundle(t *testing.T) {
 	if result.Status != "passed" || result.RunID != "run-001" || result.EvidencePath == "" {
 		t.Fatalf("result = %#v", result)
 	}
+	if result.StartedAt == "" || result.FinishedAt == "" || result.ElapsedMs < 0 {
+		t.Fatalf("result timing was not recorded: %#v", result)
+	}
 
 	for _, name := range []string{"case.json", "request.json", "summary.json"} {
 		if _, err := os.Stat(filepath.Join(result.EvidencePath, name)); err != nil {
@@ -74,6 +77,9 @@ func TestRunExecutesHTTPCaseAndWritesResponseEvidence(t *testing.T) {
 	}
 	if result.Status != "passed" {
 		t.Fatalf("result = %#v", result)
+	}
+	if result.DryRun {
+		t.Fatalf("live run should not be marked dry-run: %#v", result)
 	}
 	for _, name := range []string{"response.json", "assertions.json"} {
 		if _, err := os.Stat(filepath.Join(result.EvidencePath, name)); err != nil {
