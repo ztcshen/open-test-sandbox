@@ -130,6 +130,13 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 		}
 		handleCaseRuns(w, r, runtime)
 	})
+	mux.HandleFunc("/api/case/evidence", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleCaseEvidence(w, r, runtime)
+	})
 	mux.HandleFunc("/api/case/timing", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)

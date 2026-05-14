@@ -947,6 +947,65 @@ func TestServerExposesCaseRunsFromStore(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:           "run.alpha",
+		ProfileID:    "sample",
+		Status:       store.StatusPassed,
+		EvidenceRoot: ".runtime/evidence/run.alpha",
+		SummaryJSON:  "{}",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   "run.alpha.case",
+		RunID:                "run.alpha",
+		CaseID:               "case.alpha",
+		Status:               store.StatusPassed,
+		RequestSummaryJSON:   `{"method":"POST","path":"/alpha","hasBody":true}`,
+		AssertionSummaryJSON: `{"status":"passed","errorCount":0}`,
+	})
+	if err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        "run.alpha.response",
+		RunID:     "run.alpha",
+		CaseRunID: "run.alpha.case",
+		Kind:      "response",
+		URI:       ".runtime/evidence/run.alpha/response.json",
+		MediaType: "application/json",
+		Summary:   `{"statusCode":200,"bodyBytes":19}`,
+	})
+	if err != nil {
+		t.Fatalf("record evidence: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/evidence?runId=run.alpha", http.StatusOK)
+	evidence := payload["evidence"].(map[string]any)
+	summary := evidence["summary"].(map[string]any)
+	request := evidence["request"].(map[string]any)
+	response := evidence["response"].(map[string]any)
+	assertions := evidence["assertions"].(map[string]any)
+	if summary["case_id"] != "case.alpha" || request["method"] != "POST" || request["path"] != "/alpha" {
+		t.Fatalf("case evidence request = %#v", payload)
+	}
+	if response["http_code"] != float64(200) || assertions["status"] != "passed" {
+		t.Fatalf("case evidence response/assertions = %#v", payload)
+	}
+}
+
 func TestServerExposesEmptyAgentTestWorkbench(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
 	defer server.Close()
