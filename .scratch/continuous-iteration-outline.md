@@ -52,6 +52,8 @@ generic, profile-driven, and local-first.
   a neutral local-storage key and clean empty state.
 - Frontend trace topology slice: reference Trace Topology page is served with a
   clean missing-run recovery state.
+- Frontend agent run detail slice: reference Agent Run page is served with a
+  clean missing-run recovery state.
 
 ## Open Task Queue
 

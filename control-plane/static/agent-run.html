@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent Run · Open Test Sandbox</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app agent-run-detail-page">
+      <section class="topbar">
+        <div>
+          <h1>Agent run</h1>
+          <p id="agentRunTitle">run loading</p>
+        </div>
+        <div class="actions">
+          <span id="agentRunStatus" class="agent-test-status-pill" role="status">loading</span>
+          <a class="button-link" href="/agent-test.html">Agent Test Kit</a>
+          <a class="button-link" href="/">控制台</a>
+        </div>
+      </section>
+
+      <section id="agentRunSummary" class="agent-run-detail-summary" aria-label="Agent run summary"></section>
+
+      <section id="agentRunDetail" class="agent-run-detail-shell">
+        <section class="agent-run-detail-panel">
+          <div class="agent-test-section-head">
+            <div>
+              <h2>Diagnosis</h2>
+              <p id="agentRunDiagnosisMeta">loading</p>
+            </div>
+          </div>
+          <div id="agentRunDiagnosis" class="agent-run-detail-list"></div>
+        </section>
+
+        <section class="agent-run-detail-panel">
+          <div class="agent-test-section-head">
+            <div>
+              <h2>Evidence</h2>
+              <p id="agentRunEvidenceMeta">loading</p>
+            </div>
+          </div>
+          <div id="agentRunEvidence" class="agent-run-detail-list"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/agent-run.js"></script>
+  </body>
+</html>

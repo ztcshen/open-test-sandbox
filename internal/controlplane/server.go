@@ -200,6 +200,8 @@ var staticFileNames = []string{
 	"app.js",
 	"agent-test.html",
 	"agent-test.js",
+	"agent-run.html",
+	"agent-run.js",
 	"case-runs.html",
 	"case-runs.js",
 	"evidence-viewer.html",
