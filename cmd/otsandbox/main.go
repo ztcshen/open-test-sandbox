@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"open-test-sandbox/internal/controlplane"
+	"open-test-sandbox/internal/evidence"
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
@@ -40,6 +41,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "evidence":
+		if err := runEvidence(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "serve":
 		if err := runServe(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -60,6 +66,8 @@ Usage:
   otsandbox store status [--store-url PATH]
   otsandbox store migrate [--store-url PATH]
   otsandbox profile inspect --profile PATH
+  otsandbox profile import --from PATH [--store-url PATH]
+  otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox serve [--profile PATH] [--host HOST] [--port PORT]
   otsandbox help`)
 }
@@ -192,6 +200,47 @@ func printProfile(bundle profile.Bundle) {
 	fmt.Printf("Case Dependencies: %d\n", counts.CaseDependencies)
 	fmt.Printf("Workflow Bindings: %d\n", counts.WorkflowBindings)
 	fmt.Printf("Fixtures: %d\n", counts.Fixtures)
+}
+
+func runEvidence(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing evidence command")
+	}
+	switch args[0] {
+	case "import":
+		return runEvidenceImport(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown evidence command: %s", args[0])
+	}
+}
+
+func runEvidenceImport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("evidence import", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	from := flags.String("from", "", "Source runtime SQLite path")
+	profileID := flags.String("profile", "", "Profile id")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	s, err := sqlite.Open(ctx, sqlite.ConfigFromURL(*storeURL))
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	result, err := evidence.ImportLegacyRuntime(ctx, evidence.ImportOptions{
+		SourcePath: *from,
+		ProfileID:  *profileID,
+		Store:      s,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Println("Imported evidence index")
+	fmt.Printf("Runs: %d\n", result.RunCount)
+	fmt.Printf("API Case Runs: %d\n", result.APICaseRunCount)
+	fmt.Printf("Evidence Records: %d\n", result.EvidenceCount)
+	return nil
 }
 
 func runServe(args []string) error {

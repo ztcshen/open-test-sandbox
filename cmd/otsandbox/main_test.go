@@ -60,6 +60,18 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
+func TestEvidenceImportCommandIndexesLegacyRuntime(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "legacy.sqlite")
+	createLegacyRuntimeDB(t, sourcePath)
+	storePath := filepath.Join(dir, "store.sqlite")
+
+	out := runCLI(t, "evidence", "import", "--from", sourcePath, "--profile", "sample", "--store-url", storePath)
+	if !strings.Contains(out, "Imported evidence index") || !strings.Contains(out, "Runs: 2") || !strings.Contains(out, "API Case Runs: 1") {
+		t.Fatalf("evidence import output = %q", out)
+	}
+}
+
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
@@ -68,4 +80,38 @@ func runCLI(t *testing.T, args ...string) string {
 		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func createLegacyRuntimeDB(t *testing.T, path string) {
+	t.Helper()
+	statement := `
+create table workflow_runs (
+  id integer primary key,
+  workflow_id text not null,
+  status text not null,
+  summary_json text not null default '',
+  created_at text not null
+);
+create table interface_node_case_run (
+  id integer primary key,
+  node_id text not null,
+  case_id text not null,
+  run_id text not null,
+  status text not null,
+  failure_kind text not null default '',
+  failure_reason text not null default '',
+  evidence_path text not null default '',
+  elapsed_ms integer not null default 0,
+  summary_json text not null default '',
+  created_at text not null
+);
+insert into workflow_runs(id, workflow_id, status, summary_json, created_at)
+values (7, 'workflow.alpha', 'passed', '{"steps":1}', '2026-05-14T01:02:03Z');
+insert into interface_node_case_run(id, node_id, case_id, run_id, status, evidence_path, summary_json, created_at)
+values (11, 'node.alpha', 'case.alpha', 'case-run-parent', 'failed', '.runtime/cases/case-run-parent', '{"failure":"expected"}', '2026-05-14T01:03:03Z');
+`
+	cmd := exec.Command("sqlite3", path, statement)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create legacy db: %v\n%s", err, out)
+	}
 }
