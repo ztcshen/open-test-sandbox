@@ -2,6 +2,77 @@ import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Chip, fetchJSON, queryParam, selectedStep, selectedWorkflow, serviceName, workflowIdFromURL } from "./workflowPagesCommon.jsx";
 
+function unique(values) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
+function runtimeText(runtime) {
+  if (!runtime) return "missing";
+  return [runtime.state || "unknown", runtime.health || runtime.message || ""].filter(Boolean).join(" · ");
+}
+
+function ContextCard({ title, values, empty }) {
+  const items = unique(values);
+  return (
+    <article className="workflow-step-context-card">
+      <strong>{title}</strong>
+      <div className="workflow-detail-chips">
+        {items.length ? items.map((value) => <Chip key={value}>{value}</Chip>) : <Chip>{empty}</Chip>}
+      </div>
+    </article>
+  );
+}
+
+function StepContext({ workflow, step, services }) {
+  const steps = workflow?.steps || [];
+  const index = steps.findIndex((item) => item.id === step?.id);
+  return (
+    <section className="workflow-step-context">
+      <div className="section-head">
+        <div>
+          <h2>上下文摘要</h2>
+          <p>{workflow && step ? `${Math.max(index, 0) + 1} / ${steps.length || 0} · ${workflow.displayName || workflow.id}` : "loading"}</p>
+        </div>
+      </div>
+      <div className="workflow-step-context-grid">
+        <ContextCard title="当前服务" values={[serviceName(services, step?.serviceId)]} empty="未声明服务" />
+        <ContextCard title="Workflow action" values={steps.map((item) => item.action)} empty="无 action" />
+        <ContextCard title="Workflow evidence" values={steps.flatMap((item) => item.evidenceKinds || [])} empty="无 Evidence" />
+        <ContextCard title="Workflow cases" values={steps.map((item) => item.caseId)} empty="无 case" />
+      </div>
+    </section>
+  );
+}
+
+function ServiceEvidence({ step, service, runtime }) {
+  const rows = [
+    ["service id", step?.serviceId || "-"],
+    ["kind", service?.kind || "-"],
+    ["runtime", runtimeText(runtime)],
+    ["health", runtime?.health || "-"],
+  ];
+  return (
+    <section className="workflow-step-service-evidence">
+      <div className="section-head">
+        <div>
+          <h2>服务证据</h2>
+          <p>{service ? `${service.displayName || service.id} · ${service.role || "service"} · ${runtimeText(runtime)}` : `${step?.serviceId || "-"} · 未建模`}</p>
+        </div>
+        <div className="workflow-step-service-actions">
+          {step?.serviceId ? <a className="button-link" href={`/environment-node.html?id=${encodeURIComponent(step.serviceId)}`}>环境节点详情</a> : null}
+          <a className="button-link" href="/service-inventory.html">服务清单</a>
+        </div>
+      </div>
+      <dl className="workflow-step-service-meta">
+        {rows.flatMap(([label, value]) => [
+          <dt key={`${label}-term`}>{label}</dt>,
+          <dd key={`${label}-value`}>{value || "-"}</dd>,
+        ])}
+      </dl>
+    </section>
+  );
+}
+
 function WorkflowStepApp() {
   const [catalog, setCatalog] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -41,6 +112,7 @@ function WorkflowStepApp() {
     const items = (dashboard?.groups || []).flatMap((group) => group.items || []);
     return items.find((item) => item.id === step?.serviceId);
   }, [dashboard, step]);
+  const service = services.find((item) => item.id === step?.serviceId);
   const stepResult = stepRun?.summary?.steps?.[0] || null;
 
   useEffect(() => {
@@ -132,6 +204,8 @@ function WorkflowStepApp() {
             <article className="workflow-step-card"><span>Service</span><div className="workflow-detail-chips"><Chip>{step?.serviceId || "-"}</Chip></div></article>
             <article className="workflow-step-card"><span>Latest run</span><strong>{stepRun?.run?.status || "no run"}</strong></article>
           </section>
+          <StepContext workflow={workflow} step={step} services={services} />
+          <ServiceEvidence step={step} service={service} runtime={runtime} />
           <section className="workflow-step-detail-card">
             <div className="section-head">
               <h2>最近 Step Run</h2>

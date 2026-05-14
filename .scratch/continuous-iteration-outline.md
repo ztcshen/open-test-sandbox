@@ -111,6 +111,9 @@ generic, profile-driven, and local-first.
   API Case page renders the selected case run state.
 - Workflow step run evidence slice: `workflow-step.html` now reads the latest
   Store-backed step run and renders status plus request/response summaries.
+- Workflow step context/service slice: `workflow-step.html` now renders
+  reference-style context and service evidence panels from catalog and runtime
+  snapshot data.
 
 ## Open Task Queue
 
