@@ -281,7 +281,6 @@ var staticFileNames = []string{
 	"api-cases.html",
 	"case-runs.html",
 	"evidence-viewer.html",
-	"evidence-viewer.js",
 	"trace-topology.html",
 	"replay-evidence.html",
 	"trace-call.html",
@@ -298,7 +297,6 @@ var staticFileNames = []string{
 	"workflow-run.html",
 	"workflow-detail.html",
 	"workflow-step.html",
-	"topology-renderer.js",
 	"styles.css",
 }
 

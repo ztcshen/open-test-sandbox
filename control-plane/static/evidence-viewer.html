@@ -9,50 +9,7 @@
     <link rel="stylesheet" href="/assets/react/controlPlane.css">
   </head>
   <body>
-    <main class="app viewer-app">
-      <section class="viewer-topbar">
-        <div>
-          <p class="viewer-eyebrow">Evidence Viewer</p>
-          <h1 id="viewerTitle">日志查看页</h1>
-          <p id="viewerSubtitle" class="viewer-subtitle">在新页面查看当前步骤的完整系统日志。</p>
-        </div>
-        <div class="viewer-meta">
-          <span id="viewerStage" class="detail-phase">阶段</span>
-          <span id="viewerCase" class="viewer-case">-</span>
-          <nav id="viewerActions" class="viewer-actions" aria-label="Evidence navigation">
-            <a class="button-link" href="/case-runs.html">API Case Evidence</a>
-            <a class="button-link" href="/agent-test.html">Agent Test Kit</a>
-            <a class="button-link" href="/">控制台</a>
-          </nav>
-        </div>
-      </section>
-
-      <section class="viewer-summary">
-        <article class="summary-card">
-          <span>经过系统</span>
-          <strong id="viewerPath">-</strong>
-        </article>
-        <article class="summary-card">
-          <span>关联字段</span>
-          <strong id="viewerCorrelators">-</strong>
-        </article>
-        <article class="summary-card">
-          <span>请求 / 返回</span>
-          <strong id="viewerMeta">-</strong>
-        </article>
-        <article class="summary-card">
-          <span>Trace Continuity</span>
-          <strong id="viewerContinuity">-</strong>
-        </article>
-        <article class="summary-card">
-          <span>代码位点</span>
-          <strong id="viewerCodeHints">-</strong>
-        </article>
-      </section>
-
-      <section class="viewer-grid" id="viewerGrid"></section>
-    </main>
-    <script src="/topology-renderer.js"></script>
-    <script src="/evidence-viewer.js?v=case-evidence"></script>
+    <div id="react-evidence-viewer-root"></div>
+    <script type="module" src="/assets/react/evidenceViewer.js"></script>
   </body>
 </html>

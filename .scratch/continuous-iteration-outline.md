@@ -92,6 +92,8 @@ generic, profile-driven, and local-first.
   bundles.
 - Frontend workbench import React slice: the home workbench is served through a
   source-built React bundle and exposes the local profile import API.
+- Frontend Evidence Viewer React slice: case Evidence viewing and topology
+  rendering are served through a source-built React bundle.
 
 ## Open Task Queue
 

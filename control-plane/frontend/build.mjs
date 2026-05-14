@@ -18,6 +18,7 @@ await build({
     dashboard: resolve(root, "src/dashboard.jsx"),
     environmentNode: resolve(root, "src/environmentNode.jsx"),
     environmentNodes: resolve(root, "src/environmentNodes.jsx"),
+    evidenceViewer: resolve(root, "src/evidenceViewer.jsx"),
     interfaceNode: resolve(root, "src/interfaceNode.jsx"),
     interfaceNodes: resolve(root, "src/interfaceNodes.jsx"),
     replayEvidence: resolve(root, "src/replayEvidence.jsx"),
