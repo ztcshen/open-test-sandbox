@@ -100,6 +100,9 @@ generic, profile-driven, and local-first.
 - Agent test workbench Store slice: `/api/agent-test` now exposes generic
   Store run history, status/failure summaries, and active profile metadata for
   the React workbench.
+- Interface node run history slice: `/api/interface-node` now hydrates case
+  `latestRun`, node history, and evidence run indexes from Store API case run
+  records.
 
 ## Open Task Queue
 

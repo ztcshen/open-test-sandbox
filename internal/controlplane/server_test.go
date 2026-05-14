@@ -636,6 +636,104 @@ func TestServerExposesInterfaceNodeDetail(t *testing.T) {
 	}
 }
 
+func TestServerExposesInterfaceNodeRunHistoryFromStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	started := time.Date(2026, 5, 14, 9, 0, 0, 0, time.UTC)
+	for _, item := range []struct {
+		run     store.Run
+		caseRun store.APICaseRun
+	}{
+		{
+			run: store.Run{
+				ID:           "run.alpha",
+				ProfileID:    "sample",
+				WorkflowID:   "workflow.alpha",
+				Status:       store.StatusPassed,
+				EvidenceRoot: ".runtime/evidence/run.alpha",
+				CreatedAt:    started,
+			},
+			caseRun: store.APICaseRun{
+				ID:                   "run.alpha.case",
+				RunID:                "run.alpha",
+				CaseID:               "case.alpha",
+				Status:               store.StatusPassed,
+				RequestSummaryJSON:   `{"method":"GET","path":"/alpha"}`,
+				AssertionSummaryJSON: `{"status":"passed"}`,
+				StartedAt:            started,
+				FinishedAt:           started.Add(150 * time.Millisecond),
+				CreatedAt:            started,
+			},
+		},
+		{
+			run: store.Run{
+				ID:           "run.beta",
+				ProfileID:    "sample",
+				WorkflowID:   "workflow.alpha",
+				Status:       store.StatusFailed,
+				EvidenceRoot: ".runtime/evidence/run.beta",
+				CreatedAt:    started.Add(time.Minute),
+			},
+			caseRun: store.APICaseRun{
+				ID:                   "run.beta.case",
+				RunID:                "run.beta",
+				CaseID:               "case.beta",
+				Status:               store.StatusFailed,
+				RequestSummaryJSON:   `{"method":"POST","path":"/beta"}`,
+				AssertionSummaryJSON: `{"status":"failed","errorCount":1}`,
+				StartedAt:            started.Add(time.Minute),
+				FinishedAt:           started.Add(time.Minute + 250*time.Millisecond),
+				CreatedAt:            started.Add(time.Minute),
+			},
+		},
+	} {
+		if _, err := s.CreateRun(ctx, item.run); err != nil {
+			t.Fatalf("create run %s: %v", item.run.ID, err)
+		}
+		if _, err := s.RecordAPICaseRun(ctx, item.caseRun); err != nil {
+			t.Fatalf("record case run %s: %v", item.caseRun.ID, err)
+		}
+	}
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+			{ID: "case.beta", DisplayName: "Case Beta", NodeID: "node.alpha"},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/interface-node?id=node.alpha", http.StatusOK)
+	history := payload["history"].(map[string]any)
+	if history["latestRunId"] != "run.beta" || history["runCount"] != float64(2) || history["passCount"] != float64(1) || history["failCount"] != float64(1) {
+		t.Fatalf("interface node history = %#v", history)
+	}
+	if history["latestFailureReason"] != "assertion errors: 1" || history["totalElapsedMs"] != float64(400) {
+		t.Fatalf("interface node history details = %#v", history)
+	}
+	cases := payload["cases"].([]any)
+	if len(cases) != 2 {
+		t.Fatalf("interface node cases = %#v", cases)
+	}
+	latest := cases[1].(map[string]any)["latestRun"].(map[string]any)
+	if latest["runId"] != "run.beta" || latest["caseId"] != "case.beta" || latest["status"] != store.StatusFailed || latest["elapsedMs"] != float64(250) {
+		t.Fatalf("case latest run = %#v", latest)
+	}
+	runs := payload["runs"].([]any)
+	if len(runs) != 2 || runs[0].(map[string]any)["runId"] != "run.beta" {
+		t.Fatalf("interface node runs = %#v", runs)
+	}
+}
+
 func TestServerExposesCatalogForReactShell(t *testing.T) {
 	bundle := profile.Bundle{
 		ID:          "sample",

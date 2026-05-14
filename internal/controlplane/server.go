@@ -211,7 +211,11 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		payload, ok := interfaceNodeDetailPayloadFromBundle(profiles.Current(), r.URL.Query().Get("id"))
+		payload, ok, err := interfaceNodeDetailPayloadFromBundleWithStore(r.Context(), profiles.Current(), r.URL.Query().Get("id"), runtime)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
 		if !ok {
 			writeJSONStatus(w, http.StatusNotFound, payload)
 			return
@@ -432,6 +436,7 @@ type interfaceCase struct {
 	CaseType             string           `json:"caseType"`
 	RequiredForAdmission bool             `json:"requiredForAdmission"`
 	Dependencies         []map[string]any `json:"dependencies"`
+	LatestRun            map[string]any   `json:"latestRun,omitempty"`
 }
 
 type interfaceNodeFields struct {
