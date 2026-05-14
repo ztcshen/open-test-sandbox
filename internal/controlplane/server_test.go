@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1154,6 +1156,99 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 	}
 	if len(payload.Cases[0].Graph.Nodes) != 1 || payload.Cases[0].Graph.Nodes[0].ID != "service.alpha" || payload.Cases[0].Graph.Nodes[0].Role != "http" {
 		t.Fatalf("api case graph = %#v", payload.Cases[0].Graph)
+	}
+}
+
+func TestServerRunsAPICaseAndIndexesStoreRecords(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/items" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"created"}`))
+	}))
+	defer target.Close()
+
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	if err := os.WriteFile(casePath, []byte(`{
+  "id": "case.alpha",
+  "title": "Create Item",
+  "request": {
+    "method": "POST",
+    "path": "/v1/items",
+    "headers": {"Content-Type": "application/json"},
+    "body": {"id": "item-001"}
+  },
+  "assertions": {
+    "expectedStatusCodes": [200],
+    "responseContains": ["created"]
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write api case: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	body := `{"casePath":` + strconv.Quote(casePath) + `,"baseUrl":` + strconv.Quote(target.URL) + `,"evidenceDir":` + strconv.Quote(filepath.Join(dir, "evidence")) + `}`
+	resp, err := http.Post(server.URL+"/api/cases/run", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post api case run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var payload struct {
+		OK        bool   `json:"ok"`
+		DryRun    bool   `json:"dryRun"`
+		ViewerURL string `json:"viewerUrl"`
+		Report    struct {
+			RunID     string `json:"run_id"`
+			CaseID    string `json:"case_id"`
+			Status    string `json:"status"`
+			ElapsedMs int64  `json:"elapsed_ms"`
+		} `json:"report"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode api case run response: %v", err)
+	}
+	if !payload.OK || payload.DryRun || payload.Report.CaseID != "case.alpha" || payload.Report.Status != store.StatusPassed || payload.ViewerURL == "" {
+		t.Fatalf("api case run payload = %#v", payload)
+	}
+	if payload.Report.RunID == "" || payload.Report.ElapsedMs < 0 {
+		t.Fatalf("api case run timing = %#v", payload.Report)
+	}
+
+	runs, err := s.ListRuns(ctx)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != payload.Report.RunID || runs[0].Status != store.StatusPassed {
+		t.Fatalf("stored runs = %#v", runs)
+	}
+	caseRuns, err := s.ListAPICaseRuns(ctx, payload.Report.RunID)
+	if err != nil {
+		t.Fatalf("list api case runs: %v", err)
+	}
+	if len(caseRuns) != 1 || caseRuns[0].CaseID != "case.alpha" || !caseRuns[0].FinishedAt.After(caseRuns[0].StartedAt) {
+		t.Fatalf("stored api case runs = %#v", caseRuns)
+	}
+	evidence, err := s.ListEvidence(ctx, payload.Report.RunID)
+	if err != nil {
+		t.Fatalf("list evidence: %v", err)
+	}
+	if len(evidence) < 4 {
+		t.Fatalf("stored evidence = %#v", evidence)
 	}
 }
 

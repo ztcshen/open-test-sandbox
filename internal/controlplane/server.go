@@ -176,10 +176,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{
-			"ok":    false,
-			"error": "api case execution is not wired to the control plane yet",
-		})
+		handleAPICaseRun(w, r, bundle, runtime)
 	})
 	mux.HandleFunc("/api/test-kit/run", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
