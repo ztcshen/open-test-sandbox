@@ -372,6 +372,68 @@ func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 	}
 }
 
+func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := filepath.Join(dir, "profile")
+	alphaPath := filepath.Join(dir, "case.alpha.json")
+	betaPath := filepath.Join(dir, "case.beta.json")
+	writeAPICaseFile(t, alphaPath)
+	writeFile(t, betaPath, `{
+  "id": "case.beta",
+  "title": "Read Item",
+  "request": {"method": "GET", "path": "/v1/items/item-001"},
+  "assertions": {"expectedStatusCodes": [200]}
+}`)
+	writeFile(t, filepath.Join(profileDir, "profile.json"), fmt.Sprintf(`{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [
+    {"id":"case.alpha","displayName":"Case Alpha","casePath":%q},
+    {"id":"case.beta","displayName":"Case Beta","casePath":%q}
+  ],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`, alphaPath, betaPath))
+
+	storePath := filepath.Join(dir, "store.sqlite")
+	runCLI(t, "case", "run", "--case", alphaPath, "--dry-run", "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
+
+	out := runCLI(t, "case", "incomplete-batches", "--profile", profileDir, "--store-url", storePath)
+	for _, want := range []string{"Incomplete API Cases: 1", "case.beta", "not-run", betaPath} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("incomplete case output missing %q: %q", want, out)
+		}
+	}
+
+	jsonOut := runCLI(t, "case", "incomplete-batches", "--profile", profileDir, "--store-url", storePath, "--json")
+	var report struct {
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
+		Items []struct {
+			ID      string `json:"id"`
+			Reason  string `json:"reason"`
+			Command string `json:"suggestedCommand"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &report); err != nil {
+		t.Fatalf("decode incomplete cases report: %v\n%s", err, jsonOut)
+	}
+	if !report.OK || report.Count != 1 || len(report.Items) != 1 {
+		t.Fatalf("incomplete cases report = %#v", report)
+	}
+	if report.Items[0].ID != "case.beta" || report.Items[0].Reason != "not-run" {
+		t.Fatalf("incomplete case item = %#v", report.Items[0])
+	}
+	if !strings.Contains(report.Items[0].Command, betaPath) {
+		t.Fatalf("suggested command = %q", report.Items[0].Command)
+	}
+}
+
 func TestServeHandlerUsesConfiguredStore(t *testing.T) {
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
