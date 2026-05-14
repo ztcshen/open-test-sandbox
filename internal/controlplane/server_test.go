@@ -1,6 +1,7 @@
 package controlplane_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/store"
+	"open-test-sandbox/internal/store/sqlite"
 )
 
 func TestServerExposesProfileAPI(t *testing.T) {
@@ -603,6 +606,111 @@ func TestServerExposesEmptyRunListsForReactShell(t *testing.T) {
 	}
 }
 
+func TestServerExposesWorkflowRunContracts(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:           "run.alpha",
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusPassed,
+		EvidenceRoot: ".runtime/evidence/run.alpha",
+		SummaryJSON:  `{"summary":{"expectedStepCount":2,"stepCount":2},"steps":[{"stepId":"step.alpha","ok":true},{"stepId":"step.beta","ok":false}]}`,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	list := decodeJSONResponse(t, server.URL+"/api/runs", http.StatusOK)
+	workflowRuns := list["workflowRuns"].([]any)
+	if len(workflowRuns) != 1 || workflowRuns[0].(map[string]any)["id"] != "run.alpha" {
+		t.Fatalf("workflow run list = %#v", list)
+	}
+
+	detail := decodeJSONResponse(t, server.URL+"/api/workflow-runs/run.alpha", http.StatusOK)
+	if detail["ok"] != true {
+		t.Fatalf("workflow run detail failed: %#v", detail)
+	}
+	if detail["traceTopologies"] == nil {
+		t.Fatalf("workflow run detail should include topology array: %#v", detail)
+	}
+	summary := detail["summary"].(map[string]any)
+	if len(summary["steps"].([]any)) != 2 {
+		t.Fatalf("workflow run detail summary = %#v", summary)
+	}
+
+	step := decodeJSONResponse(t, server.URL+"/api/workflow-runs/step?runId=run.alpha&stepId=step.beta", http.StatusOK)
+	stepSummary := step["summary"].(map[string]any)
+	steps := stepSummary["steps"].([]any)
+	if len(steps) != 1 || steps[0].(map[string]any)["stepId"] != "step.beta" {
+		t.Fatalf("workflow run step payload = %#v", step)
+	}
+	if strings.Contains(mustJSON(t, step), "step.alpha") {
+		t.Fatalf("workflow run step leaked other steps: %#v", step)
+	}
+
+	latest := decodeJSONResponse(t, server.URL+"/api/workflow-runs/latest-step?workflowId=workflow.alpha&stepId=step.beta", http.StatusOK)
+	latestRun := latest["run"].(map[string]any)
+	if latestRun["id"] != "run.alpha" {
+		t.Fatalf("latest workflow step run = %#v", latest)
+	}
+}
+
+func TestServerSavesWorkflowRunToStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/workflow-runs", "application/json", strings.NewReader(`{
+		"workflowId":"workflow.alpha",
+		"status":"passed",
+		"ok":true,
+		"steps":[{"stepId":"step.alpha","ok":true}],
+		"summary":{"expectedStepCount":1,"stepCount":1}
+	}`))
+	if err != nil {
+		t.Fatalf("post workflow run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("save workflow run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var saved struct {
+		OK            bool   `json:"ok"`
+		WorkflowRunID string `json:"workflowRunId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&saved); err != nil {
+		t.Fatalf("decode saved workflow run: %v", err)
+	}
+	if !saved.OK || saved.WorkflowRunID == "" {
+		t.Fatalf("saved workflow run = %#v", saved)
+	}
+
+	loaded := decodeJSONResponse(t, server.URL+"/api/workflow-runs/"+saved.WorkflowRunID, http.StatusOK)
+	run := loaded["run"].(map[string]any)
+	if run["workflowId"] != "workflow.alpha" || run["status"] != "passed" {
+		t.Fatalf("loaded saved workflow run = %#v", loaded)
+	}
+	if run["evidenceRoot"] != "" {
+		t.Fatalf("empty evidence root should stay empty: %#v", run)
+	}
+}
+
 func TestServerExposesEmptyWorkbenchAuxiliaryAPIs(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
 	defer server.Close()
@@ -728,4 +836,34 @@ func loadEmptyProfile(t *testing.T) profile.Bundle {
 		t.Fatalf("load empty profile: %v", err)
 	}
 	return bundle
+}
+
+func decodeJSONResponse(t *testing.T, url string, wantStatus int) map[string]any {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("get %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read %s: %v", url, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("%s status = %d body=%s", url, resp.StatusCode, raw)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode %s: %v body=%s", url, err, raw)
+	}
+	return payload
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal value: %v", err)
+	}
+	return string(raw)
 }

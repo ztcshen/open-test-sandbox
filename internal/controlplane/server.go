@@ -8,9 +8,14 @@ import (
 	"sort"
 
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/store"
 )
 
 func New(bundle profile.Bundle) http.Handler {
+	return NewWithStore(bundle, nil)
+}
+
+func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 	mux := http.NewServeMux()
 	staticDir := findStaticDir()
 	mux.HandleFunc("/api/profile", func(w http.ResponseWriter, r *http.Request) {
@@ -62,11 +67,35 @@ func New(bundle profile.Bundle) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, runsPayload{
-			WorkflowRuns: []map[string]any{},
-			ReplayRuns:   []map[string]any{},
-			ProbeRuns:    []map[string]any{},
-		})
+		handleRuns(w, r, runtime)
+	})
+	mux.HandleFunc("/api/workflow-runs/latest-step", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleLatestWorkflowStepRun(w, r, runtime)
+	})
+	mux.HandleFunc("/api/workflow-runs/step", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleWorkflowStepRun(w, r, runtime)
+	})
+	mux.HandleFunc("/api/workflow-runs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleSaveWorkflowRun(w, r, bundle, runtime)
+	})
+	mux.HandleFunc("/api/workflow-runs/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleWorkflowRun(w, r, runtime)
 	})
 	mux.HandleFunc("/api/agent-test", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

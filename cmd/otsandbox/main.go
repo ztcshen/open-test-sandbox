@@ -98,7 +98,7 @@ Usage:
   otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store-url PATH]
   otsandbox template render --profile PATH --template ID [--fixture ID]
   otsandbox case run --case PATH [--base-url URL] [--dry-run] [--evidence-dir PATH]
-  otsandbox serve [--profile PATH] [--host HOST] [--port PORT]
+  otsandbox serve [--profile PATH] [--host HOST] [--port PORT] [--store-url PATH]
   otsandbox help`)
 }
 
@@ -810,20 +810,61 @@ func compactJSON(value any) (string, error) {
 }
 
 func runServe(args []string) error {
+	cfg, err := serveConfigFromArgs(args)
+	if err != nil {
+		return err
+	}
+	handler, cleanup, err := serveHandler(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	addr := cfg.host + ":" + strconv.Itoa(cfg.port)
+	fmt.Printf("Open Test Sandbox listening on http://%s\n", addr)
+	return http.ListenAndServe(addr, handler)
+}
+
+type serveConfig struct {
+	profilePath string
+	host        string
+	port        int
+	storeURL    string
+}
+
+func serveHandlerFromArgs(args []string) (http.Handler, func() error, error) {
+	cfg, err := serveConfigFromArgs(args)
+	if err != nil {
+		return nil, nil, err
+	}
+	return serveHandler(cfg)
+}
+
+func serveConfigFromArgs(args []string) (serveConfig, error) {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "profiles/empty", "Profile bundle path")
 	host := flags.String("host", "127.0.0.1", "HTTP host")
 	port := flags.Int("port", 18191, "HTTP port")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return serveConfig{}, err
 	}
+	return serveConfig{profilePath: *profilePath, host: *host, port: *port, storeURL: *storeURL}, nil
+}
 
-	bundle, err := profile.Load(*profilePath)
+func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
+	bundle, err := profile.Load(cfg.profilePath)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	addr := *host + ":" + strconv.Itoa(*port)
-	fmt.Printf("Open Test Sandbox listening on http://%s\n", addr)
-	return http.ListenAndServe(addr, controlplane.New(bundle))
+	storeCfg, err := sqlite.ParseConfigFromURL(cfg.storeURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	runtime, err := sqlite.Open(context.Background(), storeCfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return controlplane.NewWithStore(bundle, runtime), runtime.Close, nil
 }

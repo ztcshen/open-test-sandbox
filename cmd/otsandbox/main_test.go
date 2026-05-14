@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
 )
 
@@ -344,6 +345,47 @@ func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusOK || response.BodyBytes == 0 {
 		t.Fatalf("response evidence summary = %#v", response)
+	}
+}
+
+func TestServeHandlerUsesConfiguredStore(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:           "run.alpha",
+		ProfileID:    "empty",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusPassed,
+		EvidenceRoot: ".runtime/evidence/run.alpha",
+		SummaryJSON:  `{"steps":[{"stepId":"step.alpha","ok":true}]}`,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	handler, cleanup, err := serveHandlerFromArgs([]string{
+		"--profile", "../../profiles/empty",
+		"--store-url", storePath,
+	})
+	if err != nil {
+		t.Fatalf("build serve handler: %v", err)
+	}
+	defer cleanup()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "run.alpha") {
+		t.Fatalf("serve handler did not use configured store: %s", rec.Body.String())
 	}
 }
 
