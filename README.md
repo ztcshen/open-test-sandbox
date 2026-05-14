@@ -55,6 +55,15 @@ Store backend support is documented in
 
 ## Current Status
 
-The project now has a neutral CLI, SQLite Store, profile loader, generic Control
-plane, runtime Evidence import path, and API Case runner. Domain-specific data
-belongs in profile/config bundles, not in core source code.
+The project now has:
+
+- a neutral CLI and generic Control plane;
+- a SQLite Store with migrations, contract tests, Evidence queries, baseline
+  gates, and backend URL validation;
+- a profile loader for manifest and split-asset bundles;
+- API Case dry-run/live execution with reproducible Evidence and Store indexes;
+- request template rendering from profile-owned fixture data;
+- workflow planning from profile-owned bindings;
+- runtime Evidence import with text and JSON reports.
+
+Domain-specific data belongs in profile/config bundles, not in core source code.

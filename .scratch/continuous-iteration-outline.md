@@ -23,17 +23,17 @@ generic, profile-driven, and local-first.
 - Request template rendering preview.
 - Evidence query CLI.
 - Baseline gate CLI.
+- Release hygiene pass.
 
 ## Open Task Queue
 
-### Task 1: Release Hygiene
-
-Status: open
+### Task 1: First Review Feedback
 
 Goal:
-- Prepare the repository for first external review.
+- Collect review feedback from a fresh checkout or external reviewer and turn it
+  into the next small implementation queue.
 
 Acceptance:
-- README current status matches implemented capabilities.
-- Runtime files remain ignored.
-- A fresh clone can run quickstart commands.
+- Any issue found by review maps to a small, testable slice.
+- Core/profile separation remains intact.
+- `go test ./...` and the source-domain scan pass after each slice.
