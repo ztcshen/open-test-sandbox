@@ -193,6 +193,8 @@ func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
 		t.Fatalf("interface node after import = %#v", items)
 	}
 	for table, want := range map[string]int{
+		"template":                1,
+		"template_config":         1,
 		"node_config":             1,
 		"workflow":                1,
 		"interface_node":          1,

@@ -413,9 +413,17 @@ insert into node_config (id, display_name, role, status, sort_order)
 values (%s, %s, %s, 'active', %d);`, sqlString(service.ID), sqlString(service.DisplayName), sqlString(service.Kind), index))
 	}
 	for index, workflow := range catalog.Workflows {
+		templateID := "workflow/" + workflow.ID
+		configID := templateID + "/config"
+		statements = append(statements, fmt.Sprintf(`
+insert into template (id, name, kind, status, sort_order)
+values (%s, %s, 'workflow', 'active', %d);`, sqlString(templateID), sqlString(workflow.DisplayName), index))
+		statements = append(statements, fmt.Sprintf(`
+insert into template_config (id, template_id, workflow_id, title, description, config_json, status, sort_order)
+values (%s, %s, %s, %s, %s, '{}', 'active', %d);`, sqlString(configID), sqlString(templateID), sqlString(workflow.ID), sqlString(workflow.DisplayName), sqlString(workflow.Description), index))
 		statements = append(statements, fmt.Sprintf(`
 insert into workflow (id, name, template_id, template_config_id, description, status, sort_order)
-values (%s, %s, '', '', %s, 'active', %d);`, sqlString(workflow.ID), sqlString(workflow.DisplayName), sqlString(workflow.Description), index))
+values (%s, %s, %s, %s, %s, 'active', %d);`, sqlString(workflow.ID), sqlString(workflow.DisplayName), sqlString(templateID), sqlString(configID), sqlString(workflow.Description), index))
 	}
 	for index, node := range catalog.InterfaceNodes {
 		statements = append(statements, fmt.Sprintf(`
@@ -423,6 +431,14 @@ insert into interface_node (id, display_name, service_id, status, sort_order, cr
 values (%s, %s, %s, 'active', %d, %s, %s);`, sqlString(node.ID), sqlString(node.DisplayName), sqlString(node.ServiceID), index, sqlString(indexedAt), sqlString(indexedAt)))
 	}
 	for index, template := range catalog.RequestTemplates {
+		templateID := "request/" + template.ID
+		configID := templateID + "/config"
+		statements = append(statements, fmt.Sprintf(`
+insert into template (id, name, kind, status, sort_order)
+values (%s, %s, 'request', 'active', %d);`, sqlString(templateID), sqlString(template.DisplayName), index))
+		statements = append(statements, fmt.Sprintf(`
+insert into template_config (id, template_id, node_id, scope_type, scope_id, title, config_json, status, sort_order)
+values (%s, %s, %s, 'interface_node', %s, %s, %s, 'active', %d);`, sqlString(configID), sqlString(templateID), sqlString(template.NodeID), sqlString(template.NodeID), sqlString(template.DisplayName), sqlString(stringDefault(template.TemplateJSON, "{}")), index))
 		statements = append(statements, fmt.Sprintf(`
 insert into interface_node_request_template (id, node_id, name, template_json, status, sort_order, created_at, updated_at)
 values (%s, %s, %s, %s, 'active', %d, %s, %s);`, sqlString(template.ID), sqlString(template.NodeID), sqlString(template.DisplayName), sqlString(stringDefault(template.TemplateJSON, "{}")), index, sqlString(indexedAt), sqlString(indexedAt)))

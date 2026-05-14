@@ -136,7 +136,8 @@ generic, profile-driven, and local-first.
   from the reference control-plane database model.
 - Profile catalog indexing slice: profile import now projects services,
   workflows, interface nodes, API cases, request templates, bindings,
-  fixtures, and dependencies into the generic template-config Store tables.
+  fixtures, dependencies, and template/config rows into the generic
+  template-config Store tables.
 
 ## Open Task Queue
 
