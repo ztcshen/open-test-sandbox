@@ -21,6 +21,7 @@ import (
 	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
+	"open-test-sandbox/internal/workflowaudit"
 )
 
 const version = "0.1.0"
@@ -117,6 +118,7 @@ Usage:
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
   otsandbox workflow plan --profile PATH --workflow ID
+  otsandbox workflow audit --profile PATH --workflow ID [--store-url PATH] [--json]
   otsandbox baseline get --profile ID --subject ID [--store-url PATH]
   otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store-url PATH]
   otsandbox template render --profile PATH --template ID [--fixture ID]
@@ -387,8 +389,87 @@ func runWorkflow(args []string) error {
 	switch args[0] {
 	case "plan":
 		return runWorkflowPlan(args[1:])
+	case "audit":
+		return runWorkflowAudit(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown workflow command: %s", args[0])
+	}
+}
+
+func runWorkflowAudit(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow audit", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	workflowID := flags.String("workflow", "", "Workflow id")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, err := profile.Load(*profilePath)
+	if err != nil {
+		return err
+	}
+
+	options := workflowaudit.Options{
+		Bundle:     bundle,
+		WorkflowID: *workflowID,
+	}
+	if strings.TrimSpace(*storeURL) != "" {
+		s, err := openStore(ctx, *storeURL)
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		options.Store = s
+	}
+
+	report, err := workflowaudit.Audit(ctx, options)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	printWorkflowAudit(report)
+	return nil
+}
+
+func printWorkflowAudit(report workflowaudit.Report) {
+	fmt.Printf("Workflow Audit: %s\n", report.WorkflowID)
+	fmt.Printf("Profile: %s\n", report.ProfileID)
+	if report.DisplayName != "" {
+		fmt.Printf("Display Name: %s\n", report.DisplayName)
+	}
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Issues: %d\n", report.IssueCount)
+	fmt.Printf("Bindings: %d\n", report.BindingCount)
+	for _, item := range report.Bindings {
+		fmt.Printf("Binding: %s Node: %s", item.StepID, item.NodeID)
+		if item.CaseID != "" {
+			fmt.Printf(" Case: %s", item.CaseID)
+		}
+		fmt.Printf(" Required: %t\n", item.Required)
+	}
+	for _, item := range report.Issues {
+		fmt.Printf("- [%s] %s %s %s: %s\n", item.Severity, item.Code, item.SubjectType, item.SubjectID, item.Message)
+	}
+	if report.Store == nil {
+		return
+	}
+	if report.Store.LatestRun == nil {
+		fmt.Println("Latest Run: not-run")
+	} else {
+		fmt.Printf("Latest Run: %s [%s]\n", report.Store.LatestRun.ID, report.Store.LatestRun.Status)
+	}
+	for _, item := range report.Store.BindingCases {
+		status := item.LatestStatus
+		if status == "" {
+			status = "not-run"
+		}
+		fmt.Printf("Binding Case: %s %s Status: %s Passed: %t\n", item.StepID, item.CaseID, status, item.HasPassed)
 	}
 }
 

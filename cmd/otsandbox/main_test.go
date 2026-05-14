@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
@@ -299,6 +300,162 @@ func TestWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T) {
 	out := runCLIFails(t, "workflow", "plan", "--profile", dir, "--workflow", "workflow.missing")
 	if !strings.Contains(out, "workflow not found") || !strings.Contains(out, "workflow.missing") {
 		t.Fatalf("missing workflow output = %q", out)
+	}
+}
+
+func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	profileDir := filepath.Join(dir, "profile")
+	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha"}],
+  "apiCases": [
+    {"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"},
+    {"id":"case.beta","displayName":"Case Beta","nodeId":"node.missing"}
+  ],
+  "requestTemplates": [{"id":"template.alpha","nodeId":"node.alpha","method":"POST","path":"/v1/items"}],
+  "caseDependencies": [{"id":"dependency.beta","caseId":"case.beta","fixtureId":"fixture.missing"}],
+  "workflowBindings": [
+    {"workflowId":"workflow.alpha","stepId":"step.one","nodeId":"node.alpha","caseId":"case.alpha","required":true},
+    {"workflowId":"workflow.alpha","stepId":"step.two","nodeId":"node.alpha","caseId":"case.beta","required":true}
+  ],
+  "fixtures": []
+}`)
+	storePath := filepath.Join(dir, "store.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	started := mustParseTime(t, "2026-01-02T03:04:05Z")
+	finished := started.Add(2 * time.Second)
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run.workflow.001",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.alpha",
+		Status:     store.StatusFailed,
+		StartedAt:  started,
+		FinishedAt: finished,
+		CreatedAt:  started,
+		UpdatedAt:  finished,
+	}); err != nil {
+		t.Fatalf("create first workflow run: %v", err)
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:         "run.workflow.001.case.alpha",
+		RunID:      "run.workflow.001",
+		CaseID:     "case.alpha",
+		Status:     store.StatusFailed,
+		StartedAt:  started,
+		FinishedAt: finished,
+		CreatedAt:  started,
+	}); err != nil {
+		t.Fatalf("record first case run: %v", err)
+	}
+	laterStarted := started.Add(10 * time.Second)
+	laterFinished := laterStarted.Add(3 * time.Second)
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run.workflow.002",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  laterStarted,
+		FinishedAt: laterFinished,
+		CreatedAt:  laterStarted,
+		UpdatedAt:  laterFinished,
+	}); err != nil {
+		t.Fatalf("create second workflow run: %v", err)
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:         "run.workflow.002.case.alpha",
+		RunID:      "run.workflow.002",
+		CaseID:     "case.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  laterStarted,
+		FinishedAt: laterFinished,
+		CreatedAt:  laterStarted,
+	}); err != nil {
+		t.Fatalf("record second case run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t, "workflow", "audit", "--profile", profileDir, "--workflow", "workflow.alpha", "--store-url", storePath, "--json")
+
+	var report struct {
+		OK         bool   `json:"ok"`
+		WorkflowID string `json:"workflowId"`
+		IssueCount int    `json:"issueCount"`
+		Issues     []struct {
+			Code      string `json:"code"`
+			SubjectID string `json:"subjectId"`
+		} `json:"issues"`
+		Store *struct {
+			LatestRun *struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"latestRun"`
+			BindingCases []struct {
+				StepID       string `json:"stepId"`
+				CaseID       string `json:"caseId"`
+				HasPassed    bool   `json:"hasPassed"`
+				LatestStatus string `json:"latestStatus"`
+				LatestRunID  string `json:"latestRunId"`
+			} `json:"bindingCases"`
+		} `json:"store"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode workflow audit json: %v\n%s", err, out)
+	}
+	if report.OK || report.WorkflowID != "workflow.alpha" || report.IssueCount != 2 {
+		t.Fatalf("workflow audit summary = %#v", report)
+	}
+	if len(report.Issues) != 2 || report.Issues[0].Code != "api-case-node-missing" || report.Issues[1].Code != "case-dependency-fixture-missing" {
+		t.Fatalf("workflow audit issues = %#v", report.Issues)
+	}
+	if report.Store == nil || report.Store.LatestRun == nil || report.Store.LatestRun.ID != "run.workflow.002" || report.Store.LatestRun.Status != store.StatusPassed {
+		t.Fatalf("latest workflow run = %#v", report.Store)
+	}
+	caseState := map[string]struct {
+		HasPassed    bool
+		LatestStatus string
+		LatestRunID  string
+	}{}
+	for _, item := range report.Store.BindingCases {
+		caseState[item.CaseID] = struct {
+			HasPassed    bool
+			LatestStatus string
+			LatestRunID  string
+		}{HasPassed: item.HasPassed, LatestStatus: item.LatestStatus, LatestRunID: item.LatestRunID}
+	}
+	if !caseState["case.alpha"].HasPassed || caseState["case.alpha"].LatestStatus != store.StatusPassed || caseState["case.alpha"].LatestRunID != "run.workflow.002" {
+		t.Fatalf("case.alpha workflow state = %#v", caseState["case.alpha"])
+	}
+	if caseState["case.beta"].HasPassed || caseState["case.beta"].LatestStatus != "" || caseState["case.beta"].LatestRunID != "" {
+		t.Fatalf("case.beta workflow state = %#v", caseState["case.beta"])
+	}
+}
+
+func TestWorkflowAuditCommandPrintsTextSummary(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflowProfile(t, dir)
+
+	out := runCLI(t, "workflow", "audit", "--profile", dir, "--workflow", "workflow.alpha")
+
+	for _, want := range []string{
+		"Workflow Audit: workflow.alpha",
+		"OK: true",
+		"Issues: 0",
+		"Bindings: 1",
+		"Binding: step.one Node: node.alpha Case: case.alpha Required: true",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workflow audit output missing %q: %q", want, out)
+		}
 	}
 }
 
@@ -764,6 +921,15 @@ func writeFile(t *testing.T, path string, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func mustParseTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatalf("parse time %q: %v", value, err)
+	}
+	return parsed
 }
 
 func createLegacyRuntimeDB(t *testing.T, path string) {
