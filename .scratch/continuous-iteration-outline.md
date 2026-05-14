@@ -14,66 +14,73 @@ generic, profile-driven, and local-first.
 - Generic API Case dry-run and HTTP runner.
 - API Case Store indexing.
 - Local quickstart example.
+- API Case format documentation.
+- Control Plane profile asset list API.
+- API Case Store summaries for requests, assertions, and response Evidence.
+- Store backend URL boundary with SQLite as the default.
+- Machine-readable Evidence import report.
 
 ## Open Task Queue
 
-### Task 1: API Case Format Documentation
+### Task 1: Workflow Plan Command
 
 Status: open
 
 Goal:
-- Document the generic API Case JSON format and Evidence output contract.
+- Load a profile workflow and print its bound steps without executing runtime
+  actions.
 
 Acceptance:
-- `docs/api-case-format.md` covers request fields, assertions, dry-run output,
-  live run output, and Store indexing.
-- The example case links to the document.
+- A generic profile fixture can plan a workflow by id.
+- Missing workflow ids fail with actionable errors.
+- Output includes step id, node id, case id, and required flag.
 - `go test ./...` and the source-domain scan pass.
 
-### Task 2: Control Plane Profile Lists
+### Task 2: Request Template Rendering
 
 Status: open
 
 Goal:
-- Show loaded services, workflows, interface nodes, and cases in generic pages
-  or API endpoints.
+- Render a request template with fixture data into a concrete API Case request
+  preview.
 
 Acceptance:
-- Empty profile renders without errors.
-- A larger profile renders counts and lists from data only.
-- Headless smoke verifies the endpoints.
+- Template and fixture files remain profile-owned assets.
+- Core rendering stays generic JSON/path/method oriented.
+- Render output can be inspected without sending HTTP.
 
-### Task 3: API Case Store Summary
+### Task 3: Evidence Query CLI
 
 Status: open
 
 Goal:
-- Store useful request, response, and assertion summaries for API Case runs.
+- List runs, case runs, and Evidence records from the local Store.
 
 Acceptance:
-- Store records include compact JSON summaries rather than empty objects.
-- Evidence files remain the source of detailed runtime records.
+- Query commands read from SQLite by default.
+- Text output is useful for humans and can be requested as JSON.
+- Missing records return not-found errors without panics.
 
-### Task 4: Optional Store Backend Boundary
+### Task 4: Baseline Gate CLI
 
 Status: open
 
 Goal:
-- Prepare the Store backend interface for an optional team/hosted backend
-  without changing the default local path.
+- Let users inspect and update baseline gate state for a profile subject.
 
 Acceptance:
-- SQLite remains default.
-- Unsupported backend URLs fail with actionable errors.
-- Documentation explains the backend boundary.
+- Commands use the generic Store interface.
+- Gate state is profile-id and subject-id based.
+- No domain-specific subject names appear in core.
 
-### Task 5: Evidence Import Report
+### Task 5: Release Hygiene
 
 Status: open
 
 Goal:
-- Emit a machine-readable report for runtime Evidence index imports.
+- Prepare the repository for first external review.
 
 Acceptance:
-- Import output can be requested as JSON.
-- Report includes counts, source path, target Store path, and profile id.
+- README current status matches implemented capabilities.
+- Runtime files remain ignored.
+- A fresh clone can run quickstart commands.
