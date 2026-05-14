@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"open-test-sandbox/internal/apicase"
@@ -267,6 +268,8 @@ func runCaseRun(ctx context.Context, args []string) error {
 	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "cases"), "Evidence output directory")
 	runID := flags.String("run-id", "", "Run id")
 	dryRun := flags.Bool("dry-run", false, "Render evidence without sending a request")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	profileID := flags.String("profile", "default", "Profile id for store records")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -280,10 +283,73 @@ func runCaseRun(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if *storeURL != "" {
+		if err := indexCaseRun(ctx, *storeURL, *profileID, result); err != nil {
+			return err
+		}
+	}
 	fmt.Printf("Case Run: %s\n", result.RunID)
 	fmt.Printf("Case: %s\n", result.CaseID)
 	fmt.Printf("Status: %s\n", result.Status)
 	fmt.Printf("Evidence: %s\n", result.EvidencePath)
+	return nil
+}
+
+func indexCaseRun(ctx context.Context, storeURL string, profileID string, result apicase.RunResult) error {
+	s, err := sqlite.Open(ctx, sqlite.ConfigFromURL(storeURL))
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	now := time.Now().UTC()
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:           result.RunID,
+		ProfileID:    profileID,
+		WorkflowID:   "",
+		Status:       result.Status,
+		EvidenceRoot: result.EvidencePath,
+		SummaryJSON:  "{}",
+		StartedAt:    now,
+		FinishedAt:   now,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}); err != nil {
+		return err
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   result.RunID + ".case",
+		RunID:                result.RunID,
+		CaseID:               result.CaseID,
+		Status:               result.Status,
+		RequestSummaryJSON:   "{}",
+		AssertionSummaryJSON: "{}",
+		StartedAt:            now,
+		FinishedAt:           now,
+		CreatedAt:            now,
+	}); err != nil {
+		return err
+	}
+	for _, name := range []string{"case.json", "request.json", "response.json", "assertions.json", "summary.json"} {
+		path := filepath.Join(result.EvidencePath, name)
+		if _, err := os.Stat(path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+			ID:        result.RunID + "." + name,
+			RunID:     result.RunID,
+			CaseRunID: result.RunID + ".case",
+			Kind:      strings.TrimSuffix(name, ".json"),
+			URI:       path,
+			MediaType: "application/json",
+			CreatedAt: now,
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

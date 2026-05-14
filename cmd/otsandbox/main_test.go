@@ -112,6 +112,49 @@ func TestCaseRunCommandExecutesHTTPCase(t *testing.T) {
 	}
 }
 
+func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"created"}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	storePath := filepath.Join(dir, "store.sqlite")
+	evidenceDir := filepath.Join(dir, "evidence")
+
+	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-003", "--evidence-dir", evidenceDir, "--store-url", storePath, "--profile", "sample")
+
+	s, err := sqlite.Open(context.Background(), sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	run, err := s.GetRun(context.Background(), "case-run-003")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.ProfileID != "sample" || run.Status != "passed" {
+		t.Fatalf("run = %#v", run)
+	}
+	caseRuns, err := s.ListAPICaseRuns(context.Background(), "case-run-003")
+	if err != nil {
+		t.Fatalf("list api case runs: %v", err)
+	}
+	if len(caseRuns) != 1 || caseRuns[0].CaseID != "case.alpha" {
+		t.Fatalf("case runs = %#v", caseRuns)
+	}
+	records, err := s.ListEvidence(context.Background(), "case-run-003")
+	if err != nil {
+		t.Fatalf("list evidence: %v", err)
+	}
+	if len(records) != 5 {
+		t.Fatalf("evidence records = %#v", records)
+	}
+}
+
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
