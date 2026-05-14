@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store/sqlite"
 )
 
@@ -28,6 +29,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "profile":
+		if err := runProfile(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printHelp()
@@ -42,6 +48,7 @@ Usage:
   otsandbox version
   otsandbox store status [--store-url PATH]
   otsandbox store migrate [--store-url PATH]
+  otsandbox profile inspect --profile PATH
   otsandbox help`)
 }
 
@@ -89,4 +96,40 @@ func printStoreStatus(status sqlite.MigrationStatusResult) {
 	fmt.Printf("Version: %d\n", status.CurrentVersion)
 	fmt.Printf("Target: %d\n", status.TargetVersion)
 	fmt.Printf("Pending: %d\n", pending)
+}
+
+func runProfile(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing profile command")
+	}
+
+	flags := flag.NewFlagSet("profile "+args[0], flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	switch args[0] {
+	case "inspect":
+		bundle, err := profile.Load(*profilePath)
+		if err != nil {
+			return err
+		}
+		printProfile(bundle)
+	default:
+		return fmt.Errorf("unknown profile command: %s", args[0])
+	}
+	return nil
+}
+
+func printProfile(bundle profile.Bundle) {
+	counts := bundle.Counts()
+	fmt.Printf("Profile: %s\n", bundle.ID)
+	fmt.Printf("Display Name: %s\n", bundle.DisplayName)
+	fmt.Printf("Services: %d\n", counts.Services)
+	fmt.Printf("Workflows: %d\n", counts.Workflows)
+	fmt.Printf("Interface Nodes: %d\n", counts.InterfaceNodes)
+	fmt.Printf("API Cases: %d\n", counts.APICases)
+	fmt.Printf("Fixtures: %d\n", counts.Fixtures)
 }

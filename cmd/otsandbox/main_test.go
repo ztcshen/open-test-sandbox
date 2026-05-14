@@ -26,6 +26,15 @@ func TestStoreMigrateAndStatusCommands(t *testing.T) {
 	}
 }
 
+func TestProfileInspectCommand(t *testing.T) {
+	out := runCLI(t, "profile", "inspect", "--profile", "../../profiles/empty")
+	for _, want := range []string{"Profile: empty", "Display Name: Empty Profile", "Workflows: 0", "API Cases: 0"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("profile inspect output missing %q: %q", want, out)
+		}
+	}
+}
+
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)

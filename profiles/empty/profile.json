@@ -1,0 +1,10 @@
+{
+  "id": "empty",
+  "displayName": "Empty Profile",
+  "description": "A neutral profile with no services, workflows, cases, or fixtures.",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [],
+  "fixtures": []
+}
