@@ -97,7 +97,7 @@ Usage:
   otsandbox baseline get --profile ID --subject ID [--store-url PATH]
   otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store-url PATH]
   otsandbox template render --profile PATH --template ID [--fixture ID]
-  otsandbox case run --case PATH [--base-url URL] [--dry-run] [--evidence-dir PATH]
+  otsandbox case run --case PATH [--base-url URL] [--dry-run] [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox serve [--profile PATH] [--host HOST] [--port PORT] [--store-url PATH]
   otsandbox help`)
 }
@@ -605,6 +605,7 @@ func runCase(ctx context.Context, args []string) error {
 func runCaseRun(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("case run", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	overrides := mapFlag{}
 	casePath := flags.String("case", "", "API case file path")
 	baseURL := flags.String("base-url", "", "Base URL for live request execution")
 	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "cases"), "Evidence output directory")
@@ -612,6 +613,7 @@ func runCaseRun(ctx context.Context, args []string) error {
 	dryRun := flags.Bool("dry-run", false, "Render evidence without sending a request")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	profileID := flags.String("profile", "default", "Profile id for store records")
+	flags.Var(&overrides, "override", "Request body override as key=value; repeat for multiple values")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -621,6 +623,7 @@ func runCaseRun(ctx context.Context, args []string) error {
 		EvidenceDir: *evidenceDir,
 		RunID:       *runID,
 		DryRun:      *dryRun,
+		Overrides:   overrides.Values(),
 	})
 	if err != nil {
 		return err
@@ -635,6 +638,40 @@ func runCaseRun(ctx context.Context, args []string) error {
 	fmt.Printf("Status: %s\n", result.Status)
 	fmt.Printf("Evidence: %s\n", result.EvidencePath)
 	return nil
+}
+
+type mapFlag map[string]any
+
+func (m *mapFlag) String() string {
+	if m == nil || len(*m) == 0 {
+		return ""
+	}
+	raw, _ := json.Marshal(*m)
+	return string(raw)
+}
+
+func (m *mapFlag) Set(value string) error {
+	key, parsed, ok := strings.Cut(value, "=")
+	key = strings.TrimSpace(key)
+	if !ok || key == "" {
+		return fmt.Errorf("override must use key=value")
+	}
+	if *m == nil {
+		*m = map[string]any{}
+	}
+	(*m)[key] = parsed
+	return nil
+}
+
+func (m mapFlag) Values() map[string]any {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for key, value := range m {
+		out[key] = value
+	}
+	return out
 }
 
 func indexCaseRun(ctx context.Context, storeURL string, profileID string, result apicase.RunResult) error {

@@ -249,6 +249,13 @@ func TestCaseRunDryRunCommandWritesEvidence(t *testing.T) {
 
 func TestCaseRunCommandExecutesHTTPCase(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request["id"] != "item-override" {
+			t.Fatalf("request overrides = %#v", request)
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{"status":"created"}`)
 	}))
@@ -259,7 +266,7 @@ func TestCaseRunCommandExecutesHTTPCase(t *testing.T) {
 	writeAPICaseFile(t, casePath)
 	evidenceDir := filepath.Join(dir, "evidence")
 
-	out := runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-002", "--evidence-dir", evidenceDir)
+	out := runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-002", "--evidence-dir", evidenceDir, "--override", "id=item-override")
 	if !strings.Contains(out, "Case Run: case-run-002") || !strings.Contains(out, "Status: passed") {
 		t.Fatalf("case run output = %q", out)
 	}
