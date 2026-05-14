@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
+	"open-test-sandbox/internal/apicase"
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/evidence"
 	"open-test-sandbox/internal/profile"
@@ -46,6 +48,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "case":
+		if err := runCase(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "serve":
 		if err := runServe(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -68,6 +75,7 @@ Usage:
   otsandbox profile inspect --profile PATH
   otsandbox profile import --from PATH [--store-url PATH]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
+  otsandbox case run --case PATH --dry-run [--evidence-dir PATH]
   otsandbox serve [--profile PATH] [--host HOST] [--port PORT]
   otsandbox help`)
 }
@@ -236,6 +244,44 @@ func runEvidenceImport(ctx context.Context, args []string) error {
 	fmt.Printf("Runs: %d\n", result.RunCount)
 	fmt.Printf("API Case Runs: %d\n", result.APICaseRunCount)
 	fmt.Printf("Evidence Records: %d\n", result.EvidenceCount)
+	return nil
+}
+
+func runCase(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing case command")
+	}
+	switch args[0] {
+	case "run":
+		return runCaseRun(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown case command: %s", args[0])
+	}
+}
+
+func runCaseRun(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case run", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	casePath := flags.String("case", "", "API case file path")
+	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "cases"), "Evidence output directory")
+	runID := flags.String("run-id", "", "Run id")
+	dryRun := flags.Bool("dry-run", false, "Render evidence without sending a request")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	result, err := apicase.Run(ctx, apicase.RunOptions{
+		CasePath:    *casePath,
+		EvidenceDir: *evidenceDir,
+		RunID:       *runID,
+		DryRun:      *dryRun,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Case Run: %s\n", result.RunID)
+	fmt.Printf("Case: %s\n", result.CaseID)
+	fmt.Printf("Status: %s\n", result.Status)
+	fmt.Printf("Evidence: %s\n", result.EvidencePath)
 	return nil
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,21 @@ func TestEvidenceImportCommandIndexesLegacyRuntime(t *testing.T) {
 	}
 }
 
+func TestCaseRunDryRunCommandWritesEvidence(t *testing.T) {
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	evidenceDir := filepath.Join(dir, "evidence")
+
+	out := runCLI(t, "case", "run", "--case", casePath, "--dry-run", "--run-id", "case-run-001", "--evidence-dir", evidenceDir)
+	if !strings.Contains(out, "Case Run: case-run-001") || !strings.Contains(out, "Status: passed") {
+		t.Fatalf("case run output = %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(evidenceDir, "case-run-001", "summary.json")); err != nil {
+		t.Fatalf("summary evidence missing: %v", err)
+	}
+}
+
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
@@ -80,6 +96,27 @@ func runCLI(t *testing.T, args ...string) string {
 		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func writeAPICaseFile(t *testing.T, path string) {
+	t.Helper()
+	raw := []byte(`{
+  "id": "case.alpha",
+  "title": "Create Item",
+  "request": {
+    "method": "POST",
+    "path": "/v1/items",
+    "headers": {"Content-Type": "application/json"},
+    "body": {"id": "item-001"}
+  },
+  "assertions": {
+    "expectedStatusCodes": [200],
+    "responseContains": ["created"]
+  }
+}`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write api case: %v", err)
+	}
 }
 
 func createLegacyRuntimeDB(t *testing.T, path string) {
