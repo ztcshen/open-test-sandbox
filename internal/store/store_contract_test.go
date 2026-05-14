@@ -99,6 +99,9 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if len(caseRuns) != 1 || caseRuns[0].CaseID != "case.health" || caseRuns[0].Status != store.StatusPassed {
 		t.Fatalf("case runs = %#v", caseRuns)
 	}
+	if caseRuns[0].RequestSummaryJSON != `{"method":"GET"}` || caseRuns[0].AssertionSummaryJSON != `{"passed":1}` {
+		t.Fatalf("case run summaries = %#v", caseRuns[0])
+	}
 
 	evidence, err := s.RecordEvidence(ctx, store.EvidenceRecord{
 		ID:        "evidence-001",
@@ -124,6 +127,9 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if len(evidenceRecords) != 1 || evidenceRecords[0].URI != "evidence/run-001/response.json" {
 		t.Fatalf("evidence records = %#v", evidenceRecords)
+	}
+	if evidenceRecords[0].Kind != "http-response" || evidenceRecords[0].MediaType != "application/json" || evidenceRecords[0].SHA256 != "abc123" || evidenceRecords[0].SizeBytes != 42 || evidenceRecords[0].Summary != "response body" {
+		t.Fatalf("evidence metadata = %#v", evidenceRecords[0])
 	}
 
 	gate, err := s.UpsertBaselineGate(ctx, store.BaselineGate{
