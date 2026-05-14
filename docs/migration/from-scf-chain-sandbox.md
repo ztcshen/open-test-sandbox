@@ -7,12 +7,8 @@ This document tracks how reusable code and data move from
 
 - Build a new neutral core project instead of renaming the old repository.
 - Treat the old repository as the SCF profile/source repository.
-- Treat migration as the default mode. New core code should first look for an
-  existing source behavior, contract, test, or data model in the old repository.
 - Move generic capabilities into core only after they are scrubbed of
   domain-specific assumptions.
-- If a capability is rewritten from scratch, record the reason in
-  `docs/migration/source-map.md`.
 - Export profile configuration into reviewable files.
 - Import runtime history and Evidence indexes through commands, not manual
   SQLite edits.
