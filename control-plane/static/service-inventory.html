@@ -9,46 +9,7 @@
     <link rel="stylesheet" href="/assets/react/controlPlane.css">
   </head>
   <body>
-    <main class="app service-inventory-page service-inventory-shell" data-template-id="TPL-SERVICE-INVENTORY-V1">
-      <div class="template-watermark" aria-label="模板编号">TPL-SERVICE-INVENTORY-V1</div>
-      <section class="topbar">
-        <div>
-          <h1>服务清单</h1>
-          <p id="serviceInventorySummary">loading</p>
-        </div>
-        <div id="serviceInventoryStats" class="service-inventory-stats" aria-label="服务清单摘要"></div>
-        <div class="actions">
-          <span id="serviceInventoryStatus" class="dashboard-status-pill" role="status">ready</span>
-          <a class="button-link" href="/">控制台</a>
-          <a class="button-link" href="/dashboard.html">环境大盘</a>
-          <a class="button-link" href="/environment-nodes.html">环境节点</a>
-          <button id="refreshServiceInventoryBtn" type="button" title="刷新">↻</button>
-        </div>
-      </section>
-
-      <section class="service-inventory-layout" aria-label="Catalog 服务清单">
-        <section class="service-inventory-main">
-          <div class="dashboard-section-head">
-            <div>
-              <h2>Catalog services</h2>
-              <p>Manifest 中声明的 app / platform / support / external 服务。</p>
-            </div>
-            <div id="serviceInventorySource" class="catalog-source-status">Catalog loading</div>
-          </div>
-          <div id="serviceInventoryGroups" class="service-inventory-groups"></div>
-        </section>
-
-        <aside class="service-inventory-side">
-          <div class="dashboard-section-head">
-            <div>
-              <h2>Topology edges</h2>
-              <p id="serviceInventoryTopologySummary">loading</p>
-            </div>
-          </div>
-          <div id="serviceInventoryTopology" class="service-inventory-topology"></div>
-        </aside>
-      </section>
-    </main>
-    <script src="/service-inventory.js"></script>
+    <div id="react-service-inventory-root"></div>
+    <script type="module" src="/assets/react/serviceInventory.js"></script>
   </body>
 </html>

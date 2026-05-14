@@ -9,24 +9,7 @@
     <link rel="stylesheet" href="/assets/react/controlPlane.css">
   </head>
   <body>
-    <main class="app environment-node-page environment-node-detail-shell" data-template-id="TPL-ENVIRONMENT-NODE-DETAIL-V1">
-      <div class="template-watermark" aria-label="模板编号">TPL-ENVIRONMENT-NODE-DETAIL-V1</div>
-      <section class="topbar">
-        <div>
-          <h1 id="environmentNodeTitle">环境节点详情</h1>
-          <p id="environmentNodeSummary">loading</p>
-        </div>
-        <div id="environmentNodeStats" class="dashboard-top-stats" aria-label="节点状态摘要"></div>
-        <div class="actions">
-          <span id="environmentNodeStatus" class="environment-status-pill" role="status">ready</span>
-          <a class="button-link" href="/environment-nodes.html">环境节点</a>
-          <a class="button-link" href="/dashboard.html">环境大盘</a>
-          <button id="refreshEnvironmentNodeBtn" type="button" title="刷新状态">↻</button>
-        </div>
-      </section>
-
-      <section id="environmentNodeDetail" class="environment-node-detail-grid" aria-label="环境节点详情"></section>
-    </main>
-    <script src="/environment-node.js"></script>
+    <div id="react-environment-node-root"></div>
+    <script type="module" src="/assets/react/environmentNode.js"></script>
   </body>
 </html>
