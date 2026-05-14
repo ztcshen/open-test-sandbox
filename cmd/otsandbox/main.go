@@ -5,8 +5,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"strconv"
 
+	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store/sqlite"
 )
@@ -34,6 +37,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "serve":
+		if err := runServe(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printHelp()
@@ -49,6 +57,7 @@ Usage:
   otsandbox store status [--store-url PATH]
   otsandbox store migrate [--store-url PATH]
   otsandbox profile inspect --profile PATH
+  otsandbox serve [--profile PATH] [--host HOST] [--port PORT]
   otsandbox help`)
 }
 
@@ -132,4 +141,23 @@ func printProfile(bundle profile.Bundle) {
 	fmt.Printf("Interface Nodes: %d\n", counts.InterfaceNodes)
 	fmt.Printf("API Cases: %d\n", counts.APICases)
 	fmt.Printf("Fixtures: %d\n", counts.Fixtures)
+}
+
+func runServe(args []string) error {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "profiles/empty", "Profile bundle path")
+	host := flags.String("host", "127.0.0.1", "HTTP host")
+	port := flags.Int("port", 18191, "HTTP port")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	bundle, err := profile.Load(*profilePath)
+	if err != nil {
+		return err
+	}
+	addr := *host + ":" + strconv.Itoa(*port)
+	fmt.Printf("Open Test Sandbox listening on http://%s\n", addr)
+	return http.ListenAndServe(addr, controlplane.New(bundle))
 }
