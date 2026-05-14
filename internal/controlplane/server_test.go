@@ -1201,6 +1201,13 @@ func TestServerRunsAPICaseAndIndexesStoreRecords(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/items" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode target request: %v", err)
+		}
+		if request["id"] != "item-override" {
+			t.Fatalf("target request overrides = %#v", request)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"created"}`))
 	}))
@@ -1228,7 +1235,7 @@ func TestServerRunsAPICaseAndIndexesStoreRecords(t *testing.T) {
 	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
 	defer server.Close()
 
-	body := `{"casePath":` + strconv.Quote(casePath) + `,"baseUrl":` + strconv.Quote(target.URL) + `,"evidenceDir":` + strconv.Quote(filepath.Join(dir, "evidence")) + `}`
+	body := `{"casePath":` + strconv.Quote(casePath) + `,"baseUrl":` + strconv.Quote(target.URL) + `,"evidenceDir":` + strconv.Quote(filepath.Join(dir, "evidence")) + `,"overrides":{"id":"item-override"}}`
 	resp, err := http.Post(server.URL+"/api/cases/run", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("post api case run: %v", err)

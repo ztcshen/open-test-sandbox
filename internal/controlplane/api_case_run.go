@@ -40,6 +40,7 @@ func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 		EvidenceDir: firstNonEmpty(valueString(payload["evidenceDir"]), filepath.Join(".runtime", "cases")),
 		RunID:       strings.TrimSpace(valueString(payload["runId"])),
 		DryRun:      boolValue(payload["dryRun"]),
+		Overrides:   mapValue(payload["overrides"]),
 	})
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
@@ -235,4 +236,12 @@ func intValue(value any) int {
 	default:
 		return 0
 	}
+}
+
+func mapValue(value any) map[string]any {
+	typed, _ := value.(map[string]any)
+	if typed == nil {
+		return map[string]any{}
+	}
+	return typed
 }

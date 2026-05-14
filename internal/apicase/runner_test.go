@@ -95,6 +95,34 @@ func TestRunExecutesHTTPCaseAndWritesResponseEvidence(t *testing.T) {
 	}
 }
 
+func TestRunAppliesRequestBodyOverrides(t *testing.T) {
+	casePath := filepath.Join(t.TempDir(), "case.json")
+	writeCaseFile(t, casePath)
+	evidenceDir := filepath.Join(t.TempDir(), "evidence")
+
+	result, err := apicase.Run(context.Background(), apicase.RunOptions{
+		CasePath:    casePath,
+		EvidenceDir: evidenceDir,
+		DryRun:      true,
+		RunID:       "run-override",
+		Overrides: map[string]any{
+			"id":       "item-override",
+			"priority": "high",
+		},
+	})
+	if err != nil {
+		t.Fatalf("run api case with overrides: %v", err)
+	}
+
+	var request struct {
+		Body map[string]any `json:"body"`
+	}
+	readJSONFile(t, filepath.Join(result.EvidencePath, "request.json"), &request)
+	if request.Body["id"] != "item-override" || request.Body["priority"] != "high" {
+		t.Fatalf("request body overrides = %#v", request.Body)
+	}
+}
+
 func writeCaseFile(t *testing.T, path string) {
 	t.Helper()
 	raw := []byte(`{

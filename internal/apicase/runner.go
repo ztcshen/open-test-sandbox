@@ -40,6 +40,7 @@ type RunOptions struct {
 	DryRun      bool
 	RunID       string
 	BaseURL     string
+	Overrides   map[string]any
 }
 
 type RunResult struct {
@@ -60,6 +61,7 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 	if err != nil {
 		return RunResult{}, err
 	}
+	applyOverrides(&item, options.Overrides)
 	runID := strings.TrimSpace(options.RunID)
 	if runID == "" {
 		runID = "case-run-" + time.Now().UTC().Format("20060102T150405")
@@ -110,6 +112,18 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 		return RunResult{}, err
 	}
 	return result, nil
+}
+
+func applyOverrides(item *Case, overrides map[string]any) {
+	if len(overrides) == 0 {
+		return
+	}
+	if item.Request.Body == nil {
+		item.Request.Body = map[string]any{}
+	}
+	for key, value := range overrides {
+		item.Request.Body[key] = value
+	}
 }
 
 func Load(path string) (Case, error) {
