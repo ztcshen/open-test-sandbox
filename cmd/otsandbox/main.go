@@ -25,6 +25,27 @@ import (
 
 const version = "0.1.0"
 
+type profileImportReport struct {
+	ProfileID    string               `json:"profileId"`
+	BundlePath   string               `json:"bundlePath"`
+	BundleDigest string               `json:"bundleDigest"`
+	Counts       profileImportCounts  `json:"counts"`
+	StorePath    string               `json:"storePath"`
+	ImportedAt   time.Time            `json:"importedAt"`
+	Audit        *profileaudit.Report `json:"audit,omitempty"`
+}
+
+type profileImportCounts struct {
+	Services         int `json:"services"`
+	Workflows        int `json:"workflows"`
+	InterfaceNodes   int `json:"interfaceNodes"`
+	APICases         int `json:"apiCases"`
+	RequestTemplates int `json:"requestTemplates"`
+	CaseDependencies int `json:"caseDependencies"`
+	WorkflowBindings int `json:"workflowBindings"`
+	Fixtures         int `json:"fixtures"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printHelp()
@@ -92,7 +113,7 @@ Usage:
   otsandbox store migrate [--store-url PATH]
   otsandbox profile inspect --profile PATH
   otsandbox profile audit --profile PATH [--store-url PATH] [--json]
-  otsandbox profile import --from PATH [--store-url PATH]
+  otsandbox profile import --from PATH [--store-url PATH] [--json] [--audit]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
   otsandbox workflow plan --profile PATH --workflow ID
@@ -191,6 +212,8 @@ func runProfileImport(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	from := flags.String("from", "", "Profile bundle path")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	auditOutput := flags.Bool("audit", false, "Run profile audit after import")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -206,6 +229,7 @@ func runProfileImport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	cfg = cfg.Resolve()
 	s, err := sqlite.Open(ctx, cfg)
 	if err != nil {
 		return err
@@ -216,18 +240,67 @@ func runProfileImport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	importedAt := time.Now().UTC()
 	if _, err := s.UpsertProfileIndex(ctx, store.ProfileIndex{
 		ProfileID:    bundle.ID,
 		BundlePath:   *from,
 		BundleDigest: digest,
 		SummaryJSON:  string(summary),
-		ImportedAt:   time.Now().UTC(),
+		ImportedAt:   importedAt,
 	}); err != nil {
 		return err
 	}
+	report := profileImportReport{
+		ProfileID:    bundle.ID,
+		BundlePath:   *from,
+		BundleDigest: digest,
+		Counts:       profileImportAssetCounts(bundle.Counts()),
+		StorePath:    cfg.Path,
+		ImportedAt:   importedAt,
+	}
+	if *auditOutput {
+		auditReport, err := profileaudit.Audit(ctx, profileaudit.Options{
+			Bundle:     bundle,
+			BundlePath: *from,
+			Store:      s,
+		})
+		if err != nil {
+			return err
+		}
+		report.Audit = &auditReport
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
 	fmt.Printf("Imported profile: %s\n", bundle.ID)
 	fmt.Printf("Digest: %s\n", digest)
+	if report.Audit != nil {
+		printProfileImportAudit(*report.Audit)
+	}
 	return nil
+}
+
+func profileImportAssetCounts(counts profile.Counts) profileImportCounts {
+	return profileImportCounts{
+		Services:         counts.Services,
+		Workflows:        counts.Workflows,
+		InterfaceNodes:   counts.InterfaceNodes,
+		APICases:         counts.APICases,
+		RequestTemplates: counts.RequestTemplates,
+		CaseDependencies: counts.CaseDependencies,
+		WorkflowBindings: counts.WorkflowBindings,
+		Fixtures:         counts.Fixtures,
+	}
+}
+
+func printProfileImportAudit(report profileaudit.Report) {
+	fmt.Printf("Audit OK: %t\n", report.OK)
+	fmt.Printf("Audit Issues: %d\n", report.IssueCount)
+	for _, item := range report.Issues {
+		fmt.Printf("- [%s] %s %s %s: %s\n", item.Severity, item.Code, item.SubjectType, item.SubjectID, item.Message)
+	}
 }
 
 func printProfile(bundle profile.Bundle) {

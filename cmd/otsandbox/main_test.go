@@ -73,6 +73,100 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
+func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+
+	out := runCLI(t, "profile", "import", "--from", "../../profiles/empty", "--store-url", dbPath, "--json")
+
+	var report struct {
+		ProfileID    string `json:"profileId"`
+		BundlePath   string `json:"bundlePath"`
+		BundleDigest string `json:"bundleDigest"`
+		Counts       struct {
+			Services         int `json:"services"`
+			Workflows        int `json:"workflows"`
+			InterfaceNodes   int `json:"interfaceNodes"`
+			APICases         int `json:"apiCases"`
+			RequestTemplates int `json:"requestTemplates"`
+			CaseDependencies int `json:"caseDependencies"`
+			WorkflowBindings int `json:"workflowBindings"`
+			Fixtures         int `json:"fixtures"`
+		} `json:"counts"`
+		StorePath  string `json:"storePath"`
+		ImportedAt string `json:"importedAt"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile import json: %v\n%s", err, out)
+	}
+	if report.ProfileID != "empty" || report.BundlePath != "../../profiles/empty" {
+		t.Fatalf("report profile/path = %#v", report)
+	}
+	if !strings.HasPrefix(report.BundleDigest, "sha256:") || report.StorePath != dbPath || report.ImportedAt == "" {
+		t.Fatalf("report digest/store/import time = %#v", report)
+	}
+	if report.Counts.Services != 0 || report.Counts.APICases != 0 || report.Counts.WorkflowBindings != 0 {
+		t.Fatalf("report counts = %#v", report.Counts)
+	}
+}
+
+func TestProfileImportCommandCanAuditImportedProfile(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := filepath.Join(dir, "profile")
+	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"}],
+  "requestTemplates": [],
+  "caseDependencies": [{"id":"dependency.alpha","caseId":"case.alpha","fixtureId":"fixture.missing"}],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	storePath := filepath.Join(dir, "store.sqlite")
+
+	out := runCLI(t, "profile", "import", "--from", profileDir, "--store-url", storePath, "--json", "--audit")
+
+	var report struct {
+		ProfileID string `json:"profileId"`
+		Audit     *struct {
+			OK         bool `json:"ok"`
+			IssueCount int  `json:"issueCount"`
+			Issues     []struct {
+				Code      string `json:"code"`
+				SubjectID string `json:"subjectId"`
+			} `json:"issues"`
+			Store *struct {
+				ProfileIndexed bool `json:"profileIndexed"`
+				DigestMatches  bool `json:"digestMatches"`
+			} `json:"store,omitempty"`
+		} `json:"audit,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode audited profile import json: %v\n%s", err, out)
+	}
+	if report.ProfileID != "sample" || report.Audit == nil {
+		t.Fatalf("report missing audit = %#v", report)
+	}
+	if report.Audit.OK || report.Audit.IssueCount != 2 || len(report.Audit.Issues) != 2 {
+		t.Fatalf("audit summary = %#v", report.Audit)
+	}
+	if report.Audit.Issues[0].Code != "api-case-node-missing" || report.Audit.Issues[1].Code != "case-dependency-fixture-missing" {
+		t.Fatalf("audit issues = %#v", report.Audit.Issues)
+	}
+	if report.Audit.Store == nil || !report.Audit.Store.ProfileIndexed || !report.Audit.Store.DigestMatches {
+		t.Fatalf("audit store = %#v", report.Audit.Store)
+	}
+
+	text := runCLI(t, "profile", "import", "--from", profileDir, "--store-url", storePath, "--audit")
+	for _, want := range []string{"Imported profile: sample", "Audit OK: false", "Audit Issues: 2"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("audited text import output missing %q: %q", want, text)
+		}
+	}
+}
+
 func TestProfileAuditCommandEmitsJSONWithStoreState(t *testing.T) {
 	dir := t.TempDir()
 	profileDir := filepath.Join(dir, "profile")
