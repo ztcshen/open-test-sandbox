@@ -485,7 +485,7 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/assets/react/workflowRun.js", want: "/api/runs"},
 		{path: "/assets/react/workflowStep.js", want: "/api/dashboard"},
 		{path: "/assets/react/workflowBlueprintDemo.css", want: "blueprint-demo-shell"},
-		{path: "/assets/react/workflowBlueprintDemo.js", want: "workflow-blueprint/v1"},
+		{path: "/assets/react/workflowBlueprintDemo.js", want: "workflow-blueprint-demo/v1"},
 	} {
 		resp, err := http.Get(server.URL + item.path)
 		if err != nil {

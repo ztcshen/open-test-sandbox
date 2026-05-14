@@ -176,6 +176,8 @@ async function main() {
         { path: "/dashboard.html", root: "#react-dashboard-root" },
         { path: "/workflows.html", root: "#react-workflows-root" },
         { path: "/workflow-detail.html?id=workflow.alpha", root: "#react-workflow-detail-root" },
+        { path: "/workflow-blueprint-demo.html?workflow=workflow.alpha", root: "#react-workflow-blueprint-demo-root" },
+        { path: "/workflow-blueprint-new.html", root: "#react-workflow-blueprint-demo-root" },
         { path: "/api-cases.html", root: "#react-api-cases-root" },
         { path: "/interface-nodes.html", root: "#react-interface-nodes-root" },
         { path: "/agent-test.html", root: "#react-agent-test-root" },
