@@ -140,6 +140,9 @@ func printProfile(bundle profile.Bundle) {
 	fmt.Printf("Workflows: %d\n", counts.Workflows)
 	fmt.Printf("Interface Nodes: %d\n", counts.InterfaceNodes)
 	fmt.Printf("API Cases: %d\n", counts.APICases)
+	fmt.Printf("Request Templates: %d\n", counts.RequestTemplates)
+	fmt.Printf("Case Dependencies: %d\n", counts.CaseDependencies)
+	fmt.Printf("Workflow Bindings: %d\n", counts.WorkflowBindings)
 	fmt.Printf("Fixtures: %d\n", counts.Fixtures)
 }
 

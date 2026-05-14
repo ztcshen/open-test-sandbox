@@ -6,5 +6,8 @@
   "workflows": [],
   "interfaceNodes": [],
   "apiCases": [],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
   "fixtures": []
 }

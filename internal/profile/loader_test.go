@@ -50,6 +50,9 @@ func TestLoadProfileReadsSplitAssetDirectories(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "workflows", "workflow.json"), `{"id":"workflow.one","displayName":"Workflow One"}`)
 	writeFile(t, filepath.Join(dir, "interface-nodes", "node.json"), `{"id":"node.one","displayName":"Node One","serviceId":"service.one"}`)
 	writeFile(t, filepath.Join(dir, "cases", "case.json"), `{"id":"case.one","displayName":"Case One","nodeId":"node.one"}`)
+	writeFile(t, filepath.Join(dir, "request-templates", "template.json"), `{"id":"template.one","displayName":"Template One","nodeId":"node.one","method":"GET","path":"/health","templateJson":"{}"}`)
+	writeFile(t, filepath.Join(dir, "case-dependencies", "dependency.json"), `{"id":"dependency.one","caseId":"case.one","fixtureId":"fixture.one","mappingsJson":"[]"}`)
+	writeFile(t, filepath.Join(dir, "workflow-bindings", "binding.json"), `{"workflowId":"workflow.one","stepId":"step.one","nodeId":"node.one","caseId":"case.one","required":true}`)
 	writeFile(t, filepath.Join(dir, "fixtures", "fixture.json"), `{"id":"fixture.one","displayName":"Fixture One","kind":"json"}`)
 
 	bundle, err := profile.Load(dir)
@@ -58,10 +61,10 @@ func TestLoadProfileReadsSplitAssetDirectories(t *testing.T) {
 	}
 
 	counts := bundle.Counts()
-	if counts.Services != 1 || counts.Workflows != 1 || counts.InterfaceNodes != 1 || counts.APICases != 1 || counts.Fixtures != 1 {
+	if counts.Services != 1 || counts.Workflows != 1 || counts.InterfaceNodes != 1 || counts.APICases != 1 || counts.RequestTemplates != 1 || counts.CaseDependencies != 1 || counts.WorkflowBindings != 1 || counts.Fixtures != 1 {
 		t.Fatalf("split profile counts = %#v", counts)
 	}
-	if bundle.APICases[0].ID != "case.one" || bundle.InterfaceNodes[0].ServiceID != "service.one" {
+	if bundle.APICases[0].ID != "case.one" || bundle.RequestTemplates[0].NodeID != "node.one" || !bundle.WorkflowBindings[0].Required {
 		t.Fatalf("split profile assets = %#v", bundle)
 	}
 }

@@ -87,6 +87,24 @@ func loadAssets(baseDir string, bundle *Bundle) error {
 	}
 	bundle.APICases = append(bundle.APICases, cases...)
 
+	requestTemplates, err := loadAssetDir[RequestTemplate](baseDir, "request-templates")
+	if err != nil {
+		return err
+	}
+	bundle.RequestTemplates = append(bundle.RequestTemplates, requestTemplates...)
+
+	caseDependencies, err := loadAssetDir[CaseDependency](baseDir, "case-dependencies")
+	if err != nil {
+		return err
+	}
+	bundle.CaseDependencies = append(bundle.CaseDependencies, caseDependencies...)
+
+	workflowBindings, err := loadAssetDir[WorkflowBinding](baseDir, "workflow-bindings")
+	if err != nil {
+		return err
+	}
+	bundle.WorkflowBindings = append(bundle.WorkflowBindings, workflowBindings...)
+
 	fixtures, err := loadAssetDir[Fixture](baseDir, "fixtures")
 	if err != nil {
 		return err
