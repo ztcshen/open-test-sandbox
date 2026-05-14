@@ -117,6 +117,9 @@ generic, profile-driven, and local-first.
 - Workflow run step evidence slice: `workflow-run.html` now renders stored
   step summaries with catalog service links, step detail links, topology
   filters, and body-health diagnostics.
+- Workflow detail interface coverage slice: `workflow-detail.html` now consumes
+  interface-node coverage APIs and renders mapped/unmapped step rows plus a
+  coverage-gap JSON entrypoint.
 
 ## Open Task Queue
 

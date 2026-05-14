@@ -13,6 +13,67 @@ function runStatusTone(status) {
   return "idle";
 }
 
+function coverageNumber(summary, key) {
+  const value = summary?.[key];
+  return Number.isFinite(value) ? value : 0;
+}
+
+function CoverageCard({ title, value, detail }) {
+  return (
+    <article className="workflow-coverage-card">
+      <strong>{title}</strong>
+      <code>{value}</code>
+      <span>{detail}</span>
+    </article>
+  );
+}
+
+function InterfaceCoverageRow({ row }) {
+  return (
+    <article className={`workflow-interface-coverage-row ${row.mapped ? "mapped" : "unmapped"}`}>
+      <div className="workflow-interface-coverage-title">
+        <strong>{row.stepId || "-"}</strong>
+        <code>{row.caseDisplayName || row.caseId || "no case"}</code>
+      </div>
+      <div className="workflow-interface-coverage-state">
+        <span className={`status-pill ${row.mapped ? "passed" : "failed"}`}>{row.mapped ? "mapped" : "gap"}</span>
+        <code>{row.admissionStatus || "pending"}</code>
+      </div>
+      <div className="workflow-interface-coverage-target">
+        {row.href ? <a className="button-link" href={row.href}>{row.nodeDisplayName || row.nodeId}</a> : <span>未映射接口节点</span>}
+      </div>
+    </article>
+  );
+}
+
+function WorkflowCoverage({ workflow, coverage }) {
+  const summary = coverage?.summary || {};
+  const rows = coverage?.rows || [];
+  return (
+    <section className="workflow-coverage-panel">
+      <div className="section-head">
+        <div>
+          <h2>接口覆盖</h2>
+          <p>{workflow ? `${workflow.id} · ${coverageNumber(summary, "mappedSteps")}/${coverageNumber(summary, "totalSteps")} mapped` : "loading"}</p>
+        </div>
+        {workflow?.id ? <a className="button-link" href={`/api/interface-node/coverage-gaps?workflow=${encodeURIComponent(workflow.id)}`}>覆盖缺口 JSON</a> : null}
+      </div>
+      <div className="workflow-coverage-grid">
+        <CoverageCard title="total steps" value={coverageNumber(summary, "totalSteps")} detail="workflow bindings" />
+        <CoverageCard title="mapped" value={coverageNumber(summary, "mappedSteps")} detail="interface nodes" />
+        <CoverageCard title="unmapped" value={coverageNumber(summary, "unmappedSteps")} detail="coverage gaps" />
+        <CoverageCard title="pending" value={coverageNumber(summary, "pendingNodes")} detail="admission state" />
+      </div>
+      <section className="workflow-interface-coverage">
+        <h3>Step interface map</h3>
+        <div className="workflow-interface-coverage-list">
+          {rows.length ? rows.map((row) => <InterfaceCoverageRow row={row} key={`${row.workflowId}-${row.stepId}`} />) : <p className="dashboard-empty">当前 Workflow 没有接口覆盖记录。</p>}
+        </div>
+      </section>
+    </section>
+  );
+}
+
 function WorkflowGraph({ workflow, services }) {
   const steps = workflow?.steps || [];
   return (
@@ -65,6 +126,7 @@ function StepList({ workflow, services }) {
 
 function WorkflowDetailApp() {
   const [catalog, setCatalog] = useState(null);
+  const [coverage, setCoverage] = useState(null);
   const [message, setMessage] = useState("loading");
   const [workflowID, setWorkflowID] = useState(workflowIdFromURL());
 
@@ -89,6 +151,24 @@ function WorkflowDetailApp() {
   const warnings = catalog?.warnings || [];
   const latestRun = workflow?.latestRun || null;
   const latestStatus = latestRun?.status || (workflow?.runCount ? "unknown" : "no run");
+
+  useEffect(() => {
+    if (!workflow?.id) {
+      setCoverage(null);
+      return;
+    }
+    let cancelled = false;
+    fetchJSON(`/api/interface-node/coverage?workflow=${encodeURIComponent(workflow.id)}`)
+      .then((payload) => {
+        if (!cancelled) setCoverage(payload);
+      })
+      .catch((error) => {
+        if (!cancelled) setCoverage({ ok: false, error: error.message, rows: [], summary: {} });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workflow?.id]);
 
   return (
     <main className="app workflow-detail-page workflow-detail-compact-density" data-template-id="TPL-WORKFLOW-LONG-CHAIN-V1">
@@ -139,6 +219,7 @@ function WorkflowDetailApp() {
         </aside>
         <section className="workflow-detail-main">
           <WorkflowGraph workflow={workflow} services={services} />
+          <WorkflowCoverage workflow={workflow} coverage={coverage} />
           <div className="section-head">
             <div>
               <h2>步骤</h2>
