@@ -15,3 +15,4 @@ should be called out in this file and in the relevant docs.
   and synchronous failed case Evidence lookup.
 - Added source-domain guardrails to keep core code generic.
 - Added open-source readiness docs, CI gate, and release checklist.
+- Added a backend capabilities overview and richer documentation entry points.

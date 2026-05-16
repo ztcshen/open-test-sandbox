@@ -277,6 +277,12 @@
       gap: 14px;
     }
 
+    .grid-four {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
     .card,
     .skill-card,
     .goal-card {
@@ -411,6 +417,32 @@
       gap: 12px;
     }
 
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .flow-node {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      padding: 14px;
+      min-height: 112px;
+    }
+
+    .flow-node strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .flow-node p {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
     .rule {
       border: 1px solid var(--line);
       border-radius: 14px;
@@ -460,11 +492,16 @@
         display: none;
       }
 
-      .grid {
+      .grid,
+      .grid-four {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
       .skills {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .flow {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
@@ -480,7 +517,9 @@
 
       .pipeline,
       .grid,
+      .grid-four,
       .skills,
+      .flow,
       .goal-card {
         grid-template-columns: 1fr;
       }
@@ -498,44 +537,47 @@
     <header class="hero">
       <div class="hero-main panel">
         <div class="eyebrow">Open Test Sandbox Core</div>
-        <h1>核心能力、技能说明与迭代目标</h1>
-        <p class="lead">这是一份放在核心仓库里的可视化说明：帮助维护者、测试 agent 和接入团队快速理解后端能力边界、协作技能、质量守卫和下一阶段目标。核心保持通用、外部配置驱动、本地优先；具体团队内容只应进入外部配置包或本地 Store。</p>
+        <h1>核心能力、技能说明与迭代目标<br>Core Capabilities, Skills, and Goals</h1>
+        <p class="lead">这是一份放在核心仓库里的可视化说明：帮助维护者、测试 agent 和接入团队快速理解后端能力边界、协作技能、质量守卫和下一阶段目标。核心保持通用、外部配置驱动、本地优先；具体团队内容只应进入外部配置包或本地 Store。<br><br>This visual overview helps maintainers, testing agents, and adopting teams understand backend boundaries, collaboration skills, quality gates, and iteration goals. The core stays generic, externally configured, and local-first.</p>
       </div>
       <aside class="hero-side panel">
         <div class="metric"><strong>Core</strong><span>CLI + Control plane + Store + Runner + Evidence + Reports</span></div>
-        <div class="metric"><strong>Local-first</strong><span>默认 SQLite，本地报告和证据可复现。</span></div>
-        <div class="metric"><strong>Profile-driven</strong><span>核心不携带团队场景，配置从外部发布。</span></div>
+        <div class="metric"><strong>Local-first</strong><span>默认 SQLite，本地报告和证据可复现。SQLite by default, reproducible local reports and Evidence.</span></div>
+        <div class="metric"><strong>Profile-driven</strong><span>核心不携带团队场景，配置从外部发布。Team scenarios live in external profile bundles.</span></div>
       </aside>
     </header>
 
     <nav class="nav" aria-label="Page navigation">
-      <a href="#path">主路径</a>
-      <a href="#core">核心能力</a>
-      <a href="#skills">技能说明</a>
-      <a href="#commands">命令面</a>
-      <a href="#rules">核心规则</a>
-      <a href="#goals">迭代目标</a>
+      <a href="#path">主路径 / Flow</a>
+      <a href="#core">核心能力 / Core</a>
+      <a href="#backend">后端能力 / Backend</a>
+      <a href="#api">API 面 / APIs</a>
+      <a href="#data-flow">数据流 / Data</a>
+      <a href="#skills">技能 / Skills</a>
+      <a href="#commands">命令 / CLI</a>
+      <a href="#rules">规则 / Rules</a>
+      <a href="#goals">目标 / Goals</a>
     </nav>
 
     <section id="path">
       <div class="section-head">
-        <h2>一条标准 agent 路径</h2>
-        <p class="note">报告生成不应隐藏目标解析。agent 先发现候选，再用精确 ID 执行报告；失败用例进入报告，不阻断报告产出。</p>
+        <h2>一条标准 agent 路径 / Standard Agent Flow</h2>
+        <p class="note">报告生成不应隐藏目标解析。agent 先发现候选，再用精确 ID 执行报告；失败用例进入报告，不阻断报告产出。Agents discover targets first, then run reports with exact IDs. Failed cases are report content, not report-generation failures.</p>
       </div>
       <div class="pipeline">
-        <article class="step"><span class="tag">Discover</span><h3>发现可测目标</h3><p>用 <code>discover</code> 命令从 Store/catalog 中搜索接口节点或工作流候选。</p></article>
-        <article class="step"><span class="tag">Select</span><h3>选择精确 ID</h3><p>从 JSON 结果中读取 <code>id</code>，后续 report 命令只接受 ID。</p></article>
-        <article class="step"><span class="tag">Execute</span><h3>执行用例集合</h3><p>接口节点执行全部关联用例；工作流按绑定步骤执行。</p></article>
-        <article class="step"><span class="tag">Record</span><h3>写入本地索引</h3><p>运行、用例结果、证据摘要和后处理任务进入 Store。</p></article>
-        <article class="step"><span class="tag">Render</span><h3>生成临时报告</h3><p>HTML 给人看，JSON 给机器读；失败原因被保留在报告内。</p></article>
-        <article class="step"><span class="tag">Review</span><h3>审阅与回归</h3><p>报告、证据、日志和拓扑共同支撑后续分析。</p></article>
+        <article class="step"><span class="tag">Discover</span><h3>发现可测目标<br>Find targets</h3><p>用 <code>discover</code> 从 Store/catalog 搜索接口节点或工作流。Search interface nodes or workflows from Store/catalog.</p></article>
+        <article class="step"><span class="tag">Select</span><h3>选择精确 ID<br>Select ID</h3><p>从 JSON 结果中读取 <code>id</code>，后续 report 命令只接受 ID。Use returned IDs for report commands.</p></article>
+        <article class="step"><span class="tag">Execute</span><h3>执行用例集合<br>Run tests</h3><p>接口节点执行全部关联用例；工作流按绑定步骤执行。Run all attached cases or ordered workflow steps.</p></article>
+        <article class="step"><span class="tag">Record</span><h3>写入本地索引<br>Record facts</h3><p>运行、用例结果、证据摘要和后处理任务进入 Store。Persist run facts, Evidence indexes, and post-process tasks.</p></article>
+        <article class="step"><span class="tag">Render</span><h3>生成临时报告<br>Render report</h3><p>HTML 给人看，JSON 给机器读；失败原因保留在报告内。HTML for people, JSON for machines.</p></article>
+        <article class="step"><span class="tag">Review</span><h3>审阅与回归<br>Review</h3><p>报告、证据、日志和拓扑共同支撑后续分析。Reports, Evidence, logs, and topology support review.</p></article>
       </div>
     </section>
 
     <section id="core">
       <div class="section-head">
-        <h2>核心能力分层</h2>
-        <p class="note">当前核心后端已经具备完整的“配置发布 -> 发现目标 -> 执行 -> 记录 -> 报告”闭环。</p>
+        <h2>核心能力分层 / Core Capability Layers</h2>
+        <p class="note">当前核心后端已经具备完整的“配置发布 -> 发现目标 -> 执行 -> 记录 -> 报告”闭环。The backend already supports the full loop from config publishing to discovery, execution, recording, and reports.</p>
       </div>
       <div class="grid">
         <article class="card"><div class="kicker">Configuration</div><h3>外部配置包生命周期</h3><p>创建、安装、打包、审计、校验、发布。配置文件保留为可审阅源资产，Store 作为索引和运行态视图。</p><div class="cmds"><code>profile init</code><code>profile install</code><code>profile pack</code><code>config publish</code></div></article>
@@ -547,24 +589,78 @@
       </div>
     </section>
 
+    <section id="backend">
+      <div class="section-head">
+        <h2>后端能力总览 / Backend Capability Overview</h2>
+        <p class="note">当前后端不是单一 runner，而是一套本地控制平面：配置进入 Store，执行产生 Evidence，报告和页面再从同一份事实读取。The backend is a local control plane: profiles publish into Store, execution writes Evidence, and reports/pages read the same facts.</p>
+      </div>
+      <div class="grid-four">
+        <article class="card"><div class="kicker">Store</div><h3>本地事实库 / Local fact store</h3><p>保存 schema、配置索引、运行记录、用例运行、证据索引、基线、耗时、日志、拓扑和后处理任务。Stores schema, catalogs, runs, Evidence indexes, logs, topology, timing, and tasks.</p><div class="cmds"><code>SQLite</code><code>Store interface</code><code>schema upgrade</code></div></article>
+        <article class="card"><div class="kicker">Profile</div><h3>配置包生命周期 / Profile lifecycle</h3><p>外部配置包可以创建、安装、打包、审计、验证、发布；运行产物和本地数据库会被过滤。Creates, installs, packs, audits, verifies, and publishes external bundles.</p><div class="cmds"><code>profile verify</code><code>/api/profile/verify</code></div></article>
+        <article class="card"><div class="kicker">Read-model</div><h3>目录视图 / Catalog views</h3><p>把服务、工作流、接口节点、用例、模板、夹具、依赖和绑定转成页面与 agent 都能读取的视图。Builds UI and agent-readable views from profile assets.</p><div class="cmds"><code>/api/catalog</code><code>/api/dashboard</code></div></article>
+        <article class="card"><div class="kicker">Discovery</div><h3>可测目标发现 / Target discovery</h3><p>agent 先搜索目标，再用返回的精确 ID 生成报告，避免在提示词或代码里写死目标。Agents search first and pass exact IDs to report commands.</p><div class="cmds"><code>discover</code><code>--filter</code><code>--json</code></div></article>
+        <article class="card"><div class="kicker">Execution</div><h3>运行能力 / Execution</h3><p>支持单用例、接口节点全量、工作流步骤、同步接口和异步 batch。失败用例会写进报告。Runs cases, interface batches, and workflow steps; failed cases stay in reports.</p><div class="cmds"><code>case run</code><code>case report</code><code>workflow report</code></div></article>
+        <article class="card"><div class="kicker">Reports</div><h3>报告能力 / Reports</h3><p>生成机器可读 JSON 和临时 HTML；每个用例保留 run id、case run id、耗时、状态和详情入口。Produces JSON and HTML with status, timing, and detail links.</p><div class="cmds"><code>report.html</code><code>detailUrl</code></div></article>
+        <article class="card"><div class="kicker">Evidence</div><h3>证据查询 / Evidence lookup</h3><p>按运行、步骤或 case run id 查询请求、响应、断言、前置数据、拓扑和持久化日志。Reads request, response, assertions, context, topology, and logs.</p><div class="cmds"><code>/api/case-run/evidence</code><code>/api/case/evidence</code></div></article>
+        <article class="card"><div class="kicker">Observability</div><h3>观测导入 / Observability</h3><p>拓扑、回放证据、运行日志和后处理任务可以落库，避免页面每次临时重算。Persists topology, replay Evidence, runtime logs, and post-process tasks.</p><div class="cmds"><code>/api/trace-topology/collect</code><code>post-process</code></div></article>
+      </div>
+    </section>
+
+    <section id="api">
+      <div class="section-head">
+        <h2>Control Plane API 面 / Control Plane APIs</h2>
+        <p class="note">API 按能力分组。页面、CLI 适配器和本地 agent 可以共用这些入口，但配置源仍然是外部配置包。APIs are grouped by capability and shared by the workbench, adapters, and local agents.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>分组</th><th>端点</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>Profile</td><td><code>GET /api/profile</code><br><code>POST /api/profile/install</code><br><code>POST /api/profile/import</code><br><code>POST /api/profile/verify</code></td><td>读取当前配置、安装外部配置包、发布 read-model、执行验收检查。</td></tr>
+            <tr><td>Catalog</td><td><code>GET /api/catalog</code><br><code>GET /api/dashboard</code><br><code>GET /api/profile/catalog-index</code></td><td>提供服务、工作流、接口节点、用例、模板、夹具和绑定的页面视图。</td></tr>
+            <tr><td>Interface</td><td><code>GET /api/interface-nodes</code><br><code>GET /api/interface-node</code><br><code>GET /api/interface-node/coverage</code><br><code>GET /api/interface-node/coverage-gaps</code></td><td>接口节点目录、节点详情、工作流覆盖和缺口视图。</td></tr>
+            <tr><td>Runs</td><td><code>GET /api/runs</code><br><code>POST /api/workflow-runs</code><br><code>GET /api/workflow-runs/{id}</code><br><code>GET /api/workflow-runs/step</code></td><td>运行索引、工作流快照、步骤详情和最新步骤结果。</td></tr>
+            <tr><td>Cases</td><td><code>GET /api/cases/capabilities</code><br><code>POST /api/cases/run</code><br><code>POST /api/cases/batch-runs</code><br><code>GET /api/cases/batch-runs/{id}</code></td><td>可运行用例矩阵、单用例执行、异步批量执行和报告查询。</td></tr>
+            <tr><td>Evidence</td><td><code>GET /api/case/runs</code><br><code>GET /api/case/evidence</code><br><code>GET /api/case-run/evidence</code><br><code>GET /api/case/timing</code></td><td>用例运行列表、详情证据、耗时与预算视图。</td></tr>
+            <tr><td>Observability</td><td><code>POST /api/trace-topology/collect</code><br><code>GET /api/replay/evidence</code></td><td>拓扑和回放证据入口，供页面和报告复用。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="data-flow">
+      <div class="section-head">
+        <h2>后端数据流 / Backend Data Flow</h2>
+        <p class="note">这条链路解释为什么核心可以保持通用：团队差异进入配置包，运行事实进入 Store 和 Evidence，核心只负责通用编排。Team-specific differences enter profile bundles; runtime facts enter Store and Evidence; the core stays generic.</p>
+      </div>
+      <div class="flow">
+        <article class="flow-node"><strong>1. 外部配置<br>External profile</strong><p>配置包保留在核心仓库外，作为可审阅源资产。Profiles stay outside core as reviewable source.</p></article>
+        <article class="flow-node"><strong>2. 审计发布<br>Audit and publish</strong><p>profile audit/verify 检查引用完整性，再发布 read-model。Audit references, then publish read-models.</p></article>
+        <article class="flow-node"><strong>3. Store 索引<br>Store index</strong><p>SQLite 保存目录、运行事实、基线、耗时和后处理任务。SQLite stores catalogs, run facts, baselines, timing, and tasks.</p></article>
+        <article class="flow-node"><strong>4. 目标发现<br>Discover</strong><p>agent 或页面从 catalog 搜索接口节点和工作流。Agents/pages search interface nodes and workflows.</p></article>
+        <article class="flow-node"><strong>5. 执行记录<br>Execute</strong><p>runner 写请求、响应、断言、摘要和 case run id。The runner records request, response, assertions, summary, and IDs.</p></article>
+        <article class="flow-node"><strong>6. 后处理<br>Post-process</strong><p>拓扑、日志和重处理任务异步补齐，并记录状态和耗时。Topology/log work can complete asynchronously with timing records.</p></article>
+        <article class="flow-node"><strong>7. 报告审阅<br>Review</strong><p>HTML 给人看，JSON 给机器读，失败项保留详情入口。HTML is human-readable; JSON is machine-readable.</p></article>
+      </div>
+    </section>
+
     <section id="skills">
       <div class="section-head">
-        <h2>技能说明</h2>
-        <p class="note">这里的“技能”指项目内推荐的 agent 工作方式，不是把团队场景写死在核心里。</p>
+        <h2>技能说明 / Agent Skills</h2>
+        <p class="note">这里的“技能”指项目内推荐的 agent 工作方式，不是把团队场景写死在核心里。Skills here mean recommended agent workflows, not hardcoded team scenarios.</p>
       </div>
       <div class="skills">
-        <article class="skill-card"><span class="number">1</span><h3>发现技能</h3><p>读取项目简介和命令帮助，调用 <code>discover</code> 搜索候选目标，再从结果中选择精确 ID。</p></article>
-        <article class="skill-card"><span class="number">2</span><h3>报告技能</h3><p>使用精确 ID 生成 HTML/JSON 报告。报告是产物，用例失败是内容，不是 CLI 崩溃。</p></article>
-        <article class="skill-card"><span class="number">3</span><h3>配置技能</h3><p>维护外部配置包，先审计和验证，再发布到 Store/read-model。核心不直接承载团队场景。</p></article>
-        <article class="skill-card"><span class="number">4</span><h3>证据技能</h3><p>从 Store 和 evidence 文件定位请求、响应、运行摘要、日志与拓扑，形成可复查结论。</p></article>
-        <article class="skill-card"><span class="number">5</span><h3>守卫技能</h3><p>每个后端切片都要有测试和守卫，避免通用核心被团队词汇或临时运行产物污染。</p></article>
+        <article class="skill-card"><span class="number">1</span><h3>发现技能<br>Discovery</h3><p>读取项目简介和命令帮助，调用 <code>discover</code> 搜索候选目标，再从结果中选择精确 ID。Read docs/help, discover targets, then select exact IDs.</p></article>
+        <article class="skill-card"><span class="number">2</span><h3>报告技能<br>Reporting</h3><p>使用精确 ID 生成 HTML/JSON 报告。报告是产物，用例失败是内容，不是 CLI 崩溃。Generate HTML/JSON reports; failed cases are report content.</p></article>
+        <article class="skill-card"><span class="number">3</span><h3>配置技能<br>Configuration</h3><p>维护外部配置包，先审计和验证，再发布到 Store/read-model。Maintain external profiles, audit and verify, then publish.</p></article>
+        <article class="skill-card"><span class="number">4</span><h3>证据技能<br>Evidence</h3><p>从 Store 和 evidence 文件定位请求、响应、运行摘要、日志与拓扑，形成可复查结论。Inspect requests, responses, summaries, logs, and topology.</p></article>
+        <article class="skill-card"><span class="number">5</span><h3>守卫技能<br>Guardrails</h3><p>每个后端切片都要有测试和守卫，避免通用核心被团队词汇或临时运行产物污染。Keep tests and guardrails around every backend slice.</p></article>
       </div>
     </section>
 
     <section id="commands">
       <div class="section-head">
-        <h2>核心命令面</h2>
-        <p class="note">命令面是 agent 和 CI 的首选入口；Control plane API 面向页面和长期服务模式。</p>
+        <h2>核心命令面 / CLI Surface</h2>
+        <p class="note">命令面是 agent 和 CI 的首选入口；Control plane API 面向页面和长期服务模式。The CLI is the preferred entry for agents and CI; APIs support pages and service mode.</p>
       </div>
       <div class="table-wrap">
         <table>
@@ -585,8 +681,8 @@
 
     <section id="rules">
       <div class="section-head">
-        <h2>核心规则</h2>
-        <p class="note">这些规则决定项目能否保持开源友好、跨团队可复用、可长期维护。</p>
+        <h2>核心规则 / Core Rules</h2>
+        <p class="note">这些规则决定项目能否保持开源友好、跨团队可复用、可长期维护。These rules keep the project open-source friendly, cross-team reusable, and maintainable.</p>
       </div>
       <div class="two-col">
         <div class="rule-stack">
@@ -606,8 +702,8 @@
 
     <section id="goals">
       <div class="section-head">
-        <h2>迭代目标</h2>
-        <p class="note">目标按“现在可交付、下一阶段强化、后续平台化”分层，避免把简单功能做复杂。</p>
+        <h2>迭代目标 / Iteration Goals</h2>
+        <p class="note">目标按“现在可交付、下一阶段强化、后续平台化”分层，避免把简单功能做复杂。Goals are layered into now, next, and later so simple capabilities stay simple.</p>
       </div>
       <div class="goals">
         <article class="goal-card"><div class="phase">Now</div><div><h3>稳定 agent 验收闭环</h3><p>固定 <code>discover -> report</code> 作为测试 agent 默认流程；确保接口节点全量报告、工作流报告、失败保留、HTML/JSON 输出稳定。</p></div></article>

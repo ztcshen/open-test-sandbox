@@ -73,6 +73,8 @@ Store backend support is documented in
 
 For a complete first-run guide, see [docs/quickstart.md](docs/quickstart.md).
 The full documentation map is in [docs/index.md](docs/index.md).
+Backend capability coverage is summarized in
+[docs/backend-capabilities.md](docs/backend-capabilities.md).
 For profile bundle authoring, see
 [docs/profile-authoring.md](docs/profile-authoring.md). Agent and CI
 integration contracts are summarized in

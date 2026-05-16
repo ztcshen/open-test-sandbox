@@ -1,0 +1,155 @@
+# Backend Capabilities / 后端能力总览
+
+Open Test Sandbox backend is a local-first control plane for profile-driven
+integration testing. It is built around a generic Store interface, a SQLite
+default backend, a CLI surface for agents and CI, and HTTP APIs for the
+workbench.
+
+Open Test Sandbox 的后端是一套本地优先的测试控制平面，用外部配置包驱动集成测试。
+它由通用 Store 接口、默认 SQLite 后端、面向 agent/CI 的 CLI、以及面向工作台的
+HTTP API 共同组成。
+
+## Capability Map / 能力地图
+
+| Area / 能力域 | What it does / 能力简介 | Primary surfaces / 主要入口 |
+| --- | --- | --- |
+| Store / 本地事实库 | Holds schema state, profile indexes, run records, case run records, Evidence indexes, baseline gates, timing summaries, runtime logs, topology records, and post-process tasks. 保存 schema、配置索引、运行记录、用例运行、证据索引、基线、耗时、运行日志、拓扑记录和后处理任务。 | `internal/store`, `internal/store/sqlite`, `store status`, `store upgrade` |
+| Profile lifecycle / 配置包生命周期 | Creates, installs, packs, audits, verifies, imports, and publishes external profile bundles. Runtime files and local databases are filtered out. 创建、安装、打包、审计、验证、导入和发布外部配置包，并过滤运行产物和本地数据库。 | `profile init`, `profile install`, `profile pack`, `profile audit`, `profile verify`, `/api/profile/*` |
+| Catalog read-model / 目录视图 | Converts profile assets into service, workflow, interface node, case, template, fixture, dependency, and binding views for the UI and agent commands. 将配置资产转换为服务、工作流、接口节点、用例、模板、夹具、依赖和绑定视图。 | `/api/catalog`, `/api/dashboard`, `/api/profile/catalog-index` |
+| Discovery / 目标发现 | Lets agents search interface nodes and workflows before running reports. This avoids hardcoded prompt identifiers. 让 agent 先搜索接口节点或工作流，再用精确 ID 执行报告，避免提示词写死目标。 | `interface-node discover`, `workflow discover` |
+| API case execution / 用例执行 | Runs a single HTTP case, renders requests, checks assertions, writes Evidence files, and optionally indexes the run into Store. 执行单个 HTTP 用例，渲染请求、校验断言、写入 Evidence，并可索引到 Store。 | `case run`, `/api/cases/run`, `/api/test-kit/run` |
+| Interface-node reports / 接口节点报告 | Runs all cases attached to one interface node and returns JSON plus a temporary HTML report. Failed cases remain part of the report. 执行某个接口节点下的全部用例，返回 JSON 和临时 HTML 报告；失败用例保留在报告内。 | `interface-node case report`, `/api/cases/batch-runs` |
+| Workflow reports / 工作流报告 | Runs workflow-bound steps in configured order and records per-step case run details. 按配置顺序执行工作流步骤，并记录每一步的用例运行详情。 | `workflow report`, `/api/workflow-runs`, `/api/workflow-runs/{id}` |
+| Evidence lookup / 证据查询 | Reads request, response, assertions, summaries, fixture context, stored topology, and persisted logs for a run or case run. 按运行或 case run 查询请求、响应、断言、摘要、前置数据、拓扑和持久化日志。 | `evidence list`, `/api/case/evidence`, `/api/case-run/evidence` |
+| Observability import / 观测导入 | Stores trace topology and replay/log-style Evidence for later review without blocking the main case response. 存储拓扑和回放/日志类证据，供后续审阅复用，避免阻塞主请求。 | `/api/trace-topology/collect`, `/api/replay/evidence`, post-process task records |
+| Coverage and timing / 覆盖与耗时 | Shows interface coverage, missing coverage, latest status, elapsed time, and configured timing budgets where available. 展示接口覆盖、缺口、最新状态、实际耗时和配置的耗时预算。 | `/api/interface-node/coverage`, `/api/interface-node/coverage-gaps`, `/api/case/timing` |
+| Workbench serving / 工作台服务 | Serves the React workbench, static pages, and JSON APIs from the same local control plane. 从同一个本地控制平面提供 React 工作台、静态页面和 JSON API。 | `serve`, `control-plane/static`, `control-plane/frontend` |
+| Release guardrails / 发布守卫 | Prevents generated state and source-domain terms from entering the core repository, then runs tests and browser smoke checks. 防止生成态和来源域词汇进入核心仓库，并运行测试与浏览器冒烟。 | `npm run release-check`, `tools/guardrails/check_no_source_domain_core.sh` |
+
+## Data Flow / 数据流
+
+1. A profile bundle is authored outside the core repository.
+   配置包在核心仓库外维护。
+2. The profile is installed, audited, and published into the local Store.
+   配置包被安装、审计，并发布到本地 Store。
+3. Catalog/read-model APIs expose the profile to the workbench and CLI.
+   Catalog/read-model API 将配置暴露给工作台和 CLI。
+4. An agent discovers a target and runs a case, interface-node report, or
+   workflow report.
+   agent 先发现目标，再执行单用例、接口节点报告或工作流报告。
+5. The runner writes local Evidence and indexes run facts into Store.
+   runner 写入本地 Evidence，并把运行事实索引到 Store。
+6. Reports and detail APIs read Store plus Evidence files to show results,
+   failed assertions, request/response data, logs, and topology.
+   报告和详情 API 读取 Store 与 Evidence，展示结果、失败断言、请求响应、日志和拓扑。
+
+The Store is an index and runtime fact database. Profile files and Evidence
+files remain separate source and runtime artifacts.
+
+Store 是索引和运行事实库；配置文件和 Evidence 文件分别是源资产和运行产物。
+
+## Control Plane API Groups / 控制平面 API 分组
+
+### Profile and Catalog / 配置与目录
+
+- `GET /api/profile`: active profile summary. 当前配置摘要。
+- `GET /api/profile/assets`: active profile asset summary. 当前配置资产摘要。
+- `GET /api/profile/installed`: installed profile bundles under the profile
+  home. 配置 home 下已经安装的配置包。
+- `POST /api/profile/install`: install a profile directory or archive. 安装配置目录或归档包。
+- `POST /api/profile/import`: publish a profile into Store/read-models. 发布配置到 Store/read-model。
+- `POST /api/profile/verify`: audit, publish, and run configured acceptance
+  checks. 审计、发布并执行配置的验收检查。
+- `GET /api/profile/catalog-index`: latest Store catalog index. 最新 Store catalog 索引。
+- `GET /api/catalog`: service, workflow, interface node, case, fixture,
+  template, dependency, and binding read-models. 服务、工作流、接口节点、用例、夹具、模板、依赖和绑定视图。
+- `GET /api/dashboard`: dashboard summary derived from profile and Store.
+  由配置和 Store 派生的看板摘要。
+
+### Interface Nodes and Coverage / 接口节点与覆盖
+
+- `GET /api/interface-nodes`: list interface nodes, with optional service or
+  operation filtering. 接口节点列表，可按服务或操作过滤。
+- `GET /api/interface-node`: detail for one interface node, optionally scoped
+  by workflow run and step context. 单个接口节点详情，可按工作流运行和步骤上下文限定。
+- `GET /api/interface-node/coverage`: coverage view for an optional workflow.
+  可选工作流下的覆盖视图。
+- `GET /api/interface-node/coverage-gaps`: missing or incomplete coverage for
+  an optional workflow. 可选工作流下的覆盖缺口。
+
+### Runs and Workflows / 运行与工作流
+
+- `GET /api/runs`: recent run index. 最近运行索引。
+- `POST /api/workflow-runs`: save a workflow run snapshot. 保存工作流运行快照。
+- `GET /api/workflow-runs/{id}`: workflow run detail. 工作流运行详情。
+- `GET /api/workflow-runs/step`: step detail inside a run. 某次运行中的步骤详情。
+- `GET /api/workflow-runs/latest-step`: latest step result for a workflow and
+  step id. 某工作流和步骤的最新结果。
+- `GET /api/workflow-audit`: workflow reference integrity and acceptance view.
+  工作流引用完整性和验收视图。
+
+### Cases, Reports, and Evidence / 用例、报告与证据
+
+- `GET /api/cases/capabilities`: runnable case capability matrix. 可运行用例能力矩阵。
+- `POST /api/cases/run`: run one case from profile configuration. 运行配置中的一个用例。
+- `POST /api/cases/batch-runs`: start an asynchronous batch for interface
+  nodes or one workflow. 为接口节点或工作流启动异步批量执行。
+- `GET /api/cases/batch-runs/{id}`: batch JSON report. 批量运行 JSON 报告。
+- `GET /api/cases/batch-runs/{id}/report.html`: batch HTML report. 批量运行 HTML 报告。
+- `GET /api/case/runs`: case run list. 用例运行列表。
+- `GET /api/case/evidence`: Evidence detail by run/case/step context.
+  按运行、用例或步骤上下文查询 Evidence 详情。
+- `GET /api/case-run/evidence`: Evidence detail by case run id.
+  按 case run id 查询 Evidence 详情。
+- `GET /api/case/timing`: elapsed time and budget summary. 实际耗时和预算摘要。
+- `GET /api/case/incomplete-batches`: incomplete case batch coverage.
+  未完成的用例批次覆盖情况。
+
+### Observability / 观测证据
+
+- `POST /api/trace-topology/collect`: collect and store trace topology.
+  采集并存储调用拓扑。
+- `GET /api/replay/evidence`: replay-style Evidence lookup. 查询回放类 Evidence。
+- `POST /api/test-kit/run`: compatibility run endpoint for local callers.
+  面向本地调用方的兼容运行入口。
+- `POST /api/test-kit/run-batch`: compatibility batch endpoint. 兼容批量运行入口。
+
+## CLI Capability Groups / CLI 能力分组
+
+| Group / 分组 | Commands / 命令 |
+| --- | --- |
+| Store / Store | `store status`, `store upgrade` |
+| Profile / 配置包 | `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile verify`, `profile import` |
+| Config / 配置发布 | `config publish` |
+| Discovery / 目标发现 | `interface-node discover`, `workflow discover` |
+| Reports / 报告 | `interface-node case report`, `workflow report` |
+| Execution / 执行 | `case run`, `template render` |
+| Evidence / 证据 | `evidence import`, `evidence list` |
+| Acceptance / 验收 | `baseline get`, `baseline set`, `case incomplete-batches`, `workflow audit` |
+| Service / 服务 | `serve` |
+
+## Runtime Artifacts / 运行产物
+
+The backend writes runtime artifacts that must not be committed:
+
+后端会写入以下运行产物，这些内容不能提交到核心仓库：
+
+- SQLite Store files / SQLite Store 文件；
+- Evidence directories / Evidence 目录；
+- generated HTML/JSON reports / 生成的 HTML/JSON 报告；
+- local logs / 本地日志；
+- browser smoke output / 浏览器冒烟测试输出；
+- temporary profile-home directories / 临时 profile-home 目录。
+
+`.gitignore` and `npm run release-check` guard these boundaries.
+
+`.gitignore` 和 `npm run release-check` 会守住这些边界。
+
+## Current Boundaries / 当前边界
+
+- SQLite is the supported default backend. SQLite 是当前默认支持后端。
+- PostgreSQL is reserved for a future team or hosted mode. PostgreSQL 保留给后续团队/托管模式。
+- Profile bundles are external configuration source, not core code. 配置包是外部配置源，不是核心代码。
+- HTML reports are temporary local artifacts. HTML 报告是本地临时产物。
+- Reports may contain failed cases; report generation success means the
+  sandbox completed its job. 报告可以包含失败用例；能成功生成报告表示沙箱完成了自己的工作。
