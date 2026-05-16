@@ -1,111 +1,183 @@
 # Open Test Sandbox
 
-Open Test Sandbox is a local-first integration test workbench for
-template-driven Workflows, API Cases, fixtures, and Evidence.
+[![CI](https://github.com/ztcshen/open-test-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/ztcshen/open-test-sandbox/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-The project is intentionally small at the start. The first milestone is a
-neutral core that can load external profile bundles, run tests, and record
-reproducible Evidence without baking any one business domain into the product.
+**English** | [简体中文](README.zh-CN.md)
+
+Open Test Sandbox is a local-first test sandbox workbench for profile-driven
+integration testing. It helps teams and agents discover runnable targets, run
+API cases or workflows, record reproducible Evidence, and return compact
+HTML/JSON reports without hardcoding one business domain into the core.
+
+Open Test Sandbox 是一个本地优先、配置驱动的测试沙箱工作台。它让团队和测试
+agent 能够发现可测目标、执行接口用例或工作流、记录可复现 Evidence，并生成
+紧凑的 HTML/JSON 报告，同时保持核心仓库通用、可开源、可跨团队复用。
+
+## Why It Exists
+
+Modern integration testing often has three painful gaps:
+
+- test assets are scattered across code, databases, scripts, and private docs;
+- agent-driven regression is hard because target ids and setup context are not
+  discoverable;
+- failing cases rarely come with enough request, response, log, timing, and
+  topology Evidence to review quickly.
+
+Open Test Sandbox turns those pieces into a local control plane. Profiles stay
+outside the core repository as reviewable configuration bundles. The core
+publishes them into a local Store, runs cases, records Evidence, and exposes
+the same facts to the CLI, Control plane APIs, React workbench, and reports.
+
+## What You Get
+
+| Capability | What it means |
+| --- | --- |
+| Local-first Store | SQLite by default, with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
+| External profiles | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings live outside the core repository. |
+| Agent-friendly discovery | Agents call `interface-node discover` or `workflow discover` first, then run reports with exact returned ids. |
+| API case execution | Run a single HTTP case, render requests, assert responses, write Evidence, and optionally index results into Store. |
+| Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports. |
+| Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, status, and elapsed time by run or case run id. |
+| Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
+| Open-source guardrails | Release checks prevent generated state and source-domain terms from entering the generic core. |
 
 ## Quick Start
 
+Install dependencies and verify the checkout:
+
 ```sh
+npm ci
 ./bin/otsandbox.sh version
-go test ./...
 npm run demo:api-case
+npm run release-check
 ```
 
-Run the default local Store schema upgrade:
+The demo command starts a temporary local HTTP endpoint, runs the generic
+`examples/api-cases/create-item.json` case, and prints the Evidence bundle
+path. The release gate runs whitespace checks, generated-state checks, source
+domain guardrails, Go tests, the demo, the React build, and headless browser
+smoke tests.
+
+Create a local Store and publish an external profile:
 
 ```sh
 tmpdir=$(mktemp -d)
-./bin/otsandbox.sh store status --store-url "$tmpdir/store.sqlite"
-./bin/otsandbox.sh store upgrade --store-url "$tmpdir/store.sqlite"
+store="$tmpdir/store.sqlite"
+profile_dir="$tmpdir/sample-profile"
+
+./bin/otsandbox.sh store upgrade --store-url "$store"
+./bin/otsandbox.sh profile init --output "$profile_dir" --id sample
+./bin/otsandbox.sh profile install --from "$profile_dir"
+./bin/otsandbox.sh profile verify --profile sample --store-url "$store"
 ```
 
-Publish an external profile bundle into the local Store:
+Start the workbench:
 
 ```sh
-PROFILE_DIR=$(mktemp -d)/sample-profile
-./bin/otsandbox.sh profile init --output "$PROFILE_DIR" --id sample
-./bin/otsandbox.sh profile install --from "$PROFILE_DIR"
-./bin/otsandbox.sh profile list
-./bin/otsandbox.sh profile pack --profile sample --output "$tmpdir/sample-profile.tar.gz"
-./bin/otsandbox.sh profile verify --profile sample --store-url "$tmpdir/store.sqlite"
-./bin/otsandbox.sh serve --profile sample --store-url "$tmpdir/store.sqlite"
+./bin/otsandbox.sh serve \
+  --profile sample \
+  --store-url "$store" \
+  --host 127.0.0.1 \
+  --port 18191
 ```
 
-When a profile has runnable API Cases and the local Store already contains run
-records, add `--require-case-runs` to make verification fail unless each case's
-latest run passed. Add `--require-workflow-runs` to require each declared
-Workflow's latest Store run to have passed as well.
+Then open `http://127.0.0.1:18191/`.
 
-The core repository intentionally does not contain bundled profiles. Keep
-business or team-specific bundles in a separate location or repository, then
-install them into the local profile home, publish them through `profile verify`,
-`config publish`, or the Control plane import API, so the UI reads the generated
-Store/read-model.
-Profile installation copies source profile assets only; local runtime state
-such as `.runtime/`, SQLite/database files, logs, and VCS directories is skipped.
-Use `profile pack` to create the same clean distributable archive from either a
-profile path or an installed profile id. `profile install --from bundle.tar.gz`
-installs that archive into another profile home with the same filtering rules;
-`profile audit`, `profile import`, `profile verify`, `config publish`, and the
-matching Control plane APIs can also accept the archive path and will install it
-before auditing or publishing Store/read-model data.
+## Agent Workflow
 
-Run an API Case and write an Evidence bundle:
+Open Test Sandbox is designed so an agent does not need hidden prompt knowledge
+about target ids:
 
 ```sh
-tmpdir=$(mktemp -d)
-./bin/otsandbox.sh case run \
-  --case examples/api-cases/create-item.json \
+./bin/otsandbox.sh interface-node discover \
+  --profile sample \
+  --store-url "$store" \
+  --filter "query" \
+  --json
+
+./bin/otsandbox.sh interface-node case report \
+  --node NODE_ID \
+  --profile sample \
+  --store-url "$store" \
   --base-url http://127.0.0.1:8080 \
-  --run-id quickstart \
-  --evidence-dir "$tmpdir/evidence"
-find "$tmpdir/evidence/quickstart" -maxdepth 1 -type f | sort
+  --output-dir "$tmpdir/reports" \
+  --json
 ```
 
-The API Case JSON format and Evidence output contract are documented in
-[docs/api-case-format.md](docs/api-case-format.md).
-Store backend support is documented in
-[docs/store-backends.md](docs/store-backends.md).
+The same pattern works for workflows:
 
-For a complete first-run guide, see [docs/quickstart.md](docs/quickstart.md).
-The full documentation map is in [docs/index.md](docs/index.md).
-Backend capability coverage is summarized in
-[docs/backend-capabilities.md](docs/backend-capabilities.md).
-For profile bundle authoring, see
-[docs/profile-authoring.md](docs/profile-authoring.md). Agent and CI
-integration contracts are summarized in
-[docs/cli-api-contracts.md](docs/cli-api-contracts.md).
+```sh
+./bin/otsandbox.sh workflow discover --profile sample --store-url "$store" --json
+./bin/otsandbox.sh workflow report --workflow WORKFLOW_ID --profile sample --store-url "$store" --json
+```
 
-## Direction
+Reports may contain failed cases. That is expected: a successful report means
+the sandbox completed its job and preserved the failure details for review.
+
+## Architecture
+
+```text
+External profile bundle
+  -> audit / verify / publish
+  -> SQLite Store and catalog read-models
+  -> CLI discovery, Control plane APIs, React workbench
+  -> case and workflow execution
+  -> Evidence files plus Store indexes
+  -> JSON and HTML reports
+  -> detail APIs for failed case review
+```
+
+Core packages stay generic:
+
+- `cmd/otsandbox/`: CLI entrypoint and command orchestration.
+- `internal/store/`: Store contract and runtime records.
+- `internal/store/sqlite/`: default local Store backend.
+- `internal/profile/`: profile schema and loader.
+- `internal/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.
+- `internal/apicase/`: HTTP case runner and Evidence writer.
+- `control-plane/frontend/`: React workbench source.
+- `control-plane/static/`: built static workbench assets served by `otsandbox serve`.
+
+## Documentation
+
+| Page | What it covers |
+| --- | --- |
+| [Quick Start](docs/quickstart.md) | First local run, Store setup, profile install, and workbench launch. |
+| [Backend Capabilities](docs/backend-capabilities.md) | Store, profile publishing, discovery, execution, reports, Evidence, APIs, and release guardrails. |
+| [Profile Authoring](docs/profile-authoring.md) | How to keep team-owned test assets outside the core repository. |
+| [Profile Format](docs/profile-format.md) | Manifest fields, split assets, audit, install, pack, import, and verify. |
+| [API Case Format](docs/api-case-format.md) | Runnable HTTP case JSON and Evidence output contract. |
+| [CLI and API Contracts](docs/cli-api-contracts.md) | Agent/CI discovery, reports, asynchronous batches, and failed-case Evidence lookup. |
+| [Release Checklist](docs/release-checklist.md) | Local and CI gates before publishing. |
+| [Visual Overview](docs/core-capabilities-skills-goals.html) | Bilingual capability map, API surface, data flow, and goals. |
+
+## Project Principles
 
 - Keep the default developer experience local and lightweight.
-- Use SQLite as the default local Store.
-- Add PostgreSQL as an optional team or hosted Store.
-- Treat profile bundles as reviewable source assets outside this core repo.
-- Treat runtime databases and Evidence files as generated state.
+- Use SQLite as the default Store.
+- Keep business or team-specific data in external profile bundles.
+- Treat Store rows as indexes and runtime facts, not source assets.
+- Treat Evidence, reports, logs, and local databases as generated runtime state.
+- Make agent flows discoverable before execution.
+- Keep public contracts documented when CLI, API, profile, Store, or report
+  shapes change.
 
-## Current Status
+## Status
 
-The project now has:
+The project is pre-1.0 but already has a complete local loop:
 
-- a neutral CLI and generic Control plane;
-- a SQLite Store with schema upgrades, contract tests, Evidence queries, baseline
-  gates, and backend URL validation;
-- a profile loader for manifest and split-asset bundles;
-- external profile bundle initialization, local profile-home installation,
-  audit-gated publishing, Store/read-model publishing, and CLI verification;
-- API Case execution with reproducible Evidence and Store indexes;
-- request template rendering from profile-owned fixture data;
-- workflow planning from profile-owned bindings;
-- runtime Evidence import with text and JSON reports.
+- profile lifecycle: init, install, pack, audit, verify, import, publish;
+- Store lifecycle: status, upgrade, runtime indexes, contract tests;
+- execution: single API case, interface-node reports, workflow reports;
+- Evidence: request, response, assertions, summaries, logs, topology, timing;
+- workbench: local React pages backed by Control plane APIs;
+- release gate: `npm run release-check`.
 
-Domain-specific data belongs in profile/config bundles, not in core source code.
+Next areas are profile authoring ergonomics, stronger post-process scheduling,
+optional team Store backends, and richer public examples.
 
-## Contributing and Release Gates
+## Contributing
 
 Run the full local gate before publishing a change:
 
@@ -113,9 +185,6 @@ Run the full local gate before publishing a change:
 npm run release-check
 ```
 
-The gate runs generated-state checks, source-domain guardrails, Go tests, the
-React build, and browser smoke tests. See [CONTRIBUTING.md](CONTRIBUTING.md)
-and [docs/release-checklist.md](docs/release-checklist.md) for the public
-workflow.
-
-Open Test Sandbox is licensed under the Apache License 2.0.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
+[docs/release-checklist.md](docs/release-checklist.md). Open Test Sandbox is
+licensed under the [Apache License 2.0](LICENSE).

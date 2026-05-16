@@ -16,3 +16,5 @@ should be called out in this file and in the relevant docs.
 - Added source-domain guardrails to keep core code generic.
 - Added open-source readiness docs, CI gate, and release checklist.
 - Added a backend capabilities overview and richer documentation entry points.
+- Expanded the repository homepage with English and Chinese introductions,
+  capability summaries, architecture notes, and agent workflow guidance.
