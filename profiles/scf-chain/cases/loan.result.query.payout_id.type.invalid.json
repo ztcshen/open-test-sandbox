@@ -1,5 +1,6 @@
 {
   "id": "loan.result.query.payout_id.type.invalid",
   "displayName": "放款结果查询-payout_id类型非法",
-  "nodeId": "scf.loan.result.query"
+  "nodeId": "scf.loan.result.query",
+  "requiredForAdmission": false
 }

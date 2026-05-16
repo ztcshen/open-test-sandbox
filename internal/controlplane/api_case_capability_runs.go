@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store"
@@ -11,6 +12,11 @@ func apiCaseCapabilitiesFromBundleWithStore(ctx context.Context, bundle profile.
 	payload := apiCaseCapabilitiesFromBundle(bundle)
 	if runtime == nil {
 		return payload, nil
+	}
+	if catalog, err := runtime.GetProfileCatalog(ctx); err == nil {
+		payload = apiCaseCapabilitiesFromCatalog(catalog)
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return apiCaseCapabilitiesPayload{}, err
 	}
 	runs, err := runtime.ListRuns(ctx)
 	if err != nil {
@@ -46,7 +52,7 @@ func apiCaseCapabilityRuns(ctx context.Context, runtime store.Store, runs []stor
 			state := byCase[caseRun.CaseID]
 			state.Count++
 			if state.Latest == nil {
-				state.Latest = interfaceNodeRunItem(run, caseRun)
+				state.Latest = interfaceNodeRunItem(run, caseRun, nil, 0)
 			}
 			byCase[caseRun.CaseID] = state
 		}

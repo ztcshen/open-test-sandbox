@@ -1,5 +1,6 @@
 {
   "id": "repay.result.query.credit_contract_type.missing.invalid",
   "displayName": "还款结果查询-credit_contract_type缺失",
-  "nodeId": "scf.repay.result.query"
+  "nodeId": "scf.repay.result.query",
+  "requiredForAdmission": false
 }

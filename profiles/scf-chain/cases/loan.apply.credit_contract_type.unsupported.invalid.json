@@ -1,5 +1,6 @@
 {
   "id": "loan.apply.credit_contract_type.unsupported.invalid",
   "displayName": "放款申请-credit_contract_type非文档固定值",
-  "nodeId": "scf.loan.apply"
+  "nodeId": "scf.loan.apply",
+  "requiredForAdmission": false
 }

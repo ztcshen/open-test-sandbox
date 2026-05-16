@@ -1,5 +1,6 @@
 {
   "id": "scf.repay.trial",
   "displayName": "还款试算",
-  "serviceId": "retail-gateway"
+  "serviceId": "retail-gateway",
+  "timeoutMs": 1500
 }

@@ -1,14 +1,22 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/profilecatalog"
 	"open-test-sandbox/internal/store"
 )
 
@@ -17,9 +25,20 @@ func New(bundle profile.Bundle) http.Handler {
 }
 
 func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
+	return NewWithOptions(bundle, Options{Runtime: runtime})
+}
+
+type Options struct {
+	Runtime         store.Store
+	TraceGraphQLURL string
+}
+
+func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 	mux := http.NewServeMux()
 	staticDir := findStaticDir()
 	profiles := newProfileState(bundle)
+	runtime := options.Runtime
+	collector := traceCollector{GraphQLURL: options.TraceGraphQLURL}
 	mux.HandleFunc("/api/profile/import", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -71,7 +90,12 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, dashboardPayloadFromBundle(profiles.Current()))
+		payload, err := dashboardPayloadFromBundleWithStore(r.Context(), profiles.Current(), runtime)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, payload)
 	})
 	mux.HandleFunc("/api/catalog", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -126,6 +150,13 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			return
 		}
 		handleWorkflowRun(w, r, runtime)
+	})
+	mux.HandleFunc("/api/trace-topology/collect", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleTraceTopologyCollect(w, r, runtime, collector)
 	})
 	mux.HandleFunc("/api/agent-test", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -193,42 +224,68 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleTestKitRun(w, r, profiles.Current(), runtime)
+		handleTestKitRun(w, r, profiles.Current(), runtime, collector)
 	})
 	mux.HandleFunc("/api/test-kit/run-batch", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleTestKitRunBatch(w, r, profiles.Current())
+		handleTestKitRunBatch(w, r, profiles.Current(), runtime)
 	})
 	mux.HandleFunc("/api/interface-nodes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, interfaceNodesPayloadFromBundle(profiles.Current(), r.URL.Query().Get("serviceId")))
+		if runtime != nil {
+			catalog, err := runtime.GetProfileCatalog(r.Context())
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+			if err == nil && len(catalog.InterfaceNodes) > 0 {
+				payload, err := interfaceNodesPayloadFromStore(r.Context(), catalog, runtime, r.URL.Query().Get("serviceId"), r.URL.Query().Get("operation"))
+				if err != nil {
+					writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+					return
+				}
+				writeJSON(w, payload)
+				return
+			}
+		}
+		writeJSON(w, interfaceNodesPayloadFromBundle(profiles.Current(), r.URL.Query().Get("serviceId"), r.URL.Query().Get("operation")))
 	})
 	mux.HandleFunc("/api/interface-node/coverage", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, interfaceNodeCoveragePayloadFromBundle(profiles.Current(), r.URL.Query().Get("workflow")))
+		payload, err := interfaceNodeCoveragePayloadFromBundleWithStore(r.Context(), profiles.Current(), r.URL.Query().Get("workflow"), runtime)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, payload)
 	})
 	mux.HandleFunc("/api/interface-node/coverage-gaps", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, interfaceNodeCoverageGapsPayloadFromBundle(profiles.Current(), r.URL.Query().Get("workflow")))
+		payload, err := interfaceNodeCoverageGapsPayloadFromBundleWithStore(r.Context(), profiles.Current(), r.URL.Query().Get("workflow"), runtime)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, payload)
 	})
 	mux.HandleFunc("/api/interface-node", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		payload, ok, err := interfaceNodeDetailPayloadFromBundleWithStore(r.Context(), profiles.Current(), r.URL.Query().Get("id"), runtime)
+		payload, ok, err := interfaceNodeDetailPayloadFromBundleWithStore(r.Context(), profiles.Current(), r.URL.Query().Get("id"), runtime, interfaceNodeRunContextFromQuery(r.URL.Query()))
 		if err != nil {
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
@@ -351,8 +408,12 @@ type stateService struct {
 }
 
 type dashboardPayload struct {
-	Summary dashboardSummary `json:"summary"`
-	Groups  []dashboardGroup `json:"groups"`
+	OK             bool                  `json:"ok"`
+	Source         map[string]string     `json:"source,omitempty"`
+	Summary        dashboardSummary      `json:"summary"`
+	Groups         []dashboardGroup      `json:"groups"`
+	ServiceRuntime []serviceRuntime      `json:"serviceRuntime"`
+	Presentation   dashboardPresentation `json:"presentation,omitempty"`
 }
 
 type dashboardSummary struct {
@@ -370,61 +431,102 @@ type dashboardGroup struct {
 }
 
 type dashboardItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name,omitempty"`
-	DisplayName string `json:"displayName,omitempty"`
-	State       string `json:"state"`
-	Health      string `json:"health"`
-	Kind        string `json:"kind,omitempty"`
-	OK          bool   `json:"ok"`
-	Branch      string `json:"branch,omitempty"`
-	Profile     string `json:"profile,omitempty"`
+	ID             string                `json:"id"`
+	Name           string                `json:"name,omitempty"`
+	DisplayName    string                `json:"displayName,omitempty"`
+	State          string                `json:"state"`
+	Health         string                `json:"health"`
+	Kind           string                `json:"kind,omitempty"`
+	OK             bool                  `json:"ok"`
+	Branch         string                `json:"branch,omitempty"`
+	Profile        string                `json:"profile,omitempty"`
+	Container      string                `json:"container,omitempty"`
+	Image          string                `json:"image,omitempty"`
+	Port           int                   `json:"port,omitempty"`
+	ManagementPort int                   `json:"managementPort,omitempty"`
+	Message        string                `json:"message,omitempty"`
+	Presentation   dashboardPresentation `json:"presentation,omitempty"`
+}
+
+type dashboardPresentation struct {
+	Copy map[string]string `json:"copy,omitempty"`
 }
 
 type runsPayload struct {
+	OK           bool             `json:"ok"`
 	WorkflowRuns []map[string]any `json:"workflowRuns"`
 	ReplayRuns   []map[string]any `json:"replayRuns"`
 	ProbeRuns    []map[string]any `json:"probeRuns"`
 }
 
 type interfaceNodesPayload struct {
-	Source map[string]string   `json:"source"`
-	Items  []interfaceNodeItem `json:"items"`
+	OK           bool                      `json:"ok"`
+	TemplateID   string                    `json:"templateId"`
+	Filters      map[string]string         `json:"filters"`
+	Source       map[string]string         `json:"source"`
+	Items        []interfaceNodeItem       `json:"items"`
+	Presentation interfaceNodePresentation `json:"presentation,omitempty"`
 }
 
 type interfaceNodeItem struct {
 	ID                   string `json:"id"`
 	DisplayName          string `json:"displayName,omitempty"`
 	ServiceID            string `json:"serviceId,omitempty"`
+	Operation            string `json:"operation,omitempty"`
+	Method               string `json:"method,omitempty"`
+	Path                 string `json:"path,omitempty"`
 	Href                 string `json:"href"`
+	Status               string `json:"status"`
 	AdmissionStatus      string `json:"admissionStatus"`
 	ValidationStatus     string `json:"validationStatus"`
 	ValidationIssueCount int    `json:"validationIssueCount"`
 	RequiredCaseCount    int    `json:"requiredCaseCount"`
 	PassedCaseCount      int    `json:"passedCaseCount"`
+	TimeoutMs            int    `json:"timeoutMs,omitempty"`
+	LatestRunID          string `json:"latestRunId,omitempty"`
+	LatestElapsedMs      int64  `json:"latestElapsedMs,omitempty"`
+	TotalElapsedMs       int64  `json:"totalElapsedMs,omitempty"`
 }
 
 type interfaceNodeDetailPayload struct {
-	OK               bool                       `json:"ok,omitempty"`
+	OK               bool                       `json:"ok"`
+	TemplateID       string                     `json:"templateId"`
+	Source           map[string]string          `json:"source"`
+	Context          map[string]string          `json:"context,omitempty"`
 	Error            string                     `json:"error,omitempty"`
 	Requested        string                     `json:"requested,omitempty"`
 	Available        []interfaceNodeItem        `json:"available,omitempty"`
+	Attention        map[string]any             `json:"attention,omitempty"`
 	Node             interfaceNodeDetail        `json:"node,omitempty"`
 	Admission        interfaceNodeAdmission     `json:"admission,omitempty"`
-	RequestTemplates []interfaceRequestTemplate `json:"requestTemplates,omitempty"`
+	RequestTemplates []interfaceRequestTemplate `json:"requestTemplates"`
 	Cases            []interfaceCase            `json:"cases"`
 	Fields           interfaceNodeFields        `json:"fields"`
 	History          map[string]any             `json:"history"`
 	Runs             []map[string]any           `json:"runs"`
+	Presentation     interfaceNodePresentation  `json:"presentation,omitempty"`
+}
+
+type interfaceNodePresentation struct {
+	Copy map[string]string `json:"copy,omitempty"`
 }
 
 type interfaceNodeDetail struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName,omitempty"`
-	ServiceID   string `json:"serviceId,omitempty"`
-	Operation   string `json:"operation,omitempty"`
-	Method      string `json:"method,omitempty"`
-	Path        string `json:"path,omitempty"`
+	ID          string   `json:"id"`
+	DisplayName string   `json:"displayName,omitempty"`
+	ServiceID   string   `json:"serviceId,omitempty"`
+	Operation   string   `json:"operation,omitempty"`
+	Method      string   `json:"method,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	TimeoutMs   int      `json:"timeoutMs,omitempty"`
+	TemplateID  string   `json:"templateId,omitempty"`
+	Version     string   `json:"version,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Description string   `json:"description,omitempty"`
+	SortOrder   int      `json:"sortOrder,omitempty"`
+	CreatedAt   string   `json:"createdAt,omitempty"`
+	UpdatedAt   string   `json:"updatedAt,omitempty"`
 }
 
 type interfaceNodeAdmission struct {
@@ -449,6 +551,16 @@ type interfaceCase struct {
 	ID                   string           `json:"id"`
 	Title                string           `json:"title,omitempty"`
 	CaseType             string           `json:"caseType"`
+	Blocked              bool             `json:"blocked"`
+	BlockedReason        string           `json:"blockedReason"`
+	Scenario             string           `json:"scenario"`
+	PayloadTemplateJSON  string           `json:"payloadTemplateJson,omitempty"`
+	RequestTemplateID    string           `json:"requestTemplateId"`
+	PatchJSON            string           `json:"patchJson,omitempty"`
+	RenderMode           string           `json:"renderMode,omitempty"`
+	ExpectedJSON         string           `json:"expectedJson,omitempty"`
+	Status               string           `json:"status,omitempty"`
+	SortOrder            int              `json:"sortOrder,omitempty"`
 	RequiredForAdmission bool             `json:"requiredForAdmission"`
 	Dependencies         []map[string]any `json:"dependencies"`
 	LatestRun            map[string]any   `json:"latestRun,omitempty"`
@@ -494,6 +606,10 @@ type apiCaseServiceNode struct {
 
 type catalogPayload struct {
 	SchemaVersion string            `json:"schemaVersion"`
+	OK            bool              `json:"ok"`
+	GeneratedAt   time.Time         `json:"generatedAt"`
+	Navigation    map[string]any    `json:"navigation"`
+	Warnings      []string          `json:"warnings"`
 	Source        map[string]string `json:"source"`
 	Services      []catalogService  `json:"services"`
 	Workflows     []catalogWorkflow `json:"workflows"`
@@ -510,27 +626,74 @@ type catalogService struct {
 }
 
 type catalogWorkflow struct {
-	ID           string                      `json:"id"`
-	DisplayName  string                      `json:"displayName,omitempty"`
-	Description  string                      `json:"description,omitempty"`
-	Entrypoint   string                      `json:"entrypoint"`
-	Steps        []catalogWorkflowStep       `json:"steps"`
-	Presentation catalogWorkflowPresentation `json:"presentation"`
-	RunCount     int                         `json:"runCount"`
-	LatestRun    map[string]any              `json:"latestRun,omitempty"`
+	ID                string                       `json:"id"`
+	DisplayName       string                       `json:"displayName,omitempty"`
+	Description       string                       `json:"description,omitempty"`
+	Entrypoint        string                       `json:"entrypoint"`
+	BaseStepTimeoutMs int                          `json:"baseStepTimeoutMs"`
+	TimeoutOffsetMs   int                          `json:"timeoutOffsetMs"`
+	TimeoutMs         int                          `json:"timeoutMs"`
+	Graph             catalogTopology              `json:"graph,omitempty"`
+	Observability     catalogWorkflowObservability `json:"observability,omitempty"`
+	Steps             []catalogWorkflowStep        `json:"steps"`
+	StepCount         int                          `json:"stepCount,omitempty"`
+	CaseCount         int                          `json:"caseCount,omitempty"`
+	ServiceCount      int                          `json:"serviceCount,omitempty"`
+	Presentation      catalogWorkflowPresentation  `json:"presentation"`
+	RunCount          int                          `json:"runCount"`
+	LatestRun         map[string]any               `json:"latestRun,omitempty"`
 }
 
 type catalogWorkflowStep struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName,omitempty"`
-	ServiceID   string `json:"serviceId,omitempty"`
-	CaseID      string `json:"caseId,omitempty"`
-	Action      string `json:"action,omitempty"`
-	Required    bool   `json:"required,omitempty"`
+	ID                 string                  `json:"id"`
+	DisplayName        string                  `json:"displayName,omitempty"`
+	ServiceID          string                  `json:"serviceId,omitempty"`
+	CaseID             string                  `json:"caseId,omitempty"`
+	Action             string                  `json:"action,omitempty"`
+	Required           bool                    `json:"required,omitempty"`
+	Executable         bool                    `json:"executable"`
+	EvidenceKinds      []string                `json:"evidenceKinds,omitempty"`
+	RelatedMockTargets []string                `json:"relatedMockTargets,omitempty"`
+	Inputs             []map[string]any        `json:"inputs,omitempty"`
+	Exports            []map[string]any        `json:"exports,omitempty"`
+	TimeoutMs          int                     `json:"timeoutMs,omitempty"`
+	Presentation       catalogStepPresentation `json:"presentation,omitempty"`
+}
+
+type catalogStepPresentation struct {
+	Copy map[string]string `json:"copy,omitempty"`
 }
 
 type catalogWorkflowPresentation struct {
-	Kind string `json:"kind"`
+	Kind     string                 `json:"kind,omitempty"`
+	Template string                 `json:"template,omitempty"`
+	Title    string                 `json:"title,omitempty"`
+	Copy     map[string]string      `json:"copy,omitempty"`
+	Stages   []catalogWorkflowStage `json:"stages,omitempty"`
+}
+
+type catalogWorkflowObservability struct {
+	Panels []catalogWorkflowPanel `json:"panels,omitempty"`
+}
+
+type catalogWorkflowPanel struct {
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Scope string `json:"scope,omitempty"`
+}
+
+type catalogWorkflowStage struct {
+	ID      string                     `json:"id"`
+	Title   string                     `json:"title,omitempty"`
+	Summary string                     `json:"summary,omitempty"`
+	Steps   []catalogWorkflowStageStep `json:"steps,omitempty"`
+}
+
+type catalogWorkflowStageStep struct {
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	CaseID string `json:"caseId,omitempty"`
 }
 
 type catalogAPICase struct {
@@ -603,25 +766,287 @@ func findStaticDir() string {
 	return filepath.Join("control-plane", "static")
 }
 
-func dashboardPayloadFromBundle(bundle profile.Bundle) dashboardPayload {
-	items := make([]dashboardItem, 0, len(bundle.Services))
-	for _, service := range bundle.Services {
-		items = append(items, dashboardItem{
-			ID:          service.ID,
-			Name:        firstNonEmpty(service.DisplayName, service.ID),
-			DisplayName: service.DisplayName,
-			State:       "missing",
-			Health:      "unknown",
-			Kind:        service.Kind,
-			OK:          false,
-			Branch:      bundle.ID,
-			Profile:     bundle.ID,
-		})
+const ReadModelDashboard = "dashboard"
+
+func DashboardReadModel(catalog store.ProfileCatalog, configVersionID string, generatedAt time.Time) (store.ReadModel, error) {
+	payload := dashboardPayloadFromCatalog(catalog)
+	payload.Source = map[string]string{"kind": "read-model", "id": catalog.ProfileID}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return store.ReadModel{}, err
+	}
+	return store.ReadModel{
+		ProfileID:       catalog.ProfileID,
+		Key:             ReadModelDashboard,
+		ConfigVersionID: configVersionID,
+		PayloadJSON:     string(raw),
+		GeneratedAt:     generatedAt,
+		UpdatedAt:       generatedAt,
+	}, nil
+}
+
+func dashboardPayloadFromBundleWithStore(ctx context.Context, bundle profile.Bundle, runtime store.Store) (dashboardPayload, error) {
+	if runtime == nil {
+		return dashboardPayloadFromBundle(ctx, bundle), nil
+	}
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return dashboardPayload{}, err
+	}
+	if err == nil && len(catalog.Services) > 0 {
+		payload, ok, err := dashboardPayloadFromReadModel(ctx, runtime, catalog.ProfileID)
+		if err != nil {
+			return dashboardPayload{}, err
+		}
+		if !ok {
+			payload = dashboardPayloadFromCatalog(catalog)
+		}
+		hydrateDashboardRuntime(ctx, &payload, catalog)
+		return payload, nil
+	}
+	return dashboardPayloadFromBundle(ctx, bundle), nil
+}
+
+func dashboardPayloadFromReadModel(ctx context.Context, runtime store.Store, profileID string) (dashboardPayload, bool, error) {
+	model, err := runtime.GetReadModel(ctx, profileID, ReadModelDashboard)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return dashboardPayload{}, false, nil
+		}
+		return dashboardPayload{}, false, err
+	}
+	var payload dashboardPayload
+	if err := json.Unmarshal([]byte(model.PayloadJSON), &payload); err != nil {
+		return dashboardPayload{}, false, err
+	}
+	payload.Source = map[string]string{"kind": "read-model", "id": profileID}
+	return payload, true, nil
+}
+
+func dashboardPayloadFromCatalog(catalog store.ProfileCatalog) dashboardPayload {
+	items := make([]dashboardItem, 0, len(catalog.Services))
+	serviceRuntimes := make([]serviceRuntime, 0, len(catalog.Services))
+	for _, service := range catalog.Services {
+		state := "missing"
+		health := "unknown"
+		healthy := false
+		if strings.EqualFold(service.Kind, "external") {
+			state = "external"
+			health = "external"
+			healthy = true
+		}
+		runtime := serviceRuntimeFromCatalogService(service, state, health, healthy)
+		if runtime.ServiceID != "" {
+			serviceRuntimes = append(serviceRuntimes, runtime)
+		}
+		items = append(items, dashboardItemFromCatalogService(catalog, service, runtime, state, health, healthy))
 	}
 	return dashboardPayload{
+		OK:             true,
+		Source:         map[string]string{"kind": "store", "id": catalog.ProfileID},
+		Summary:        dashboardSummaryForItems(items),
+		Groups:         []dashboardGroup{{ID: "business", Label: "Services", DisplayName: "Services", Items: items}},
+		ServiceRuntime: serviceRuntimes,
+		Presentation:   dashboardPresentationForCatalog(catalog.TemplateConfigs, ""),
+	}
+}
+
+func hydrateDashboardRuntime(ctx context.Context, payload *dashboardPayload, catalog store.ProfileCatalog) {
+	dockerRuntimes := dockerRuntimeByCatalogService(ctx, catalog.Services)
+	runtimeByService := map[string]serviceRuntime{}
+	for _, runtime := range payload.ServiceRuntime {
+		runtimeByService[runtime.ServiceID] = runtime
+	}
+	for _, service := range catalog.Services {
+		runtime := runtimeByService[service.ID]
+		if observed, ok := dockerRuntimes[service.ID]; ok {
+			runtime = mergeRuntime(runtime, observed)
+		}
+		runtimeByService[service.ID] = runtime
+	}
+	payload.ServiceRuntime = make([]serviceRuntime, 0, len(catalog.Services))
+	for groupIndex := range payload.Groups {
+		for itemIndex := range payload.Groups[groupIndex].Items {
+			item := &payload.Groups[groupIndex].Items[itemIndex]
+			service := catalogServiceByID(catalog.Services, item.ID)
+			runtime := runtimeByService[item.ID]
+			if runtime.ServiceID == "" {
+				continue
+			}
+			state := runtime.State
+			health := runtime.Health
+			healthy := runtime.OK
+			*item = dashboardItemFromCatalogService(catalog, service, runtime, state, health, healthy)
+		}
+	}
+	for _, service := range catalog.Services {
+		if runtime := runtimeByService[service.ID]; runtime.ServiceID != "" {
+			payload.ServiceRuntime = append(payload.ServiceRuntime, runtime)
+		}
+	}
+	allItems := []dashboardItem{}
+	for _, group := range payload.Groups {
+		allItems = append(allItems, group.Items...)
+	}
+	payload.Summary = dashboardSummaryForItems(allItems)
+}
+
+func dashboardItemFromCatalogService(catalog store.ProfileCatalog, service store.CatalogService, runtime serviceRuntime, state string, health string, healthy bool) dashboardItem {
+	return dashboardItem{
+		ID:             service.ID,
+		Name:           firstNonEmpty(service.DisplayName, service.ID),
+		DisplayName:    service.DisplayName,
+		State:          firstNonEmpty(state, "missing"),
+		Health:         firstNonEmpty(health, "unknown"),
+		Kind:           service.Kind,
+		OK:             healthy,
+		Branch:         catalog.ProfileID,
+		Profile:        catalog.ProfileID,
+		Container:      firstNonEmpty(runtime.Container, service.ContainerName),
+		Image:          firstNonEmpty(runtime.Image, service.Image),
+		Port:           firstPositiveInt(runtime.Port, service.ServicePort),
+		ManagementPort: firstPositiveInt(runtime.ManagementPort, service.ManagementPort),
+		Message:        runtime.Message,
+		Presentation:   dashboardPresentationForCatalog(catalog.TemplateConfigs, service.ID),
+	}
+}
+
+func serviceRuntimeFromCatalogService(service store.CatalogService, state string, health string, ok bool) serviceRuntime {
+	branchName, commitID := sourceSnapshotRevision(service.SourcePath)
+	return serviceRuntime{
+		ServiceID:      service.ID,
+		NodeRole:       service.Kind,
+		Container:      service.ContainerName,
+		Image:          service.Image,
+		SourcePath:     service.SourcePath,
+		BranchName:     firstNonEmpty(service.GitBranch, branchName),
+		CommitID:       commitID,
+		State:          firstNonEmpty(state, "missing"),
+		Health:         firstNonEmpty(health, "unknown"),
+		OK:             ok,
+		Port:           service.ServicePort,
+		ManagementPort: service.ManagementPort,
+	}
+}
+
+func dashboardSummaryForItems(items []dashboardItem) dashboardSummary {
+	healthy, missing, unhealthy := 0, 0, 0
+	for _, item := range items {
+		if item.OK {
+			healthy++
+			continue
+		}
+		if item.State == "missing" {
+			missing++
+			continue
+		}
+		unhealthy++
+	}
+	return dashboardSummary{Total: len(items), Healthy: healthy, Missing: missing, Unhealthy: unhealthy}
+}
+
+func dashboardPresentationForCatalog(configs []store.CatalogTemplateConfig, serviceID string) dashboardPresentation {
+	copy := map[string]string{}
+	for _, config := range configs {
+		if !visibleTemplateConfigStatus(config.Status) {
+			continue
+		}
+		configCopy := stringMapFromAny(jsonObject(config.ConfigJSON)["copy"])
+		if len(configCopy) == 0 {
+			continue
+		}
+		switch {
+		case config.ScopeType == "environment":
+			mergeStringMap(copy, configCopy)
+		case config.ScopeType == "environment-node" && config.NodeID == "" && (config.ScopeID == "" || config.ScopeID == "_default"):
+			mergeStringMap(copy, configCopy)
+		case config.ScopeType == "environment-node" && serviceID != "" && (config.NodeID == serviceID || config.ScopeID == serviceID):
+			mergeStringMap(copy, configCopy)
+		}
+	}
+	if len(copy) == 0 {
+		return dashboardPresentation{}
+	}
+	return dashboardPresentation{Copy: copy}
+}
+
+func catalogServiceByID(services []store.CatalogService, id string) store.CatalogService {
+	for _, service := range services {
+		if service.ID == id {
+			return service
+		}
+	}
+	return store.CatalogService{ID: id}
+}
+
+func dashboardPayloadFromBundle(ctx context.Context, bundle profile.Bundle) dashboardPayload {
+	dockerRuntimes := dockerRuntimeByService(ctx, bundle.Services)
+	configuredRuntimes := configuredRuntimeByService(ctx, bundle)
+	items := make([]dashboardItem, 0, len(bundle.Services))
+	serviceRuntimes := make([]serviceRuntime, 0, len(bundle.Services))
+	for _, service := range bundle.Services {
+		runtime := configuredRuntimes[service.ID]
+		dockerRuntime, ok := dockerRuntimes[service.ID]
+		state := "missing"
+		health := "unknown"
+		healthy := false
+		if ok {
+			runtime = mergeRuntime(runtime, dockerRuntime)
+			state = dockerRuntime.State
+			health = dockerRuntime.Health
+			healthy = dockerRuntime.OK
+		} else if strings.EqualFold(service.Kind, "external") {
+			runtime = serviceRuntime{
+				ServiceID: service.ID,
+				NodeRole:  service.Kind,
+				State:     "external",
+				Health:    "external",
+				OK:        true,
+			}
+			state = "external"
+			health = "external"
+			healthy = true
+		}
+		if runtime.ServiceID != "" {
+			serviceRuntimes = append(serviceRuntimes, runtime)
+		}
+		items = append(items, dashboardItem{
+			ID:             service.ID,
+			Name:           firstNonEmpty(service.DisplayName, service.ID),
+			DisplayName:    service.DisplayName,
+			State:          state,
+			Health:         health,
+			Kind:           service.Kind,
+			OK:             healthy,
+			Branch:         bundle.ID,
+			Profile:        bundle.ID,
+			Container:      firstNonEmpty(runtime.Container, service.ContainerName),
+			Image:          firstNonEmpty(runtime.Image, service.Image),
+			Port:           firstPositiveInt(runtime.Port, service.ServicePort),
+			ManagementPort: firstPositiveInt(runtime.ManagementPort, service.ManagementPort),
+			Message:        runtime.Message,
+		})
+	}
+	healthy, missing, unhealthy := 0, 0, 0
+	for _, item := range items {
+		if item.OK {
+			healthy++
+			continue
+		}
+		if item.State == "missing" {
+			missing++
+			continue
+		}
+		unhealthy++
+	}
+	return dashboardPayload{
+		OK:     true,
+		Source: map[string]string{"kind": "profile", "id": bundle.ID},
 		Summary: dashboardSummary{
-			Total:   len(items),
-			Missing: len(items),
+			Total:     len(items),
+			Healthy:   healthy,
+			Missing:   missing,
+			Unhealthy: unhealthy,
 		},
 		Groups: []dashboardGroup{{
 			ID:          "business",
@@ -629,7 +1054,346 @@ func dashboardPayloadFromBundle(bundle profile.Bundle) dashboardPayload {
 			DisplayName: "Services",
 			Items:       items,
 		}},
+		ServiceRuntime: serviceRuntimes,
 	}
+}
+
+type serviceRuntime struct {
+	ServiceID      string `json:"serviceId"`
+	NodeRole       string `json:"nodeRole,omitempty"`
+	Container      string `json:"container,omitempty"`
+	Image          string `json:"image,omitempty"`
+	SourcePath     string `json:"sourcePath,omitempty"`
+	BranchName     string `json:"branchName,omitempty"`
+	CommitID       string `json:"commitId,omitempty"`
+	State          string `json:"state"`
+	Health         string `json:"health"`
+	OK             bool   `json:"ok"`
+	Port           int    `json:"port,omitempty"`
+	ManagementPort int    `json:"managementPort,omitempty"`
+	Message        string `json:"message,omitempty"`
+}
+
+type dockerContainerRow struct {
+	Names  string `json:"Names"`
+	Image  string `json:"Image"`
+	State  string `json:"State"`
+	Status string `json:"Status"`
+	Ports  string `json:"Ports"`
+}
+
+func dockerRuntimeByService(ctx context.Context, services []profile.Service) map[string]serviceRuntime {
+	containers, err := listDockerContainers(ctx)
+	if err != nil {
+		return map[string]serviceRuntime{}
+	}
+	out := make(map[string]serviceRuntime)
+	for _, service := range services {
+		container, ok := matchServiceContainer(service, containers)
+		if !ok {
+			continue
+		}
+		state := strings.ToLower(strings.TrimSpace(container.State))
+		if state == "" {
+			state = "unknown"
+		}
+		health := dockerHealth(container.Status, state)
+		port, managementPort := dockerPublishedPorts(container.Ports)
+		out[service.ID] = serviceRuntime{
+			ServiceID:      service.ID,
+			NodeRole:       service.Kind,
+			Container:      container.Names,
+			Image:          firstNonEmpty(container.Image, service.Image),
+			State:          state,
+			Health:         health,
+			OK:             state == "running" && health != "unhealthy",
+			Port:           firstPositiveInt(port, service.ServicePort),
+			ManagementPort: firstPositiveInt(managementPort, service.ManagementPort),
+			Message:        container.Status,
+		}
+	}
+	return out
+}
+
+func dockerRuntimeByCatalogService(ctx context.Context, services []store.CatalogService) map[string]serviceRuntime {
+	containers, err := listDockerContainers(ctx)
+	if err != nil {
+		return map[string]serviceRuntime{}
+	}
+	out := make(map[string]serviceRuntime)
+	for _, service := range services {
+		container, ok := matchCatalogServiceContainer(service, containers)
+		if !ok {
+			continue
+		}
+		configured := serviceRuntimeFromCatalogService(service, "", "", false)
+		state := strings.ToLower(strings.TrimSpace(container.State))
+		if state == "" {
+			state = "unknown"
+		}
+		health := dockerHealth(container.Status, state)
+		port, managementPort := dockerPublishedPorts(container.Ports)
+		out[service.ID] = serviceRuntime{
+			ServiceID:      service.ID,
+			NodeRole:       service.Kind,
+			Container:      container.Names,
+			Image:          firstNonEmpty(container.Image, service.Image),
+			SourcePath:     configured.SourcePath,
+			BranchName:     configured.BranchName,
+			CommitID:       configured.CommitID,
+			State:          state,
+			Health:         health,
+			OK:             state == "running" && health != "unhealthy",
+			Port:           firstPositiveInt(port, service.ServicePort),
+			ManagementPort: firstPositiveInt(managementPort, service.ManagementPort),
+			Message:        container.Status,
+		}
+	}
+	return out
+}
+
+func configuredRuntimeByService(ctx context.Context, bundle profile.Bundle) map[string]serviceRuntime {
+	env := runtimeEnv(bundle)
+	out := make(map[string]serviceRuntime, len(bundle.Services))
+	for _, service := range bundle.Services {
+		sourcePath := serviceSourcePath(env, service)
+		branchName, commitID := sourcePathRevision(ctx, sourcePath)
+		if branchName == "" {
+			branchName = strings.TrimSpace(service.GitBranch)
+		}
+		out[service.ID] = serviceRuntime{
+			ServiceID:      service.ID,
+			NodeRole:       service.Kind,
+			Container:      service.ContainerName,
+			Image:          service.Image,
+			SourcePath:     sourcePath,
+			BranchName:     branchName,
+			CommitID:       commitID,
+			State:          "missing",
+			Health:         "unknown",
+			Port:           service.ServicePort,
+			ManagementPort: service.ManagementPort,
+		}
+	}
+	return out
+}
+
+func mergeRuntime(configured serviceRuntime, observed serviceRuntime) serviceRuntime {
+	if configured.ServiceID == "" {
+		return observed
+	}
+	configured.Container = firstNonEmpty(observed.Container, configured.Container)
+	configured.Image = firstNonEmpty(observed.Image, configured.Image)
+	configured.SourcePath = firstNonEmpty(observed.SourcePath, configured.SourcePath)
+	configured.BranchName = firstNonEmpty(observed.BranchName, configured.BranchName)
+	configured.CommitID = firstNonEmpty(observed.CommitID, configured.CommitID)
+	configured.State = firstNonEmpty(observed.State, configured.State)
+	configured.Health = firstNonEmpty(observed.Health, configured.Health)
+	configured.OK = observed.OK
+	configured.Port = firstPositiveInt(observed.Port, configured.Port)
+	configured.ManagementPort = firstPositiveInt(observed.ManagementPort, configured.ManagementPort)
+	configured.Message = firstNonEmpty(observed.Message, configured.Message)
+	return configured
+}
+
+func runtimeEnv(bundle profile.Bundle) map[string]string {
+	env := map[string]string{}
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	for _, path := range bundle.RuntimeEnvFiles {
+		for key, value := range loadRuntimeEnvFile(resolveProfilePath(bundle.BaseDir, path)) {
+			env[key] = value
+		}
+	}
+	return env
+}
+
+func loadRuntimeEnvFile(path string) map[string]string {
+	out := map[string]string{}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if key != "" {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func resolveProfilePath(baseDir string, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || filepath.IsAbs(path) || baseDir == "" {
+		return path
+	}
+	return filepath.Clean(filepath.Join(baseDir, path))
+}
+
+func serviceSourcePath(env map[string]string, service profile.Service) string {
+	if value := strings.TrimSpace(service.SourcePath); value != "" {
+		return value
+	}
+	repoEnv := strings.TrimSpace(service.RepoEnv)
+	if repoEnv == "" {
+		return ""
+	}
+	if value := strings.TrimSpace(env["DOCKER_"+repoEnv]); value != "" {
+		return value
+	}
+	return strings.TrimSpace(env[repoEnv])
+}
+
+func listDockerContainers(ctx context.Context) ([]dockerContainerRow, error) {
+	ctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{json .}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	rows := []dockerContainerRow{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var row dockerContainerRow
+		if err := json.Unmarshal([]byte(line), &row); err == nil && row.Names != "" {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
+func sourcePathRevision(ctx context.Context, sourcePath string) (string, string) {
+	if sourcePath == "" {
+		return "", ""
+	}
+	if _, err := os.Stat(filepath.Join(sourcePath, ".git")); err == nil {
+		return gitWorktreeRevision(ctx, sourcePath)
+	}
+	return sourceSnapshotRevision(sourcePath)
+}
+
+func gitWorktreeRevision(ctx context.Context, sourcePath string) (string, string) {
+	branch := strings.TrimSpace(commandOutput(ctx, 800*time.Millisecond, "git", "-C", sourcePath, "rev-parse", "--abbrev-ref", "HEAD"))
+	commit := strings.TrimSpace(commandOutput(ctx, 800*time.Millisecond, "git", "-C", sourcePath, "rev-parse", "--short=12", "HEAD"))
+	if branch == "HEAD" {
+		branch = ""
+	}
+	return branch, commit
+}
+
+func sourceSnapshotRevision(sourcePath string) (string, string) {
+	name := filepath.Base(sourcePath)
+	idx := strings.LastIndex(name, "-")
+	if idx <= 0 || idx == len(name)-1 {
+		return "", ""
+	}
+	branch := strings.TrimSpace(name[:idx])
+	commit := strings.TrimSpace(name[idx+1:])
+	if !regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`).MatchString(commit) {
+		return "", ""
+	}
+	return branch, commit
+}
+
+func commandOutput(ctx context.Context, timeout time.Duration, name string, args ...string) string {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+func matchServiceContainer(service profile.Service, containers []dockerContainerRow) (dockerContainerRow, bool) {
+	targets := []string{service.ContainerName, service.DockerService, service.ID}
+	for _, container := range containers {
+		for _, name := range strings.Split(container.Names, ",") {
+			name = strings.TrimSpace(name)
+			for _, target := range targets {
+				target = strings.TrimSpace(target)
+				if target == "" {
+					continue
+				}
+				if name == target || name == service.ID || strings.HasSuffix(name, "-"+target) || strings.HasSuffix(name, "_"+target) {
+					return container, true
+				}
+			}
+		}
+	}
+	return dockerContainerRow{}, false
+}
+
+func matchCatalogServiceContainer(service store.CatalogService, containers []dockerContainerRow) (dockerContainerRow, bool) {
+	targets := []string{service.ContainerName, service.DockerService, service.ID}
+	for _, container := range containers {
+		for _, name := range strings.Split(container.Names, ",") {
+			name = strings.TrimSpace(name)
+			for _, target := range targets {
+				target = strings.TrimSpace(target)
+				if target == "" {
+					continue
+				}
+				if name == target || name == service.ID || strings.HasSuffix(name, "-"+target) || strings.HasSuffix(name, "_"+target) {
+					return container, true
+				}
+			}
+		}
+	}
+	return dockerContainerRow{}, false
+}
+
+func dockerHealth(status string, state string) string {
+	status = strings.ToLower(status)
+	switch {
+	case strings.Contains(status, "(healthy)"):
+		return "healthy"
+	case strings.Contains(status, "(unhealthy)"):
+		return "unhealthy"
+	case state == "running":
+		return "healthy"
+	case state == "":
+		return "unknown"
+	default:
+		return state
+	}
+}
+
+func dockerPublishedPorts(raw string) (int, int) {
+	matches := regexp.MustCompile(`(?:0\.0\.0\.0|127\.0\.0\.1|\[::\]|::):(\d+)->`).FindAllStringSubmatch(raw, -1)
+	ports := make([]int, 0, len(matches))
+	for _, match := range matches {
+		port, err := strconv.Atoi(match[1])
+		if err == nil && port > 0 {
+			ports = append(ports, port)
+		}
+	}
+	if len(ports) == 0 {
+		return 0, 0
+	}
+	if len(ports) == 1 {
+		return ports[0], 0
+	}
+	return ports[0], ports[1]
 }
 
 func statePayloadFromBundle(bundle profile.Bundle) statePayload {
@@ -675,6 +1439,10 @@ func catalogPayloadFromBundle(bundle profile.Bundle) catalogPayload {
 
 	return catalogPayload{
 		SchemaVersion: "1",
+		OK:            true,
+		GeneratedAt:   time.Now().UTC(),
+		Navigation:    map[string]any{},
+		Warnings:      []string{},
 		Source: map[string]string{
 			"kind":        "profile",
 			"id":          bundle.ID,
@@ -690,25 +1458,326 @@ func catalogPayloadFromBundle(bundle profile.Bundle) catalogPayload {
 	}
 }
 
-func interfaceNodesPayloadFromBundle(bundle profile.Bundle, serviceID string) interfaceNodesPayload {
+func interfaceNodesPayloadFromBundle(bundle profile.Bundle, serviceID string, operation string) interfaceNodesPayload {
 	items := make([]interfaceNodeItem, 0, len(bundle.InterfaceNodes))
 	for _, node := range bundle.InterfaceNodes {
 		if serviceID != "" && node.ServiceID != serviceID {
+			continue
+		}
+		nodeOperation := firstNonEmpty(node.DisplayName, node.ID)
+		if operation != "" && nodeOperation != operation {
 			continue
 		}
 		items = append(items, interfaceNodeItem{
 			ID:               node.ID,
 			DisplayName:      node.DisplayName,
 			ServiceID:        node.ServiceID,
+			Operation:        nodeOperation,
 			Href:             "/interface-node.html?id=" + node.ID,
+			Status:           "pending",
 			AdmissionStatus:  "pending",
 			ValidationStatus: "valid",
+			TimeoutMs:        node.TimeoutMs,
 		})
 	}
 	return interfaceNodesPayload{
-		Source: map[string]string{"kind": "profile", "id": bundle.ID},
-		Items:  items,
+		OK:         true,
+		TemplateID: "TPL-INTERFACE-NODE-CASE-LIST-V1",
+		Filters:    map[string]string{"serviceId": serviceID, "operation": operation},
+		Source:     map[string]string{"kind": "profile", "id": bundle.ID},
+		Items:      items,
 	}
+}
+
+func interfaceNodesPayloadFromStore(ctx context.Context, catalog store.ProfileCatalog, runtime store.Store, serviceID string, operation string) (interfaceNodesPayload, error) {
+	payload, ok, err := interfaceNodesPayloadFromReadModel(ctx, runtime, catalog.ProfileID, serviceID, operation)
+	if err != nil {
+		return interfaceNodesPayload{}, err
+	}
+	if !ok {
+		payload = interfaceNodesBasePayloadFromCatalog(catalog, serviceID, operation)
+	}
+	if err := hydrateInterfaceNodesPayload(ctx, catalog, runtime, &payload); err != nil {
+		return interfaceNodesPayload{}, err
+	}
+	if len(payload.Presentation.Copy) == 0 {
+		payload.Presentation = interfaceNodeDirectoryPresentationForCatalog(catalog.TemplateConfigs)
+	}
+	return payload, nil
+}
+
+func interfaceNodesPayloadFromReadModel(ctx context.Context, runtime store.Store, profileID string, serviceID string, operation string) (interfaceNodesPayload, bool, error) {
+	model, err := runtime.GetReadModel(ctx, profileID, profilecatalog.ReadModelInterfaceNodes)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return interfaceNodesPayload{}, false, nil
+		}
+		return interfaceNodesPayload{}, false, err
+	}
+	var payload interfaceNodesPayload
+	if err := json.Unmarshal([]byte(model.PayloadJSON), &payload); err != nil {
+		return interfaceNodesPayload{}, false, err
+	}
+	payload.Filters = map[string]string{"serviceId": serviceID, "operation": operation}
+	payload.Source = map[string]string{"kind": "read-model", "id": profileID}
+	if serviceID == "" && operation == "" {
+		return payload, true, nil
+	}
+	filtered := payload.Items[:0]
+	for _, item := range payload.Items {
+		if serviceID != "" && item.ServiceID != serviceID {
+			continue
+		}
+		if operation != "" && item.Operation != operation {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	payload.Items = filtered
+	return payload, true, nil
+}
+
+func interfaceNodesBasePayloadFromCatalog(catalog store.ProfileCatalog, serviceID string, operation string) interfaceNodesPayload {
+	items := make([]interfaceNodeItem, 0, len(catalog.InterfaceNodes))
+	for _, node := range catalog.InterfaceNodes {
+		if serviceID != "" && node.ServiceID != serviceID {
+			continue
+		}
+		nodeOperation := firstNonEmpty(node.Operation, node.DisplayName, node.ID)
+		if operation != "" && nodeOperation != operation {
+			continue
+		}
+		cases := catalogCasesForNode(catalog.APICases, node.ID)
+		required := 0
+		for _, item := range cases {
+			if item.RequiredForAdmission {
+				required++
+			}
+		}
+		items = append(items, interfaceNodeItem{
+			ID:                   node.ID,
+			DisplayName:          node.DisplayName,
+			ServiceID:            node.ServiceID,
+			Operation:            nodeOperation,
+			Method:               node.Method,
+			Path:                 node.Path,
+			Href:                 "/interface-node.html?id=" + node.ID,
+			Status:               firstNonEmpty(node.Status, "draft"),
+			AdmissionStatus:      "pending",
+			ValidationStatus:     "valid",
+			ValidationIssueCount: 0,
+			RequiredCaseCount:    required,
+			PassedCaseCount:      0,
+			TimeoutMs:            node.TimeoutMs,
+		})
+	}
+	return interfaceNodesPayload{
+		OK:           true,
+		TemplateID:   "TPL-INTERFACE-NODE-CASE-LIST-V1",
+		Filters:      map[string]string{"serviceId": serviceID, "operation": operation},
+		Source:       map[string]string{"kind": "store", "id": catalog.ProfileID},
+		Items:        items,
+		Presentation: interfaceNodeDirectoryPresentationForCatalog(catalog.TemplateConfigs),
+	}
+}
+
+func hydrateInterfaceNodesPayload(ctx context.Context, catalog store.ProfileCatalog, runtime store.Store, payload *interfaceNodesPayload) error {
+	latest, err := preferredCaseStates(ctx, catalog, runtime)
+	if err != nil {
+		return err
+	}
+	for index := range payload.Items {
+		cases := catalogCasesForNode(catalog.APICases, payload.Items[index].ID)
+		passed, failed, missing := 0, 0, 0
+		required := 0
+		latestRunID := ""
+		latestElapsedMs := int64(0)
+		latestObservedAt := time.Time{}
+		latestRequiredRunID := ""
+		latestRequiredElapsedMs := int64(0)
+		latestRequiredObservedAt := time.Time{}
+		totalElapsedMs := int64(0)
+		for _, item := range cases {
+			state := latest[item.ID]
+			if state.RunID != "" && (latestRunID == "" || state.ObservedAt.After(latestObservedAt)) {
+				latestRunID = state.RunID
+				latestElapsedMs = state.ElapsedMs
+				latestObservedAt = state.ObservedAt
+			}
+			if !item.RequiredForAdmission {
+				continue
+			}
+			required++
+			if state.RunID != "" && (latestRequiredRunID == "" || state.ObservedAt.After(latestRequiredObservedAt)) {
+				latestRequiredRunID = state.RunID
+				latestRequiredElapsedMs = state.ElapsedMs
+				latestRequiredObservedAt = state.ObservedAt
+			}
+			totalElapsedMs += state.ElapsedMs
+			switch state.Status {
+			case store.StatusPassed:
+				passed++
+			case store.StatusFailed:
+				failed++
+			default:
+				missing++
+			}
+		}
+		admission := "pending"
+		if required > 0 && passed == required {
+			admission = store.StatusPassed
+		} else if failed > 0 {
+			admission = store.StatusFailed
+		} else if missing == 0 && required == 0 {
+			admission = "pending"
+		}
+		payload.Items[index].AdmissionStatus = admission
+		payload.Items[index].RequiredCaseCount = required
+		payload.Items[index].PassedCaseCount = passed
+		payload.Items[index].LatestRunID = firstNonEmpty(latestRequiredRunID, latestRunID)
+		payload.Items[index].LatestElapsedMs = firstPositiveInt64(latestRequiredElapsedMs, latestElapsedMs)
+		payload.Items[index].TotalElapsedMs = firstPositiveInt64(totalElapsedMs, payload.Items[index].LatestElapsedMs)
+	}
+	return nil
+}
+
+func preferredCaseStates(ctx context.Context, catalog store.ProfileCatalog, runtime store.Store) (map[string]latestCaseState, error) {
+	timeoutByCase := interfaceCaseTimeoutsByID(catalog)
+	if fast, ok := runtime.(interfaceNodeCaseRunRecordStore); ok {
+		caseIDs := make([]string, 0, len(catalog.APICases))
+		for _, item := range catalog.APICases {
+			if item.ID != "" && activeCatalogStatus(item.Status) {
+				caseIDs = append(caseIDs, item.ID)
+			}
+		}
+		records, err := fast.ListAPICaseRunRecordsForCaseIDs(ctx, caseIDs)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]latestCaseState{}
+		selectedPassed := map[string]bool{}
+		for _, record := range records {
+			item := record.CaseRun
+			if item.CaseID == "" || selectedPassed[item.CaseID] {
+				continue
+			}
+			state := evaluateLatestCaseStateTimeout(latestCaseStateFromRun(item), timeoutByCase[item.CaseID])
+			if _, exists := out[item.CaseID]; !exists {
+				out[item.CaseID] = state
+			}
+			if state.Status == store.StatusPassed {
+				out[item.CaseID] = state
+				selectedPassed[item.CaseID] = true
+			}
+		}
+		return out, nil
+	}
+	states, err := latestCaseStates(ctx, runtime)
+	if err != nil {
+		return nil, err
+	}
+	for caseID, state := range states {
+		states[caseID] = evaluateLatestCaseStateTimeout(state, timeoutByCase[caseID])
+	}
+	return states, nil
+}
+
+type latestCaseState struct {
+	Status     string
+	RunID      string
+	ElapsedMs  int64
+	ObservedAt time.Time
+}
+
+func latestCaseStatuses(ctx context.Context, runtime store.Store) (map[string]string, error) {
+	states, err := latestCaseStates(ctx, runtime)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for caseID, state := range states {
+		out[caseID] = state.Status
+	}
+	return out, nil
+}
+
+func latestCaseStates(ctx context.Context, runtime store.Store) (map[string]latestCaseState, error) {
+	out := map[string]latestCaseState{}
+	if runtime == nil {
+		return out, nil
+	}
+	if fast, ok := runtime.(latestAPICaseRunStore); ok {
+		caseRuns, err := fast.ListLatestAPICaseRuns(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range caseRuns {
+			if item.CaseID == "" {
+				continue
+			}
+			if _, exists := out[item.CaseID]; !exists {
+				out[item.CaseID] = latestCaseStateFromRun(item)
+			}
+		}
+		return out, nil
+	}
+	runs, err := runtime.ListRuns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(runs) - 1; i >= 0; i-- {
+		caseRuns, err := runtime.ListAPICaseRuns(ctx, runs[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		for j := len(caseRuns) - 1; j >= 0; j-- {
+			item := caseRuns[j]
+			if item.CaseID == "" {
+				continue
+			}
+			if _, exists := out[item.CaseID]; !exists {
+				out[item.CaseID] = latestCaseStateFromRun(item)
+			}
+		}
+	}
+	return out, nil
+}
+
+func latestCaseStateFromRun(item store.APICaseRun) latestCaseState {
+	observedAt := item.FinishedAt
+	if observedAt.IsZero() {
+		observedAt = item.StartedAt
+	}
+	if observedAt.IsZero() {
+		observedAt = item.CreatedAt
+	}
+	return latestCaseState{
+		Status:     item.Status,
+		RunID:      item.RunID,
+		ElapsedMs:  elapsedMilliseconds(item.StartedAt, item.FinishedAt),
+		ObservedAt: observedAt,
+	}
+}
+
+func evaluateLatestCaseStateTimeout(state latestCaseState, timeoutMs int) latestCaseState {
+	if evaluateRuntimeTimeout(state.ElapsedMs, timeoutMs).Exceeded {
+		state.Status = store.StatusFailed
+	}
+	return state
+}
+
+type latestAPICaseRunStore interface {
+	ListLatestAPICaseRuns(context.Context) ([]store.APICaseRun, error)
+}
+
+func catalogCasesForNode(items []store.CatalogAPICase, nodeID string) []store.CatalogAPICase {
+	cases := make([]store.CatalogAPICase, 0)
+	for _, item := range items {
+		if item.NodeID == nodeID && activeCatalogStatus(item.Status) {
+			cases = append(cases, item)
+		}
+	}
+	return cases
 }
 
 func interfaceNodeDetailPayloadFromBundle(bundle profile.Bundle, id string) (interfaceNodeDetailPayload, bool) {
@@ -718,14 +1787,16 @@ func interfaceNodeDetailPayloadFromBundle(bundle profile.Bundle, id string) (int
 		}
 	}
 	return interfaceNodeDetailPayload{
-		OK:        false,
-		Error:     "interface node not found",
-		Requested: id,
-		Available: interfaceNodesPayloadFromBundle(bundle, "").Items,
-		Cases:     []interfaceCase{},
-		Fields:    emptyInterfaceNodeFields(),
-		History:   emptyInterfaceNodeHistory(),
-		Runs:      []map[string]any{},
+		OK:         false,
+		TemplateID: "TPL-INTERFACE-NODE-CASE-LIST-V1",
+		Source:     map[string]string{"kind": "profile", "id": bundle.ID},
+		Error:      "interface node not found",
+		Requested:  id,
+		Available:  interfaceNodesPayloadFromBundle(bundle, "", "").Items,
+		Cases:      []interfaceCase{},
+		Fields:     emptyInterfaceNodeFields(),
+		History:    emptyInterfaceNodeHistory(),
+		Runs:       []map[string]any{},
 	}, false
 }
 
@@ -772,6 +1843,48 @@ func apiCaseCapabilitiesFromBundle(bundle profile.Bundle) apiCaseCapabilitiesPay
 	}
 }
 
+func apiCaseCapabilitiesFromCatalog(catalog store.ProfileCatalog) apiCaseCapabilitiesPayload {
+	nodeByID := make(map[string]store.CatalogInterfaceNode)
+	for _, node := range catalog.InterfaceNodes {
+		nodeByID[node.ID] = node
+	}
+	serviceByID := make(map[string]store.CatalogService)
+	for _, service := range catalog.Services {
+		serviceByID[service.ID] = service
+	}
+	cases := make([]apiCaseCapability, 0, len(catalog.APICases))
+	for _, item := range catalog.APICases {
+		node := nodeByID[item.NodeID]
+		service := serviceByID[node.ServiceID]
+		graph := apiCaseServiceGraph{Nodes: []apiCaseServiceNode{}, Edges: []catalogEdge{}}
+		if node.ServiceID != "" {
+			graph.Nodes = append(graph.Nodes, apiCaseServiceNode{
+				ID:          node.ServiceID,
+				DisplayName: firstNonEmpty(service.DisplayName, node.ServiceID),
+				Role:        firstNonEmpty(service.Kind, "service"),
+				Href:        "/environment-node.html?id=" + node.ServiceID,
+			})
+		}
+		cases = append(cases, apiCaseCapability{
+			ID:               item.ID,
+			Title:            firstNonEmpty(item.DisplayName, item.ID),
+			Operation:        firstNonEmpty(node.DisplayName, item.NodeID),
+			CasePath:         item.CasePath,
+			BaseURL:          item.BaseURL,
+			EvidenceDir:      item.EvidenceDir,
+			TimeoutSeconds:   item.TimeoutSeconds,
+			DefaultOverrides: jsonObject(item.DefaultOverridesJSON),
+			Workflow:         map[string]string{},
+			Graph:            graph,
+		})
+	}
+	return apiCaseCapabilitiesPayload{
+		OK:    true,
+		Cases: cases,
+		Graph: map[string][]string{},
+	}
+}
+
 func interfaceNodeDetailPayloadForNode(bundle profile.Bundle, node profile.InterfaceNode) interfaceNodeDetailPayload {
 	templates := requestTemplatesForNode(bundle.RequestTemplates, node.ID)
 	cases := casesForNode(bundle.APICases, bundle.CaseDependencies, node.ID)
@@ -781,6 +1894,9 @@ func interfaceNodeDetailPayloadForNode(bundle profile.Bundle, node profile.Inter
 		path = templates[0].Path
 	}
 	return interfaceNodeDetailPayload{
+		OK:         true,
+		TemplateID: "TPL-INTERFACE-NODE-CASE-LIST-V1",
+		Source:     map[string]string{"kind": "profile", "id": bundle.ID},
 		Node: interfaceNodeDetail{
 			ID:          node.ID,
 			DisplayName: node.DisplayName,
@@ -788,6 +1904,7 @@ func interfaceNodeDetailPayloadForNode(bundle profile.Bundle, node profile.Inter
 			Operation:   firstNonEmpty(node.DisplayName, node.ID),
 			Method:      method,
 			Path:        path,
+			TimeoutMs:   node.TimeoutMs,
 		},
 		Admission: interfaceNodeAdmission{
 			Status:            "pending",
@@ -801,6 +1918,215 @@ func interfaceNodeDetailPayloadForNode(bundle profile.Bundle, node profile.Inter
 		History:          emptyInterfaceNodeHistory(),
 		Runs:             []map[string]any{},
 	}
+}
+
+func interfaceNodeDetailPayloadFromCatalog(catalog store.ProfileCatalog, id string) (interfaceNodeDetailPayload, bool) {
+	var node store.CatalogInterfaceNode
+	found := false
+	for _, item := range catalog.InterfaceNodes {
+		if item.ID == id {
+			node = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		return interfaceNodeDetailPayload{}, false
+	}
+	cases := casesForCatalogNode(catalog, id)
+	return interfaceNodeDetailPayload{
+		OK:         true,
+		TemplateID: "TPL-INTERFACE-NODE-CASE-LIST-V1",
+		Source:     map[string]string{"kind": "store", "id": catalog.ProfileID},
+		Node: interfaceNodeDetail{
+			ID:          node.ID,
+			DisplayName: node.DisplayName,
+			ServiceID:   node.ServiceID,
+			Operation:   firstNonEmpty(node.Operation, node.DisplayName, node.ID),
+			Method:      node.Method,
+			Path:        node.Path,
+			TimeoutMs:   node.TimeoutMs,
+			TemplateID:  node.TemplateID,
+			Version:     node.Version,
+			Status:      node.Status,
+			Tags:        node.Tags,
+			Description: node.Description,
+			SortOrder:   node.SortOrder,
+			CreatedAt:   node.CreatedAt,
+			UpdatedAt:   node.UpdatedAt,
+		},
+		Admission: interfaceNodeAdmission{
+			Status:            "pending",
+			RequiredCaseCount: requiredInterfaceCaseCount(cases),
+			PassedCaseCount:   0,
+			Blockers:          []map[string]any{},
+		},
+		RequestTemplates: requestTemplatesForCatalogNode(catalog.RequestTemplates, id),
+		Cases:            cases,
+		Fields:           fieldsForCatalogNode(catalog.InterfaceFields, id),
+		History:          emptyInterfaceNodeHistory(),
+		Runs:             []map[string]any{},
+		Presentation:     interfaceNodePresentationForCatalog(catalog.TemplateConfigs, node),
+	}, true
+}
+
+func interfaceNodePresentationForCatalog(configs []store.CatalogTemplateConfig, node store.CatalogInterfaceNode) interfaceNodePresentation {
+	copy := map[string]string{}
+	for _, config := range configs {
+		if !visibleTemplateConfigStatus(config.Status) || config.ScopeType != "interface-node" {
+			continue
+		}
+		configCopy := stringMapFromAny(jsonObject(config.ConfigJSON)["copy"])
+		if len(configCopy) == 0 {
+			continue
+		}
+		switch {
+		case config.NodeID == "" && (config.ScopeID == "" || config.ScopeID == "_default"):
+			mergeStringMap(copy, configCopy)
+		case config.NodeID == node.ID || config.ScopeID == node.ID:
+			mergeStringMap(copy, configCopy)
+		}
+	}
+	if len(copy) == 0 {
+		return interfaceNodePresentation{}
+	}
+	return interfaceNodePresentation{Copy: copy}
+}
+
+func interfaceNodeDirectoryPresentationForCatalog(configs []store.CatalogTemplateConfig) interfaceNodePresentation {
+	copy := map[string]string{}
+	for _, config := range configs {
+		if !visibleTemplateConfigStatus(config.Status) || config.ScopeType != "interface-node-directory" {
+			continue
+		}
+		if config.ScopeID != "" && config.ScopeID != "_default" {
+			continue
+		}
+		configCopy := stringMapFromAny(jsonObject(config.ConfigJSON)["copy"])
+		if len(configCopy) == 0 {
+			continue
+		}
+		mergeStringMap(copy, configCopy)
+	}
+	if len(copy) == 0 {
+		return interfaceNodePresentation{}
+	}
+	return interfaceNodePresentation{Copy: copy}
+}
+
+func mergeStringMap(target map[string]string, source map[string]string) {
+	for key, value := range source {
+		if key != "" && value != "" {
+			target[key] = value
+		}
+	}
+}
+
+func requestTemplatesForCatalogNode(items []store.CatalogRequestTemplate, nodeID string) []interfaceRequestTemplate {
+	templates := make([]interfaceRequestTemplate, 0)
+	for _, item := range items {
+		if item.NodeID != nodeID || !activeCatalogStatus(item.Status) {
+			continue
+		}
+		templates = append(templates, interfaceRequestTemplate{
+			ID:           item.ID,
+			Name:         item.DisplayName,
+			Version:      item.Version,
+			Status:       firstNonEmpty(item.Status, "active"),
+			Method:       item.Method,
+			Path:         item.Path,
+			TemplateJSON: item.TemplateJSON,
+		})
+	}
+	sort.SliceStable(templates, func(i int, j int) bool { return templates[i].ID < templates[j].ID })
+	return templates
+}
+
+func casesForCatalogNode(catalog store.ProfileCatalog, nodeID string) []interfaceCase {
+	dependenciesByCase := make(map[string][]map[string]any)
+	fixtureByID := make(map[string]store.CatalogFixture)
+	for _, fixture := range catalog.Fixtures {
+		fixtureByID[fixture.ID] = fixture
+	}
+	for _, dependency := range catalog.CaseDependencies {
+		if !activeCatalogStatus(dependency.Status) {
+			continue
+		}
+		fixture := fixtureByID[dependency.FixtureID]
+		dependenciesByCase[dependency.CaseID] = append(dependenciesByCase[dependency.CaseID], map[string]any{
+			"id":               dependency.ID,
+			"fixtureProfileId": dependency.FixtureID,
+			"profile": map[string]any{
+				"id":   fixture.ID,
+				"name": fixture.DisplayName,
+				"kind": fixture.Kind,
+			},
+			"required":     dependency.Required,
+			"mappingsJson": dependency.MappingsJSON,
+		})
+	}
+	cases := make([]interfaceCase, 0)
+	for _, item := range catalog.APICases {
+		if item.NodeID != nodeID || !activeCatalogStatus(item.Status) {
+			continue
+		}
+		cases = append(cases, interfaceCase{
+			ID:                   item.ID,
+			Title:                item.DisplayName,
+			CaseType:             firstNonEmpty(item.CaseType, "api"),
+			Scenario:             item.Scenario,
+			PayloadTemplateJSON:  item.PayloadTemplateJSON,
+			RequestTemplateID:    item.RequestTemplateID,
+			PatchJSON:            item.PatchJSON,
+			RenderMode:           item.RenderMode,
+			ExpectedJSON:         item.ExpectedJSON,
+			Status:               item.Status,
+			SortOrder:            item.SortOrder,
+			RequiredForAdmission: item.RequiredForAdmission,
+			Dependencies:         nonNil(dependenciesByCase[item.ID]),
+		})
+	}
+	return cases
+}
+
+func fieldsForCatalogNode(items []store.CatalogInterfaceNodeField, nodeID string) interfaceNodeFields {
+	fields := emptyInterfaceNodeFields()
+	for _, item := range items {
+		if item.NodeID != nodeID || !activeCatalogStatus(item.Status) {
+			continue
+		}
+		row := map[string]any{
+			"id":          item.ID,
+			"fieldPath":   item.FieldPath,
+			"displayName": item.DisplayName,
+			"dataType":    item.DataType,
+			"required":    item.Required,
+			"bindable":    item.Bindable,
+			"portType":    item.PortType,
+		}
+		switch item.Direction {
+		case "response":
+			fields.Response = append(fields.Response, row)
+		default:
+			fields.Request = append(fields.Request, row)
+		}
+	}
+	return fields
+}
+
+func requiredInterfaceCaseCount(items []interfaceCase) int {
+	count := 0
+	for _, item := range items {
+		if item.RequiredForAdmission {
+			count++
+		}
+	}
+	return count
+}
+
+func activeCatalogStatus(status string) bool {
+	status = strings.TrimSpace(strings.ToLower(status))
+	return status == "" || status == "active"
 }
 
 func requestTemplatesForNode(items []profile.RequestTemplate, nodeID string) []interfaceRequestTemplate {
@@ -898,15 +2224,19 @@ func catalogWorkflows(bundle profile.Bundle) []catalogWorkflow {
 				CaseID:      binding.CaseID,
 				Action:      item.DisplayName,
 				Required:    binding.Required,
+				TimeoutMs:   node.TimeoutMs,
 			})
 		}
 		workflows = append(workflows, catalogWorkflow{
-			ID:           workflow.ID,
-			DisplayName:  workflow.DisplayName,
-			Description:  workflow.Description,
-			Entrypoint:   "/workflow-studio.html",
-			Steps:        steps,
-			Presentation: catalogWorkflowPresentation{Kind: workflowPresentationKind(steps)},
+			ID:                workflow.ID,
+			DisplayName:       workflow.DisplayName,
+			Description:       workflow.Description,
+			Entrypoint:        "/workflow-studio.html",
+			BaseStepTimeoutMs: workflow.BaseStepTimeoutMs,
+			TimeoutOffsetMs:   workflow.TimeoutOffsetMs,
+			TimeoutMs:         workflowBudgetMs(workflow.BaseStepTimeoutMs, workflow.TimeoutOffsetMs, steps),
+			Steps:             steps,
+			Presentation:      catalogWorkflowPresentation{Kind: workflowPresentationKind(steps)},
 		})
 	}
 	return workflows

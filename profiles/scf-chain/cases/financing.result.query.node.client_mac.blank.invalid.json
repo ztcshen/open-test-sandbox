@@ -1,5 +1,6 @@
 {
   "id": "financing.result.query.node.client_mac.blank.invalid",
   "displayName": "融资结果查询-client_mac为空当前返回订单不存在",
-  "nodeId": "scf.financing.result.query"
+  "nodeId": "scf.financing.result.query",
+  "requiredForAdmission": false
 }

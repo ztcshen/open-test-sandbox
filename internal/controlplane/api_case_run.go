@@ -39,7 +39,6 @@ func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 		BaseURL:     strings.TrimSpace(valueString(payload["baseUrl"])),
 		EvidenceDir: firstNonEmpty(valueString(payload["evidenceDir"]), filepath.Join(".runtime", "cases")),
 		RunID:       strings.TrimSpace(valueString(payload["runId"])),
-		DryRun:      boolValue(payload["dryRun"]),
 		Overrides:   mapValue(payload["overrides"]),
 	})
 	if err != nil {
@@ -55,7 +54,6 @@ func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 	report := apiCaseRunReport(result)
 	writeJSON(w, map[string]any{
 		"ok":        result.Status == store.StatusPassed,
-		"dryRun":    result.DryRun,
 		"report":    report,
 		"summary":   report,
 		"viewerUrl": apiCaseViewerURL(result),
@@ -190,7 +188,6 @@ func apiCaseRunReport(result apicase.RunResult) map[string]any {
 		"run_id":        result.RunID,
 		"case_id":       result.CaseID,
 		"status":        result.Status,
-		"dry_run":       result.DryRun,
 		"evidence_path": result.EvidencePath,
 		"started_at":    result.StartedAt,
 		"finished_at":   result.FinishedAt,
@@ -240,6 +237,8 @@ func intValue(value any) int {
 	switch typed := value.(type) {
 	case int:
 		return typed
+	case int64:
+		return int(typed)
 	case float64:
 		return int(typed)
 	case json.Number:

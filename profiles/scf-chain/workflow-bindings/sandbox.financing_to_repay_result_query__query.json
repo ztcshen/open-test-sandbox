@@ -3,5 +3,6 @@
   "stepId": "query",
   "nodeId": "scf.financing.result.query",
   "caseId": "financing.result.query.node.basic",
-  "required": true
+  "required": true,
+  "sortOrder": 4
 }

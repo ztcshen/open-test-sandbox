@@ -20,11 +20,27 @@ function parseSummary(run) {
   return {};
 }
 
-function RunCard({ run, selected }) {
+function compactText(value, max = 28) {
+  const text = String(value || "").trim();
+  if (text.length <= max) return text || "-";
+  if (max <= 6) return text.slice(0, max);
+  const head = Math.ceil((max - 3) * 0.58);
+  const tail = Math.floor((max - 3) * 0.42);
+  return `${text.slice(0, head)}...${text.slice(text.length - tail)}`;
+}
+
+function workflowLabel(catalog, workflowID, max = 26) {
+  const workflow = (catalog?.workflows || []).find((item) => item.id === workflowID);
+  return compactText(workflow?.displayName || workflowID, max);
+}
+
+function RunCard({ run, selected, catalog }) {
+  const workflowID = run.workflowId || "";
+  const runID = run.id || run.runId || "";
   return (
-    <a className={`workflow-run-step ${selected ? "active" : ""} ${statusTone(run.status)}`} href={`/workflow-run.html?id=${encodeURIComponent(run.id || run.runId || "")}`}>
+    <a className={`workflow-run-step ${selected ? "active" : ""} ${statusTone(run.status)}`} href={`/workflow-run.html?id=${encodeURIComponent(runID)}`} title={`${workflowID || "-"} · ${runID || "-"}`}>
       <div>
-        <strong>{run.workflowId || run.id || "-"}</strong>
+        <strong>{workflowLabel(catalog, workflowID)}</strong>
         <span>{shortTime(run.updatedAt || run.createdAt)}</span>
       </div>
       <code>{run.status || "-"}</code>
@@ -36,6 +52,10 @@ function stepID(step, index) {
   return step.stepId || step.id || `step-${index + 1}`;
 }
 
+function stepAnchor(step, index) {
+  return `workflow-step-${encodeURIComponent(stepID(step, index) || "unknown")}`;
+}
+
 function stepStatus(step) {
   if (step.status) return step.status;
   if (step.stepOk === false || step.ok === false) return "failed";
@@ -43,11 +63,12 @@ function stepStatus(step) {
   return "unknown";
 }
 
-function traceTopologyHref(runID, step) {
+function traceTopologyHref(runID, stepOrFilter = "", exitKind = "") {
   const params = new URLSearchParams();
   params.set("workflowRunId", runID || "");
-  const traceFilter = step.stepId || step.summary?.requestId || "";
+  const traceFilter = typeof stepOrFilter === "string" ? stepOrFilter : stepOrFilter.stepId || stepOrFilter.summary?.requestId || "";
   if (traceFilter) params.set("traceFilter", traceFilter);
+  if (exitKind) params.set("exitKind", exitKind);
   return `/trace-topology.html?${params.toString()}`;
 }
 
@@ -57,6 +78,15 @@ function workflowStepHref(run, step) {
   params.set("step", step.stepId || step.id || "");
   if (run?.id) params.set("runId", run.id);
   return `/workflow-step.html?${params.toString()}`;
+}
+
+function evidenceHref(run, step) {
+  const runID = run?.id || run?.runId || "";
+  const params = new URLSearchParams({ caseRun: runID });
+  if (step.caseId) params.set("caseId", step.caseId);
+  const id = stepID(step, 0);
+  if (id) params.set("stepId", id);
+  return `/evidence-viewer.html?${params.toString()}`;
 }
 
 function catalogStepFor(run, step, catalog) {
@@ -99,7 +129,7 @@ function StepCard({ run, step, index, catalog }) {
     step.elapsedMs || summary.elapsedMs ? `${step.elapsedMs || summary.elapsedMs} ms` : "",
   ].filter(Boolean).join(" · ");
   return (
-    <article className={`workflow-run-step-card ${statusTone(status)}`}>
+    <article id={stepAnchor(step, index)} className={`workflow-run-step-card ${statusTone(status)}`}>
       <div>
         <strong>{`${String(index + 1).padStart(2, "0")} ${step.title || id}`}</strong>
         <span className={`status-pill ${statusTone(status)}`}>{status}</span>
@@ -109,9 +139,49 @@ function StepCard({ run, step, index, catalog }) {
       <div className="workflow-run-step-service-links">
         {serviceID ? <a href={serviceHref(serviceID, catalog)}>{serviceName(catalog?.services, serviceID)}</a> : null}
         <a href={workflowStepHref(run, step)}>接口明细</a>
+        {run?.id && step.caseId ? <a href={evidenceHref(run, step)}>运行证据</a> : null}
         {run?.id ? <a href={traceTopologyHref(run.id, step)}>过滤拓扑</a> : null}
       </div>
     </article>
+  );
+}
+
+function topologyStatusTone(status) {
+  return status === "complete" ? "passed" : "failed";
+}
+
+function TraceTopologyCards({ detail }) {
+  const topologies = detail?.traceTopologies || [];
+  const runID = detail?.run?.id || "";
+  return (
+    <section className="workflow-run-panel">
+      <div className="section-head">
+        <div>
+          <h2>Trace Topology</h2>
+          <p>{`${topologies.length} persisted records`}</p>
+        </div>
+        {runID ? <a className="button-link" href={traceTopologyHref(runID)}>拓扑工作台</a> : null}
+      </div>
+      <div className="workflow-run-trace-topologies">
+        {topologies.length ? topologies.map((topology) => {
+          const filter = topology.stepId || topology.caseId || "";
+          return (
+            <article className={`workflow-run-trace-card ${topology.status === "complete" ? "complete" : "partial"}`} key={topology.id || `${topology.stepId}-${topology.traceId}`}>
+              <div>
+                <strong>{topology.stepId || topology.caseId || "trace"}</strong>
+                <span className={`status-pill ${topologyStatusTone(topology.status)}`}>{topology.status || "unknown"}</span>
+              </div>
+              <p>{[topology.requestId || "-", topology.traceId || "-", shortTime(topology.createdAt)].join(" · ")}</p>
+              <div className="workflow-run-step-service-links">
+                <a href={traceTopologyHref(runID, filter)}>过滤此 step</a>
+                <a href={traceTopologyHref(runID, filter, "external")}>只看 exits</a>
+              </div>
+              <pre>{topology.textTopology || "No text topology captured."}</pre>
+            </article>
+          );
+        }) : <div className="empty-note">暂无 trace topology 记录。</div>}
+      </div>
+    </section>
   );
 }
 
@@ -149,6 +219,8 @@ function WorkflowRunApp() {
   const workflowRuns = runs?.workflowRuns || [];
   const selectedRun = detail?.run || detail || workflowRuns[0] || null;
   const selectedID = selectedRun?.id || selectedRun?.runId || requestedID;
+  const selectedWorkflowID = selectedRun?.workflowId || "";
+  const selectedWorkflowLabel = workflowLabel(catalog, selectedWorkflowID, 32);
   const summary = useMemo(() => detail?.summary || parseSummary(selectedRun), [detail, selectedRun]);
   const steps = summary.steps || detail?.steps || [];
   const identifiers = Object.entries(summary.identifiers || summary.ids || {});
@@ -159,7 +231,7 @@ function WorkflowRunApp() {
       <section className="topbar">
         <div>
           <h1>Workflow run</h1>
-          <p>{selectedRun ? `${selectedRun.workflowId || "-"} · ${selectedID}` : "run loading"}</p>
+          <p title={selectedRun ? `${selectedWorkflowID || "-"} · ${selectedID}` : ""}>{selectedRun ? `${selectedWorkflowLabel} · ${compactText(selectedID, 34)}` : "run loading"}</p>
         </div>
         <div className="actions">
           <span className="workflow-step-status-pill" role="status">{message}</span>
@@ -169,7 +241,7 @@ function WorkflowRunApp() {
       </section>
       <section className="workflow-run-summary" aria-label="Workflow run summary">
         <article><span>Status</span><strong>{selectedRun?.status || "-"}</strong></article>
-        <article><span>Workflow</span><strong>{selectedRun?.workflowId || "-"}</strong></article>
+        <article className="workflow-run-summary-workflow"><span>Workflow</span><strong title={selectedWorkflowID}>{selectedWorkflowLabel}</strong><code>{compactText(selectedWorkflowID, 36)}</code></article>
         <article><span>Runs</span><strong>{workflowRuns.length}</strong></article>
         <article><span>Updated</span><strong>{shortTime(selectedRun?.updatedAt || selectedRun?.createdAt)}</strong></article>
       </section>
@@ -177,7 +249,7 @@ function WorkflowRunApp() {
         <section className="workflow-run-panel workflow-run-steps-panel">
           <div className="section-head"><div><h2>Runs</h2><p>{`${workflowRuns.length} stored workflow runs`}</p></div></div>
           <div className="workflow-run-steps">
-            {workflowRuns.length ? workflowRuns.map((run) => <RunCard run={run} selected={(run.id || run.runId) === selectedID} key={run.id || run.runId} />) : <div className="run-history-empty">暂无 Workflow run</div>}
+            {workflowRuns.length ? workflowRuns.map((run) => <RunCard run={run} selected={(run.id || run.runId) === selectedID} catalog={catalog} key={run.id || run.runId} />) : <div className="run-history-empty">暂无 Workflow run</div>}
           </div>
         </section>
         <section className="workflow-run-panel">
@@ -188,6 +260,7 @@ function WorkflowRunApp() {
             )) : <p className="dashboard-empty">当前 run 没有 step 摘要。</p>}
           </div>
         </section>
+        <TraceTopologyCards detail={detail} />
         <section className="workflow-run-panel">
           <div className="section-head"><div><h2>Identifiers</h2><p>{`${identifiers.length} identifiers`}</p></div></div>
           <div className="workflow-run-identifiers">

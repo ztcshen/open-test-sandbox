@@ -1,5 +1,6 @@
 {
   "id": "loan.apply.loan_confirm_infos.string.invalid",
   "displayName": "放款申请-loan_confirm_infos类型错误",
-  "nodeId": "scf.loan.apply"
+  "nodeId": "scf.loan.apply",
+  "requiredForAdmission": false
 }

@@ -13,7 +13,6 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 	if runtime == nil {
 		writeJSON(w, map[string]any{
 			"ok":       true,
-			"dryRun":   true,
 			"count":    0,
 			"items":    []map[string]any{},
 			"warnings": []string{"runtime store is not configured"},
@@ -46,7 +45,6 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 	}
 	writeJSON(w, map[string]any{
 		"ok":       true,
-		"dryRun":   true,
 		"count":    len(items),
 		"items":    items,
 		"warnings": []string{},

@@ -3,5 +3,6 @@
   "stepId": "repay-apply",
   "nodeId": "scf.repay.apply",
   "caseId": "repay.apply.default",
-  "required": true
+  "required": true,
+  "sortOrder": 9
 }

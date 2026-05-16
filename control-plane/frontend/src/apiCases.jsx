@@ -37,7 +37,6 @@ function selectedCaseFromPayload(payload, preferredID = "") {
 
 function caseRunPayload(caseDef) {
   return {
-    dryRun: false,
     casePath: caseDef.casePath || "",
     baseUrl: caseDef.baseUrl || "",
     evidenceDir: caseDef.evidenceDir || ".runtime/cases",
@@ -88,12 +87,10 @@ function CaseResult({ result }) {
     return <div className="api-case-result">ready</div>;
   }
   const data = result.report || result.summary || {};
-  const title = result.dryRun ? `DRY-RUN · ${data.case_id || data.CaseID || "case"}` : `${data.status || "fail"} · ${data.run_id || "-"}`;
-  const meta = result.dryRun
-    ? `trace ${data.trace_id || "-"} · ${data.operation || "-"}`
-    : `http ${data.actual_http_code || "-"} · request ${data.request_id || "-"}`;
+  const title = `${data.status || "fail"} · ${data.run_id || "-"}`;
+  const meta = `http ${data.actual_http_code || "-"} · request ${data.request_id || "-"}`;
   return (
-    <div className={`api-case-result ${result.ok ? "passed" : "failed"} ${result.dryRun ? "dry-run" : "real-run"}`}>
+    <div className={`api-case-result ${result.ok ? "passed" : "failed"}`}>
       <strong>{title}</strong>
       <p>{meta}</p>
       {result.viewerUrl ? (
@@ -113,7 +110,7 @@ function LatestRunSummary({ caseDef }) {
       <KeyValue
         label="latest"
         value={latestRun ? [latestRun.status || "unknown", latestRun.failureReason].filter(Boolean).join(" · ") : "no run"}
-        href={latestRun?.runId ? `/evidence-viewer.html?caseRun=${encodeURIComponent(latestRun.runId)}` : ""}
+        href={latestRun?.runId ? `/evidence-viewer.html?${new URLSearchParams({ caseRun: latestRun.runId, caseId: caseDef.id }).toString()}` : ""}
       />
       <KeyValue label="case run" value={latestRun?.caseRunId || "-"} />
       <KeyValue label="elapsed" value={latestRun?.elapsedMs ? `${latestRun.elapsedMs}ms` : "-"} />
@@ -211,7 +208,7 @@ function ApiCasesApp() {
       setResult(payload);
       await loadCapabilities(selectedCase.id, payload.ok ? "ready" : "case failed");
     } catch (error) {
-      setResult({ ok: false, dryRun: false, summary: { status: "fail", failure_reason: error.message } });
+      setResult({ ok: false, summary: { status: "fail", failure_reason: error.message } });
       setStatus(error.message);
     }
   }

@@ -61,17 +61,14 @@ The runner writes Evidence under:
 <evidence-dir>/<run-id>/
 ```
 
-Dry-runs render the case without sending an HTTP request:
+Every run writes the request and runtime response Evidence:
 
 - `case.json`: normalized copy of the input case.
 - `request.json`: rendered request definition.
-- `summary.json`: run summary with run id, case id, status, dry-run flag,
-  Evidence path, and creation time.
-
-Live runs add runtime response Evidence:
-
 - `response.json`: status code, response headers, and response body.
 - `assertions.json`: assertion status and any failure messages.
+- `summary.json`: run summary with run id, case id, status, Evidence path, and
+  creation time.
 
 Evidence files are the detailed runtime record. Store rows are indexes and
 summaries that point back to these files.
@@ -91,4 +88,4 @@ connects them to profile or workflow records.
 ## Examples
 
 See [../examples/api-cases/create-item.json](../examples/api-cases/create-item.json)
-for a minimal generic case that can be dry-run locally.
+for a minimal generic case that can run against a local HTTP endpoint.

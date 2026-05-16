@@ -1,5 +1,6 @@
 {
   "id": "financing.apply.repayment_type.unsupported.extra.invalid",
   "displayName": "融资申请-repayment_type非法候选",
-  "nodeId": "scf.financing.apply"
+  "nodeId": "scf.financing.apply",
+  "requiredForAdmission": false
 }

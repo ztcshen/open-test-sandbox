@@ -28,13 +28,13 @@ Inspect the empty profile bundle:
 ./bin/otsandbox.sh profile inspect --profile profiles/empty
 ```
 
-Render a dry-run API Case Evidence bundle:
+Run an API Case and write an Evidence bundle:
 
 ```sh
 tmpdir=$(mktemp -d)
 ./bin/otsandbox.sh case run \
   --case examples/api-cases/create-item.json \
-  --dry-run \
+  --base-url http://127.0.0.1:8080 \
   --run-id quickstart \
   --evidence-dir "$tmpdir/evidence"
 find "$tmpdir/evidence/quickstart" -maxdepth 1 -type f | sort
@@ -61,7 +61,7 @@ The project now has:
 - a SQLite Store with schema upgrades, contract tests, Evidence queries, baseline
   gates, and backend URL validation;
 - a profile loader for manifest and split-asset bundles;
-- API Case dry-run/live execution with reproducible Evidence and Store indexes;
+- API Case execution with reproducible Evidence and Store indexes;
 - request template rendering from profile-owned fixture data;
 - workflow planning from profile-owned bindings;
 - runtime Evidence import with text and JSON reports.

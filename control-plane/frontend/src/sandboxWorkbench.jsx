@@ -158,7 +158,7 @@ function RunHistory({ runs, caseRuns, onRefresh }) {
         <RunGroup
           title="API case runs"
           rows={caseRuns?.caseRuns || []}
-          renderRow={(row) => <RunItem title={row.caseId || row.runId} meta={row.status || "-"} detail={`${shortTime(row.updatedAt)} · ${row.failureKind || row.operation || "-"}`} tone={runStatusTone(row.status)} href={row.runId ? `/evidence-viewer.html?caseRun=${encodeURIComponent(row.runId)}` : ""} key={`case-${row.runId}`} />}
+          renderRow={(row) => <RunItem title={row.caseId || row.runId} meta={row.status || "-"} detail={`${shortTime(row.updatedAt)} · ${row.failureKind || row.operation || "-"}`} tone={runStatusTone(row.status)} href={row.runId ? `/evidence-viewer.html?${new URLSearchParams({ caseRun: row.runId, caseId: row.caseId || "" }).toString()}` : ""} key={`case-${row.runId}`} />}
         />
         <RunGroup
           title="Probe reports"

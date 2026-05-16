@@ -3,5 +3,6 @@
   "stepId": "repay-trial",
   "nodeId": "scf.repay.trial",
   "caseId": "repay.trial.default",
-  "required": true
+  "required": true,
+  "sortOrder": 8
 }

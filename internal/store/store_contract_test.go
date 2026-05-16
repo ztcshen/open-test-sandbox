@@ -132,6 +132,64 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("evidence metadata = %#v", evidenceRecords[0])
 	}
 
+	taskStarted := time.Now().UTC().Add(-150 * time.Millisecond)
+	taskFinished := taskStarted.Add(125 * time.Millisecond)
+	task, err := s.RecordPostProcessTask(ctx, store.PostProcessTask{
+		ID:          "task-001",
+		RunID:       "run-001",
+		WorkflowID:  "workflow.health",
+		StepID:      "step.health",
+		CaseID:      "case.health",
+		Kind:        "runtime_log_collect",
+		Status:      store.StatusPassed,
+		StartedAt:   taskStarted,
+		FinishedAt:  taskFinished,
+		SummaryJSON: `{"systems":2}`,
+	})
+	if err != nil {
+		t.Fatalf("record post process task: %v", err)
+	}
+	if task.DurationMs != 125 {
+		t.Fatalf("task duration should be derived from timestamps: %#v", task)
+	}
+	tasks, err := s.ListPostProcessTasks(ctx, "run-001")
+	if err != nil {
+		t.Fatalf("list post process tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Kind != "runtime_log_collect" || tasks[0].DurationMs != 125 {
+		t.Fatalf("post process tasks = %#v", tasks)
+	}
+
+	topology, err := s.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            "topology-001",
+		WorkflowRunID: "run-001",
+		WorkflowID:    "workflow.smoke",
+		StepID:        "step.health",
+		CaseID:        "case.health",
+		RequestID:     "request-001",
+		TraceID:       "trace-001",
+		Status:        "complete",
+		TopologyJSON:  `{"confirmedEdges":[{"source":"service.alpha","target":"service.beta"}],"observedNodes":["service.alpha","service.beta"]}`,
+		TextTopology:  "service.alpha -> service.beta",
+		CreatedAt:     started.Add(500 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("save trace topology: %v", err)
+	}
+	if topology.CreatedAt.IsZero() {
+		t.Fatalf("trace topology should have CreatedAt: %#v", topology)
+	}
+	topologies, err := s.ListTraceTopologies(ctx, "run-001")
+	if err != nil {
+		t.Fatalf("list trace topologies: %v", err)
+	}
+	if len(topologies) != 1 || topologies[0].TraceID != "trace-001" || topologies[0].Status != "complete" {
+		t.Fatalf("trace topologies = %#v", topologies)
+	}
+	if topologies[0].TopologyJSON != topology.TopologyJSON || topologies[0].TextTopology != "service.alpha -> service.beta" {
+		t.Fatalf("trace topology payload = %#v", topologies[0])
+	}
+
 	gate, err := s.UpsertBaselineGate(ctx, store.BaselineGate{
 		ProfileID:   "empty",
 		SubjectID:   "workflow.smoke",
@@ -176,12 +234,54 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if loadedProfile.BundlePath != "profiles/empty" || loadedProfile.BundleDigest != "sha256:bundle" {
 		t.Fatalf("loaded profile index = %#v", loadedProfile)
 	}
+	version, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
+		ID:           "config.empty.001",
+		ProfileID:    "empty",
+		SourcePath:   "profiles/empty",
+		BundleDigest: "sha256:bundle",
+		SummaryJSON:  `{"services":1}`,
+		Active:       true,
+		PublishedAt:  started.Add(3 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("upsert config version: %v", err)
+	}
+	if version.CreatedAt.IsZero() {
+		t.Fatalf("config version should have CreatedAt: %#v", version)
+	}
+	activeVersion, err := s.GetActiveConfigVersion(ctx)
+	if err != nil {
+		t.Fatalf("get active config version: %v", err)
+	}
+	if activeVersion.ID != "config.empty.001" || activeVersion.ProfileID != "empty" || activeVersion.BundleDigest != "sha256:bundle" || !activeVersion.Active {
+		t.Fatalf("active config version = %#v", activeVersion)
+	}
+	readModel, err := s.UpsertReadModel(ctx, store.ReadModel{
+		ProfileID:       "empty",
+		Key:             "interface-nodes",
+		ConfigVersionID: activeVersion.ID,
+		PayloadJSON:     `{"ok":true,"items":[]}`,
+		GeneratedAt:     started.Add(4 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("upsert read model: %v", err)
+	}
+	if readModel.UpdatedAt.IsZero() {
+		t.Fatalf("read model should have UpdatedAt: %#v", readModel)
+	}
+	loadedReadModel, err := s.GetReadModel(ctx, "empty", "interface-nodes")
+	if err != nil {
+		t.Fatalf("get read model: %v", err)
+	}
+	if loadedReadModel.ConfigVersionID != activeVersion.ID || loadedReadModel.PayloadJSON != `{"ok":true,"items":[]}` {
+		t.Fatalf("loaded read model = %#v", loadedReadModel)
+	}
 
 	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
 		ProfileID: "empty",
 		IndexedAt: started.Add(3 * time.Minute),
 		Services: []store.CatalogService{
-			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "http"},
+			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "http", SourcePath: "/tmp/source/service.alpha"},
 		},
 		Workflows: []store.CatalogWorkflow{
 			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
@@ -190,7 +290,16 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
 		},
 		APICases: []store.CatalogAPICase{
-			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+			{
+				ID:                   "case.alpha",
+				DisplayName:          "Case Alpha",
+				NodeID:               "node.alpha",
+				CasePath:             "profiles/sample/cases/case.alpha.json",
+				BaseURL:              "http://127.0.0.1:18080",
+				EvidenceDir:          ".runtime/cases",
+				TimeoutSeconds:       12,
+				DefaultOverridesJSON: `{"itemId":"item-001"}`,
+			},
 		},
 		RequestTemplates: []store.CatalogRequestTemplate{
 			{ID: "template.alpha", DisplayName: "Template Alpha", NodeID: "node.alpha", TemplateJSON: `{"method":"GET"}`},
@@ -216,6 +325,16 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if catalogIndex.Counts.Services != 1 || catalogIndex.Counts.Workflows != 1 || catalogIndex.Counts.APICases != 1 || catalogIndex.Counts.Templates != 2 {
 		t.Fatalf("profile catalog index counts = %#v", catalogIndex.Counts)
+	}
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get profile catalog: %v", err)
+	}
+	if len(catalog.Services) != 1 || catalog.Services[0].SourcePath != "/tmp/source/service.alpha" {
+		t.Fatalf("profile catalog services = %#v", catalog.Services)
+	}
+	if len(catalog.APICases) != 1 || catalog.APICases[0].CasePath != "profiles/sample/cases/case.alpha.json" || catalog.APICases[0].BaseURL != "http://127.0.0.1:18080" || catalog.APICases[0].EvidenceDir != ".runtime/cases" || catalog.APICases[0].TimeoutSeconds != 12 || catalog.APICases[0].DefaultOverridesJSON != `{"itemId":"item-001"}` {
+		t.Fatalf("profile catalog api case run config = %#v", catalog.APICases)
 	}
 
 	_, err = s.GetRun(ctx, "missing")

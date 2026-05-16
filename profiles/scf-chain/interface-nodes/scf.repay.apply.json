@@ -1,5 +1,6 @@
 {
   "id": "scf.repay.apply",
   "displayName": "还款申请",
-  "serviceId": "retail-gateway"
+  "serviceId": "retail-gateway",
+  "timeoutMs": 2500
 }

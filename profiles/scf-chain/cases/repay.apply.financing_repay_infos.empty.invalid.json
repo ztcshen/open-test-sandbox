@@ -1,5 +1,6 @@
 {
   "id": "repay.apply.financing_repay_infos.empty.invalid",
   "displayName": "还款申请-financing_repay_infos为空",
-  "nodeId": "scf.repay.apply"
+  "nodeId": "scf.repay.apply",
+  "requiredForAdmission": false
 }

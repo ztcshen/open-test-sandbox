@@ -1,5 +1,6 @@
 {
   "id": "loan.result.query.query_keys.conflict.invalid",
   "displayName": "放款结果查询-查询条件冲突",
-  "nodeId": "scf.loan.result.query"
+  "nodeId": "scf.loan.result.query",
+  "requiredForAdmission": false
 }

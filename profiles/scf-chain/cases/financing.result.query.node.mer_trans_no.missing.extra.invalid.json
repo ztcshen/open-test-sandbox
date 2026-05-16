@@ -1,5 +1,6 @@
 {
   "id": "financing.result.query.node.mer_trans_no.missing.extra.invalid",
   "displayName": "融资结果查询-mer_trans_no缺失候选",
-  "nodeId": "scf.financing.result.query"
+  "nodeId": "scf.financing.result.query",
+  "requiredForAdmission": false
 }

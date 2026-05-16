@@ -9,9 +9,10 @@ import (
 )
 
 type profileCatalogIndexResponse struct {
-	ProfileID string                    `json:"profileId"`
-	IndexedAt time.Time                 `json:"indexedAt"`
-	Counts    profileCatalogIndexCounts `json:"counts"`
+	ProfileID     string                        `json:"profileId"`
+	IndexedAt     time.Time                     `json:"indexedAt"`
+	Counts        profileCatalogIndexCounts     `json:"counts"`
+	ConfigVersion *profileConfigVersionResponse `json:"configVersion,omitempty"`
 }
 
 type profileCatalogIndexCounts struct {
@@ -25,6 +26,16 @@ type profileCatalogIndexCounts struct {
 	Fixtures         int `json:"fixtures"`
 	Templates        int `json:"templates"`
 	TemplateConfigs  int `json:"templateConfigs"`
+}
+
+type profileConfigVersionResponse struct {
+	ID           string    `json:"id"`
+	ProfileID    string    `json:"profileId"`
+	SourcePath   string    `json:"sourcePath"`
+	BundleDigest string    `json:"bundleDigest"`
+	Active       bool      `json:"active"`
+	PublishedAt  time.Time `json:"publishedAt"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 func handleProfileCatalogIndex(w http.ResponseWriter, r *http.Request, runtime store.Store) {
@@ -41,7 +52,7 @@ func handleProfileCatalogIndex(w http.ResponseWriter, r *http.Request, runtime s
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, profileCatalogIndexResponse{
+	response := profileCatalogIndexResponse{
 		ProfileID: index.ProfileID,
 		IndexedAt: index.IndexedAt,
 		Counts: profileCatalogIndexCounts{
@@ -56,5 +67,20 @@ func handleProfileCatalogIndex(w http.ResponseWriter, r *http.Request, runtime s
 			Templates:        index.Counts.Templates,
 			TemplateConfigs:  index.Counts.TemplateConfigs,
 		},
-	})
+	}
+	if version, err := runtime.GetActiveConfigVersion(r.Context()); err == nil {
+		response.ConfigVersion = &profileConfigVersionResponse{
+			ID:           version.ID,
+			ProfileID:    version.ProfileID,
+			SourcePath:   version.SourcePath,
+			BundleDigest: version.BundleDigest,
+			Active:       version.Active,
+			PublishedAt:  version.PublishedAt,
+			CreatedAt:    version.CreatedAt,
+		}
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, response)
 }

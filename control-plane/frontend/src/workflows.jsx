@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./control-plane-react.css";
 import { fetchJSON } from "./api.js";
-import { filterWorkflows, workflowKind } from "./workflowModel.js";
-import { ButtonLink, Hero, Icons, Panel, Shell, WorkflowCard } from "./components.jsx";
+import { dashboardStatusById, filterWorkflows, workflowKind, workflowRuntimeImpact } from "./workflowModel.js";
+import { ButtonLink, Hero, IconButton, Icons, Panel, Shell, WorkflowCard } from "./components.jsx";
 
-function WorkflowSection({ title, summary, workflows, services }) {
+function WorkflowSection({ title, summary, workflows, services, statusById, onRuntimeImpactClick }) {
   if (!workflows.length) return null;
   return (
     <section className="react-section">
@@ -18,7 +18,13 @@ function WorkflowSection({ title, summary, workflows, services }) {
       </div>
       <div className="react-workflow-list">
         {workflows.map((workflow) => (
-          <WorkflowCard workflow={workflow} services={services} key={workflow.id} />
+          <WorkflowCard
+            workflow={workflow}
+            services={services}
+            runtimeImpact={workflowRuntimeImpact(workflow, statusById)}
+            onRuntimeImpactClick={onRuntimeImpactClick}
+            key={workflow.id}
+          />
         ))}
       </div>
     </section>
@@ -27,6 +33,7 @@ function WorkflowSection({ title, summary, workflows, services }) {
 
 function WorkflowCatalogStudio() {
   const [catalog, setCatalog] = useState(null);
+  const [dashboard, setDashboard] = useState(null);
   const [query, setQuery] = useState(new URLSearchParams(window.location.search).get("workflowFilter") || "");
   const [message, setMessage] = useState("loading");
   const [error, setError] = useState("");
@@ -35,7 +42,12 @@ function WorkflowCatalogStudio() {
     setMessage("loading");
     setError("");
     try {
-      setCatalog(await fetchJSON("/api/catalog"));
+      const [nextCatalog, nextDashboard] = await Promise.all([
+        fetchJSON("/api/catalog"),
+        fetchJSON("/api/dashboard"),
+      ]);
+      setCatalog(nextCatalog);
+      setDashboard(nextDashboard);
       setMessage("ready");
     } catch (refreshError) {
       setError(refreshError.message);
@@ -49,9 +61,11 @@ function WorkflowCatalogStudio() {
 
   const workflows = catalog?.workflows || [];
   const services = catalog?.services || [];
-  const visible = useMemo(() => filterWorkflows(workflows, services, query), [workflows, services, query]);
+  const statusById = useMemo(() => dashboardStatusById(dashboard), [dashboard]);
+  const visible = useMemo(() => filterWorkflows(workflows, services, query, statusById), [workflows, services, query, statusById]);
   const businessFlows = visible.filter((workflow) => workflowKind(workflow) === "businessFlow");
   const toolEntries = visible.filter((workflow) => workflowKind(workflow) !== "businessFlow");
+  const applyFilter = (value) => setQuery(value || "");
 
   return (
     <Shell>
@@ -85,6 +99,9 @@ function WorkflowCatalogStudio() {
           <div className="react-toolbar">
             <Icons.Search size={16} aria-hidden="true" />
             <input className="react-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Workflow / 服务 / Step" />
+            <IconButton icon={Icons.X} title="清除筛选" onClick={() => applyFilter("")}>
+              清除
+            </IconButton>
           </div>
         }
       >
@@ -95,12 +112,16 @@ function WorkflowCatalogStudio() {
               summary="可运行的端到端业务链路，适合进入 Workflow Studio。"
               workflows={businessFlows}
               services={services}
+              statusById={statusById}
+              onRuntimeImpactClick={applyFilter}
             />
             <WorkflowSection
               title="观测/工具入口"
               summary="平台配置、服务健康和 Replay/Probe 等控制面入口，不作为业务流模版展示。"
               workflows={toolEntries}
               services={services}
+              statusById={statusById}
+              onRuntimeImpactClick={applyFilter}
             />
           </>
         ) : (
@@ -112,4 +133,3 @@ function WorkflowCatalogStudio() {
 }
 
 createRoot(document.getElementById("react-workflows-root")).render(<WorkflowCatalogStudio />);
-

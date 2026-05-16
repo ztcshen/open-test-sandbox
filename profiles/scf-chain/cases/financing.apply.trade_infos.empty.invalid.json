@@ -1,5 +1,6 @@
 {
   "id": "financing.apply.trade_infos.empty.invalid",
   "displayName": "融资申请-trade_infos为空",
-  "nodeId": "scf.financing.apply"
+  "nodeId": "scf.financing.apply",
+  "requiredForAdmission": false
 }

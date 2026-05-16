@@ -1,5 +1,6 @@
 {
   "id": "financing.trial.penalty_daily_rate.non_numeric.invalid",
   "displayName": "融资试算-penalty_daily_rate非数字",
-  "nodeId": "scf.financing.trial"
+  "nodeId": "scf.financing.trial",
+  "requiredForAdmission": false
 }

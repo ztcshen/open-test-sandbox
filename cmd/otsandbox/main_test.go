@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"open-test-sandbox/internal/store"
+	"open-test-sandbox/internal/store/schema"
 	"open-test-sandbox/internal/store/sqlite"
 )
 
@@ -21,17 +22,17 @@ func TestStoreUpgradeAndStatusCommands(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 
 	initial := runCLI(t, "store", "status", "--store-url", dbPath)
-	if !strings.Contains(initial, "Version: 0") || !strings.Contains(initial, "Pending: 2") {
+	if !strings.Contains(initial, "Version: 0") || !strings.Contains(initial, fmt.Sprintf("Pending: %d", schema.CurrentVersion)) {
 		t.Fatalf("initial status output = %q", initial)
 	}
 
 	upgraded := runCLI(t, "store", "upgrade", "--store-url", dbPath)
-	if !strings.Contains(upgraded, "Upgraded store schema to version 2") {
+	if !strings.Contains(upgraded, fmt.Sprintf("Upgraded store schema to version %d", schema.CurrentVersion)) {
 		t.Fatalf("upgrade output = %q", upgraded)
 	}
 
 	current := runCLI(t, "store", "status", "--store-url", dbPath)
-	if !strings.Contains(current, "Version: 2") || !strings.Contains(current, "Pending: 0") {
+	if !strings.Contains(current, fmt.Sprintf("Version: %d", schema.CurrentVersion)) || !strings.Contains(current, "Pending: 0") {
 		t.Fatalf("current status output = %q", current)
 	}
 }
@@ -77,6 +78,95 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
+func TestConfigPublishCommandIndexesBundleInStore(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+
+	out := runCLI(t, "config", "publish", "--from", "../../profiles/empty", "--store-url", dbPath, "--json")
+
+	var report struct {
+		ProfileID     string   `json:"profileId"`
+		BundleDigest  string   `json:"bundleDigest"`
+		ReadModels    []string `json:"readModels"`
+		ConfigVersion struct {
+			ID           string `json:"id"`
+			ProfileID    string `json:"profileId"`
+			BundleDigest string `json:"bundleDigest"`
+			Active       bool   `json:"active"`
+		} `json:"configVersion"`
+		CatalogIndex struct {
+			ProfileID string `json:"profileId"`
+		} `json:"catalogIndex"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode config publish report: %v\n%s", err, out)
+	}
+	if report.ProfileID != "empty" || report.CatalogIndex.ProfileID != "empty" || !strings.HasPrefix(report.BundleDigest, "sha256:") {
+		t.Fatalf("config publish report = %#v", report)
+	}
+	if report.ConfigVersion.ID == "" || report.ConfigVersion.ProfileID != "empty" || report.ConfigVersion.BundleDigest != report.BundleDigest || !report.ConfigVersion.Active {
+		t.Fatalf("config version = %#v", report.ConfigVersion)
+	}
+	if strings.Join(report.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
+		t.Fatalf("config publish read models = %#v", report.ReadModels)
+	}
+	if got := sqliteScalar(t, dbPath, "select value from kv where key = 'active_profile_id';"); got != "empty" {
+		t.Fatalf("active config profile = %q", got)
+	}
+	if got := sqliteScalar(t, dbPath, "select bundle_digest from config_versions where active = 1;"); got != report.BundleDigest {
+		t.Fatalf("active config digest = %q, want %q", got, report.BundleDigest)
+	}
+	if got := sqliteScalar(t, dbPath, "select config_version_id from config_read_model where profile_id = 'empty' and model_key = 'interface-nodes';"); got != report.ConfigVersion.ID {
+		t.Fatalf("interface nodes read model version = %q, want %q", got, report.ConfigVersion.ID)
+	}
+	if got := sqliteScalar(t, dbPath, "select config_version_id from config_read_model where profile_id = 'empty' and model_key = 'catalog';"); got != report.ConfigVersion.ID {
+		t.Fatalf("catalog read model version = %q, want %q", got, report.ConfigVersion.ID)
+	}
+}
+
+func TestConfigPublishCommandMaterializesInterfaceNodeDetailReadModels(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeInterfaceNodeCaseProfile(t)
+
+	out := runCLI(t, "config", "publish", "--from", profileDir, "--store-url", dbPath, "--json")
+
+	var report struct {
+		ConfigVersion struct {
+			ID string `json:"id"`
+		} `json:"configVersion"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode config publish report: %v\n%s", err, out)
+	}
+	if got := sqliteScalar(t, dbPath, "select config_version_id from config_read_model where profile_id = 'sample' and model_key = 'interface-node:node.alpha';"); got != report.ConfigVersion.ID {
+		t.Fatalf("interface node detail read model version = %q, want %q", got, report.ConfigVersion.ID)
+	}
+	if got := sqliteScalar(t, dbPath, "select json_extract(payload_json, '$.source.kind') from config_read_model where profile_id = 'sample' and model_key = 'interface-node:node.alpha';"); got != "read-model" {
+		t.Fatalf("interface node detail source kind = %q", got)
+	}
+}
+
+func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeInterfaceNodeCoverageProfile(t)
+
+	out := runCLI(t, "config", "publish", "--from", profileDir, "--store-url", dbPath, "--json")
+
+	var report struct {
+		ConfigVersion struct {
+			ID string `json:"id"`
+		} `json:"configVersion"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode config publish report: %v\n%s", err, out)
+	}
+	if got := sqliteScalar(t, dbPath, "select config_version_id from config_read_model where profile_id = 'sample' and model_key = 'interface-node-coverage:workflow.alpha';"); got != report.ConfigVersion.ID {
+		t.Fatalf("interface node coverage read model version = %q, want %q", got, report.ConfigVersion.ID)
+	}
+	if got := sqliteScalar(t, dbPath, "select json_extract(payload_json, '$.source.kind') from config_read_model where profile_id = 'sample' and model_key = 'interface-node-coverage-gaps:workflow.alpha';"); got != "read-model" {
+		t.Fatalf("interface node coverage gaps source kind = %q", got)
+	}
+}
+
 func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 
@@ -106,8 +196,9 @@ func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 				TemplateConfigs int `json:"templateConfigs"`
 			} `json:"counts"`
 		} `json:"catalogIndex"`
-		StorePath  string `json:"storePath"`
-		ImportedAt string `json:"importedAt"`
+		StorePath  string   `json:"storePath"`
+		ImportedAt string   `json:"importedAt"`
+		ReadModels []string `json:"readModels"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode profile import json: %v\n%s", err, out)
@@ -126,6 +217,116 @@ func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 	}
 	if report.CatalogIndex.StoreCounts.Services != 0 || report.CatalogIndex.StoreCounts.Templates != 0 || report.CatalogIndex.StoreCounts.TemplateConfigs != 0 {
 		t.Fatalf("report catalog index counts = %#v", report.CatalogIndex.StoreCounts)
+	}
+	if strings.Join(report.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
+		t.Fatalf("profile import read models = %#v", report.ReadModels)
+	}
+}
+
+func TestInterfaceNodeCaseAuditReportsMissingExecutionConfigs(t *testing.T) {
+	dir := writeInterfaceNodeCaseProfile(t)
+
+	out := runCLI(t, "interface-node", "case", "audit", "--profile", dir, "--node", "node.alpha", "--json")
+
+	var report struct {
+		OK     bool   `json:"ok"`
+		NodeID string `json:"nodeId"`
+		Counts struct {
+			Cases      int `json:"cases"`
+			Configured int `json:"configured"`
+			Missing    int `json:"missing"`
+		} `json:"counts"`
+		Missing []struct {
+			CaseID string `json:"caseId"`
+		} `json:"missing"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode interface node case audit json: %v\n%s", err, out)
+	}
+	if report.OK || report.NodeID != "node.alpha" || report.Counts.Cases != 2 || report.Counts.Configured != 1 || report.Counts.Missing != 1 {
+		t.Fatalf("audit report = %#v", report)
+	}
+	if len(report.Missing) != 1 || report.Missing[0].CaseID != "case.beta" {
+		t.Fatalf("missing cases = %#v", report.Missing)
+	}
+}
+
+func TestInterfaceNodeCaseApplyMergesExecutionConfigsIntoProfileCatalog(t *testing.T) {
+	dir := writeInterfaceNodeCaseProfile(t)
+	requestPath := filepath.Join(t.TempDir(), "case-config.json")
+	writeFile(t, requestPath, `{
+  "templateConfigs": [
+    {
+      "id": "cfg.case.beta",
+      "templateId": "case-execution",
+      "nodeId": "node.alpha",
+      "scopeType": "case",
+      "scopeId": "case.beta",
+      "title": "Case Beta execution",
+      "status": "active",
+      "sortOrder": 2,
+      "config": {
+        "caseId": "case.beta",
+        "caseExecution": {
+          "method": "GET",
+          "nodeId": "service.alpha",
+          "path": "/beta",
+          "expectedHttpCodes": [200]
+        }
+      }
+    }
+  ]
+}`)
+
+	out := runCLI(t, "interface-node", "case", "apply", "--profile", dir, "--file", requestPath, "--json")
+
+	var result struct {
+		Applied int    `json:"applied"`
+		Profile string `json:"profile"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode interface node case apply json: %v\n%s", err, out)
+	}
+	if result.Applied != 1 || result.Profile != dir {
+		t.Fatalf("apply result = %#v", result)
+	}
+	audit := runCLI(t, "interface-node", "case", "audit", "--profile", dir, "--node", "node.alpha", "--json")
+	var auditReport struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Missing int `json:"missing"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(audit), &auditReport); err != nil {
+		t.Fatalf("decode audit after apply: %v\n%s", err, audit)
+	}
+	if !auditReport.OK || auditReport.Counts.Missing != 0 {
+		t.Fatalf("audit after apply = %s", audit)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "catalog.json"))
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+	var catalog struct {
+		TemplateConfigs []struct {
+			ConfigJSON string `json:"configJson"`
+		} `json:"templateConfigs"`
+	}
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		t.Fatalf("decode catalog after apply: %v\n%s", err, raw)
+	}
+	hasBeta := false
+	for _, item := range catalog.TemplateConfigs {
+		var config struct {
+			CaseID string `json:"caseId"`
+		}
+		if err := json.Unmarshal([]byte(item.ConfigJSON), &config); err != nil {
+			t.Fatalf("decode template config after apply: %v\n%s", err, item.ConfigJSON)
+		}
+		hasBeta = hasBeta || config.CaseID == "case.beta"
+	}
+	if !hasBeta || strings.Contains(string(raw), "store.sqlite") {
+		t.Fatalf("catalog after apply = %s", raw)
 	}
 }
 
@@ -188,6 +389,11 @@ func TestProfileImportCommandCanAuditImportedProfile(t *testing.T) {
 }
 
 func TestProfileAuditCommandEmitsJSONWithStoreState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"created"}`)
+	}))
+	defer server.Close()
 	dir := t.TempDir()
 	profileDir := filepath.Join(dir, "profile")
 	alphaPath := filepath.Join(dir, "case.alpha.json")
@@ -217,7 +423,7 @@ func TestProfileAuditCommandEmitsJSONWithStoreState(t *testing.T) {
 
 	storePath := filepath.Join(dir, "store.sqlite")
 	runCLI(t, "profile", "import", "--from", profileDir, "--store-url", storePath)
-	runCLI(t, "case", "run", "--case", alphaPath, "--dry-run", "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
+	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
 
 	out := runCLI(t, "profile", "audit", "--profile", profileDir, "--store-url", storePath, "--json")
 
@@ -583,13 +789,18 @@ func TestEvidenceListCommandRejectsMissingRun(t *testing.T) {
 	}
 }
 
-func TestCaseRunDryRunCommandWritesEvidence(t *testing.T) {
+func TestCaseRunCommandWritesEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"created"}`)
+	}))
+	defer server.Close()
 	dir := t.TempDir()
 	casePath := filepath.Join(dir, "case.json")
 	writeAPICaseFile(t, casePath)
 	evidenceDir := filepath.Join(dir, "evidence")
 
-	out := runCLI(t, "case", "run", "--case", casePath, "--dry-run", "--run-id", "case-run-001", "--evidence-dir", evidenceDir)
+	out := runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-001", "--evidence-dir", evidenceDir)
 	if !strings.Contains(out, "Case Run: case-run-001") || !strings.Contains(out, "Status: passed") {
 		t.Fatalf("case run output = %q", out)
 	}
@@ -724,6 +935,11 @@ func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 }
 
 func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"created"}`)
+	}))
+	defer server.Close()
 	dir := t.TempDir()
 	profileDir := filepath.Join(dir, "profile")
 	alphaPath := filepath.Join(dir, "case.alpha.json")
@@ -752,7 +968,7 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
 }`, alphaPath, betaPath))
 
 	storePath := filepath.Join(dir, "store.sqlite")
-	runCLI(t, "case", "run", "--case", alphaPath, "--dry-run", "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
+	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
 
 	out := runCLI(t, "case", "incomplete-batches", "--profile", profileDir, "--store-url", storePath)
 	for _, want := range []string{"Incomplete API Cases: 1", "case.beta", "not-run", betaPath} {
@@ -823,6 +1039,69 @@ func TestServeHandlerUsesConfiguredStore(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "run.alpha") {
 		t.Fatalf("serve handler did not use configured store: %s", rec.Body.String())
+	}
+}
+
+func TestServeHandlerCanBootFromPublishedStoreCatalogWithoutProfilePath(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	sourcePath := filepath.Join(t.TempDir(), "sources", "service-alpha", "main-4e8d26674209")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "team-alpha",
+		Services: []store.CatalogService{
+			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "http", SourcePath: sourcePath},
+		},
+		InterfaceNodes: []store.CatalogInterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha", Operation: "create", Status: "active"},
+		},
+		APICases: []store.CatalogAPICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active"},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	handler, cleanup, err := serveHandlerFromArgs([]string{"--store-url", storePath})
+	if err != nil {
+		t.Fatalf("build serve handler from store catalog: %v", err)
+	}
+	defer cleanup()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/interface-nodes", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("interface nodes status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Source struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"source"`
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode interface nodes payload: %v\n%s", err, rec.Body.String())
+	}
+	if payload.Source.ID != "team-alpha" || payload.Source.Kind != "store" || len(payload.Items) != 1 || payload.Items[0].ID != "node.alpha" {
+		t.Fatalf("serve handler did not use published catalog: %#v", payload)
+	}
+
+	dashboard := httptest.NewRecorder()
+	handler.ServeHTTP(dashboard, httptest.NewRequest(http.MethodGet, "/api/dashboard", nil))
+	if dashboard.Code != http.StatusOK {
+		t.Fatalf("dashboard status = %d body=%s", dashboard.Code, dashboard.Body.String())
+	}
+	if !strings.Contains(dashboard.Body.String(), sourcePath) || !strings.Contains(dashboard.Body.String(), "4e8d26674209") {
+		t.Fatalf("dashboard did not use published runtime source: %s", dashboard.Body.String())
 	}
 }
 
@@ -939,6 +1218,61 @@ func writeTemplateProfile(t *testing.T, dir string) {
   "kind": "json",
   "dataJson": "{\"itemId\":\"item-001\",\"quantity\":3}"
 }`)
+}
+
+func writeInterfaceNodeCaseProfile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha"}],
+  "apiCases": [
+    {"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"},
+    {"id":"case.beta","displayName":"Case Beta","nodeId":"node.alpha"}
+  ],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	writeFile(t, filepath.Join(dir, "catalog.json"), `{
+  "schemaVersion": "1",
+  "templateConfigs": [
+    {
+      "id": "cfg.case.alpha",
+      "templateId": "case-execution",
+      "nodeId": "node.alpha",
+      "scopeType": "case",
+      "scopeId": "case.alpha",
+      "title": "Case Alpha execution",
+      "status": "active",
+      "sortOrder": 1,
+      "configJson": "{\"caseId\":\"case.alpha\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"service.alpha\",\"path\":\"/alpha\",\"expectedHttpCodes\":[200]}}"
+    }
+  ]
+}`)
+	return dir
+}
+
+func writeInterfaceNodeCoverageProfile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha"}],
+  "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"}],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [{"workflowId":"workflow.alpha","stepId":"step.alpha","nodeId":"node.alpha","caseId":"case.alpha","required":true}],
+  "fixtures": []
+}`)
+	return dir
 }
 
 func writeFile(t *testing.T, path string, body string) {

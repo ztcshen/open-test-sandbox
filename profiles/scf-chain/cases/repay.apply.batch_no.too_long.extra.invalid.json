@@ -1,5 +1,6 @@
 {
   "id": "repay.apply.batch_no.too_long.extra.invalid",
   "displayName": "还款申请-batch_no超长候选",
-  "nodeId": "scf.repay.apply"
+  "nodeId": "scf.repay.apply",
+  "requiredForAdmission": false
 }

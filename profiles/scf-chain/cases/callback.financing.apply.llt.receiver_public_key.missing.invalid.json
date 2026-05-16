@@ -1,5 +1,6 @@
 {
   "id": "callback.financing.apply.llt.receiver_public_key.missing.invalid",
   "displayName": "融资结果回调-receiver_public_key缺失",
-  "nodeId": "scf.financing.apply.llt.callback"
+  "nodeId": "scf.financing.apply.llt.callback",
+  "requiredForAdmission": false
 }

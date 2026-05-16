@@ -1,5 +1,6 @@
 {
   "id": "financing.result.query.node.llt_order_not_exist",
   "displayName": "融资结果查询-LLT订单不存在",
-  "nodeId": "scf.financing.result.query"
+  "nodeId": "scf.financing.result.query",
+  "requiredForAdmission": false
 }

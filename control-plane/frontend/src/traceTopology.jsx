@@ -1,34 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { fetchJSON } from "./api.js";
+import { TopologyDiagram, mergeTraceTopologies, parseTopology, topologyItems } from "./topologyView.jsx";
 
 function queryParam(name) {
   return new URLSearchParams(window.location.search).get(name) || "";
-}
-
-function parseTopology(row) {
-  if (!row?.topologyJson) return {};
-  if (typeof row.topologyJson === "object") return row.topologyJson;
-  try {
-    return JSON.parse(row.topologyJson);
-  } catch {
-    return {};
-  }
-}
-
-function topologyItems(rows, key) {
-  return rows.flatMap((row) => {
-    const parsed = parseTopology(row);
-    return (parsed[key] || []).map((item) => ({
-      ...item,
-      stepId: row.stepId,
-      caseId: row.caseId,
-      workflowRunId: row.workflowRunId,
-      requestId: row.requestId,
-      traceId: row.traceId,
-      status: row.status,
-    }));
-  });
 }
 
 function stepAnchor(stepID) {
@@ -52,6 +28,15 @@ function Empty({ children }) {
   return <div className="empty-note">{children}</div>;
 }
 
+function DiagramPanel({ topology, visible, total }) {
+  return (
+    <section className="trace-topology-panel">
+      <div className="section-head"><div><h2>Topology graph</h2><p>{`${visible}/${total} persisted step traces`}</p></div></div>
+      <TopologyDiagram topology={topology} markerPrefix="trace-topology" emptyLabel="没有匹配的 topology 可绘制。" />
+    </section>
+  );
+}
+
 function EdgeItem({ item, kind }) {
   return (
     <article className={`trace-topology-edge ${kind}`}>
@@ -59,7 +44,7 @@ function EdgeItem({ item, kind }) {
         <strong>{`${item.source || "-"} -> ${item.target || "-"}`}</strong>
         <span className="agent-status">{kind}</span>
       </div>
-      <p>{`${item.stepId || item.caseId || "-"} · ${item.sourceComponent || item.component || "-"} -> ${item.targetComponent || item.endpoint || "-"}`}</p>
+      <p>{[item.stepId, item.caseId, `${item.sourceComponent || item.component || "-"} -> ${item.targetComponent || item.endpoint || "-"}`].filter(Boolean).join(" · ")}</p>
       <code>{`${item.requestId || "-"} · ${item.traceId || "-"}`}</code>
       {item.workflowRunId && (item.stepId || item.caseId) ? (
         <div className="workflow-run-step-service-links trace-topology-step-link">
@@ -119,7 +104,7 @@ function Matrix({ rows, total }) {
                 <strong>{row.stepId || row.caseId || "trace"}</strong>
                 <span className={`status-pill ${row.status === "complete" ? "passed" : "failed"}`}>{row.status || "unknown"}</span>
               </div>
-              <p>{`${row.requestId || "-"} · ${row.traceId || "-"} · spans ${parsed.spanCount || 0}`}</p>
+              <p>{[row.caseId, row.requestId || "-", row.traceId || "-", `spans ${parsed.spanCount || 0}`].filter(Boolean).join(" · ")}</p>
               <div className="trace-topology-chip-row">
                 <Chip>{`${(parsed.confirmedEdges || []).length} edges`}</Chip>
                 <Chip>{`${(parsed.externalExits || []).length} external`}</Chip>
@@ -190,6 +175,7 @@ function TraceTopologyApp() {
 
   const rows = payload?.traceTopologies || [];
   const visibleRows = useMemo(() => filterRows(rows, query, status), [rows, query, status]);
+  const visibleTopology = useMemo(() => mergeTraceTopologies(visibleRows), [visibleRows]);
   const run = payload?.run || {};
   const confirmed = topologyItems(rows, "confirmedEdges");
   const external = topologyItems(rows, "externalExits");
@@ -238,6 +224,7 @@ function TraceTopologyApp() {
         </select>
       </section>
       <section className="trace-topology-shell">
+        <DiagramPanel topology={visibleTopology} visible={visibleRows.length} total={rows.length} />
         <Matrix rows={visibleRows} total={rows.length} />
         <Edges rows={visibleRows} />
         <Exits rows={visibleRows} query={query} exitKind={exitKind} />

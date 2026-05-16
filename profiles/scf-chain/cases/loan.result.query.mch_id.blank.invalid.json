@@ -1,5 +1,6 @@
 {
   "id": "loan.result.query.mch_id.blank.invalid",
   "displayName": "放款结果查询-mch_id为空",
-  "nodeId": "scf.loan.result.query"
+  "nodeId": "scf.loan.result.query",
+  "requiredForAdmission": false
 }

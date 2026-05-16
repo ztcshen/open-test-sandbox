@@ -3,5 +3,6 @@
   "stepId": "apply",
   "nodeId": "scf.financing.apply",
   "caseId": "financing.apply.minimal",
-  "required": true
+  "required": true,
+  "sortOrder": 2
 }

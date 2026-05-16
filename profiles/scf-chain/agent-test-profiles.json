@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "1",
+  "profiles": [
+    {
+      "id": "financing-query",
+      "title": "融资查询链路",
+      "steps": [
+        {"type": "workflow", "id": "sandbox.financing_to_repay_result_query"}
+      ],
+      "mysqlProbes": [
+        {
+          "name": "sandbox_mysql_scf_loan_tables",
+          "sql": "select count(*) as table_count from information_schema.tables where table_schema = 'scf_loan'"
+        }
+      ],
+      "evidencePolicy": {
+        "collectTrace": true,
+        "collectDockerStatus": true,
+        "collectContainerLogs": true,
+        "collectMySQLSnapshots": true,
+        "collectWireMockJournal": true
+      },
+      "configPolicy": {
+        "allowedChanges": [
+          {"kind": "env", "key": "SANDBOX_SKIP_BUILD"},
+          {"kind": "wiremock", "key": "scenario"}
+        ]
+      }
+    },
+    {
+      "id": "baseline",
+      "title": "融资到还款结果查询基准链路",
+      "steps": [
+        {"type": "workflow", "id": "sandbox.financing_to_repay_result_query"}
+      ],
+      "mysqlProbes": [
+        {
+          "name": "sandbox_mysql_scf_loan_tables",
+          "sql": "select count(*) as table_count from information_schema.tables where table_schema = 'scf_loan'"
+        }
+      ],
+      "evidencePolicy": {
+        "collectTrace": true,
+        "collectDockerStatus": true,
+        "collectContainerLogs": true,
+        "collectMySQLSnapshots": true,
+        "collectWireMockJournal": true
+      },
+      "configPolicy": {
+        "allowedChanges": [
+          {"kind": "env", "key": "SANDBOX_SKIP_BUILD"},
+          {"kind": "wiremock", "key": "scenario"}
+        ]
+      }
+    },
+    {
+      "id": "case-b-config-missing",
+      "title": "Case B 新增 Apollo 配置缺失",
+      "requiredConfig": [
+        {
+          "kind": "apollo",
+          "key": "application.agent_acceptance_probe",
+          "suggestedValue": "enabled",
+          "reason": "Case B verifies that a test agent can detect missing runtime config, apply an allowed Apollo overlay, and rerun without changing source."
+        }
+      ],
+      "steps": [
+        {"type": "workflow", "id": "sandbox.financing_to_repay_result_query"}
+      ],
+      "mysqlProbes": [
+        {
+          "name": "sandbox_mysql_scf_loan_tables",
+          "sql": "select count(*) as table_count from information_schema.tables where table_schema = 'scf_loan'"
+        }
+      ],
+      "evidencePolicy": {
+        "collectTrace": true,
+        "collectDockerStatus": true,
+        "collectContainerLogs": true,
+        "collectMySQLSnapshots": true,
+        "collectWireMockJournal": true
+      },
+      "configPolicy": {
+        "allowedChanges": [
+          {"kind": "env", "key": "SANDBOX_SKIP_BUILD"},
+          {"kind": "wiremock", "key": "scenario"},
+          {"kind": "apollo", "key": "application.agent_acceptance_probe"}
+        ]
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 
 	"open-test-sandbox/internal/profile"
@@ -10,7 +11,13 @@ import (
 
 func handleAgentTestWorkbench(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
 	payload := agentTestEmptyPayload()
+	profiles := agentTestProfiles(bundle)
+	capabilities := agentTestCapabilities(bundle)
+	payload["capabilities"] = capabilities
+	payload["profiles"] = profiles
+	payload["configAuthoring"] = agentTestConfigAuthoring(bundle.ConfigAuthoring)
 	if runtime == nil {
+		payload["summary"] = agentTestSummary(nil, capabilities, profiles, bundle.ConfigAuthoring)
 		writeJSON(w, payload)
 		return
 	}
@@ -20,12 +27,10 @@ func handleAgentTestWorkbench(w http.ResponseWriter, r *http.Request, bundle pro
 		return
 	}
 	agentRuns := agentTestRuns(runs)
-	profiles := agentTestProfiles(bundle)
-	capabilities := agentTestCapabilities()
 	payload["capabilities"] = capabilities
 	payload["profiles"] = profiles
 	payload["agentRuns"] = agentRuns
-	payload["summary"] = agentTestSummary(agentRuns, capabilities, profiles)
+	payload["summary"] = agentTestSummary(agentRuns, capabilities, profiles, bundle.ConfigAuthoring)
 	writeJSON(w, payload)
 }
 
@@ -48,6 +53,7 @@ func agentTestEmptyPayload() map[string]any {
 		"capabilities":      []map[string]any{},
 		"profiles":          []map[string]any{},
 		"agentRuns":         []map[string]any{},
+		"configAuthoring":   map[string]any{},
 		"configEvents":      []map[string]any{},
 		"escalationEvents":  []map[string]any{},
 		"acceptanceReports": []map[string]any{},
@@ -55,8 +61,11 @@ func agentTestEmptyPayload() map[string]any {
 	}
 }
 
-func agentTestCapabilities() []map[string]any {
-	return []map[string]any{
+func agentTestCapabilities(bundle profile.Bundle) []map[string]any {
+	if len(bundle.AgentTestProfiles) == 0 && strings.TrimSpace(bundle.ConfigAuthoring.Role) == "" && bundle.Counts() == (profile.Counts{}) {
+		return []map[string]any{}
+	}
+	capabilities := []map[string]any{
 		{
 			"id":          "evidence-index",
 			"title":       "Evidence Diagnosis Index",
@@ -79,9 +88,38 @@ func agentTestCapabilities() []map[string]any {
 			"evidence":    []string{"api_case_runs", "evidence_records"},
 		},
 	}
+	if strings.TrimSpace(bundle.ConfigAuthoring.Role) != "" {
+		capabilities = append(capabilities, map[string]any{
+			"id":          "config-authoring-contract",
+			"title":       "Subagent Config Authoring",
+			"status":      "available",
+			"description": "Active profile declares who may author concrete template configuration and what evidence the handoff must include.",
+			"evidence":    []string{"config-authoring.json", "agent-test-profiles.json"},
+		})
+	}
+	return capabilities
 }
 
 func agentTestProfiles(bundle profile.Bundle) []map[string]any {
+	if len(bundle.AgentTestProfiles) > 0 {
+		items := make([]map[string]any, 0, len(bundle.AgentTestProfiles))
+		for _, item := range bundle.AgentTestProfiles {
+			probeCount := len(item.Probes) + len(item.MySQLProbes)
+			items = append(items, map[string]any{
+				"id":              item.ID,
+				"title":           firstNonEmpty(item.Title, item.ID),
+				"stepCount":       len(item.Steps),
+				"workflowCount":   countAgentTestSteps(item.Steps, "workflow"),
+				"caseCount":       countAgentTestSteps(item.Steps, "case"),
+				"probeCount":      probeCount,
+				"mysqlProbeCount": len(item.MySQLProbes),
+				"requiredConfig":  configList(item.RequiredConfig),
+				"evidenceKinds":   evidencePolicyKinds(item.EvidencePolicy),
+				"allowedChanges":  configChangeList(item.ConfigPolicy.AllowedChanges),
+			})
+		}
+		return items
+	}
 	if strings.TrimSpace(bundle.ID) == "" || bundle.Counts() == (profile.Counts{}) {
 		return []map[string]any{}
 	}
@@ -95,6 +133,71 @@ func agentTestProfiles(bundle profile.Bundle) []map[string]any {
 		"evidenceKinds":  []string{"runs", "evidence"},
 		"allowedChanges": []map[string]any{},
 	}}
+}
+
+func agentTestConfigAuthoring(authoring profile.ConfigAuthoring) map[string]any {
+	if strings.TrimSpace(authoring.Role) == "" {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"schemaVersion":               authoring.SchemaVersion,
+		"role":                        authoring.Role,
+		"summary":                     authoring.Summary,
+		"guidePath":                   authoring.GuidePath,
+		"allowedWritePaths":           nonNil(authoring.AllowedWritePaths),
+		"allowedReadPaths":            nonNil(authoring.AllowedReadPaths),
+		"mainAgentResponsibilities":   nonNil(authoring.MainAgentResponsibilities),
+		"subagentResponsibilities":    nonNil(authoring.SubagentResponsibilities),
+		"handoffRequiredFields":       nonNil(authoring.HandoffRequiredFields),
+		"frictionCategories":          nonNil(authoring.FrictionCategories),
+		"requiresDedicatedSubagent":   authoring.RequiresDedicatedSubagent,
+		"prohibitsMainAgentAuthoring": authoring.ProhibitsMainAgentAuthoring,
+	}
+}
+
+func countAgentTestSteps(steps []profile.AgentTestStep, stepType string) int {
+	count := 0
+	for _, step := range steps {
+		if strings.EqualFold(step.Type, stepType) {
+			count++
+		}
+	}
+	return count
+}
+
+func evidencePolicyKinds(policy map[string]bool) []string {
+	kinds := make([]string, 0, len(policy))
+	for key, enabled := range policy {
+		if enabled {
+			kinds = append(kinds, key)
+		}
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
+func configList(items []profile.RequiredConfig) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, map[string]any{
+			"kind":           item.Kind,
+			"key":            item.Key,
+			"suggestedValue": item.SuggestedValue,
+			"reason":         item.Reason,
+		})
+	}
+	return out
+}
+
+func configChangeList(items []profile.ConfigChange) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, map[string]any{
+			"kind": item.Kind,
+			"key":  item.Key,
+		})
+	}
+	return out
 }
 
 func agentTestRuns(runs []store.Run) []map[string]any {
@@ -152,7 +255,7 @@ func agentTestFailureKind(run store.Run, diagnosis map[string]any) string {
 	return ""
 }
 
-func agentTestSummary(runs []map[string]any, capabilities []map[string]any, profiles []map[string]any) map[string]any {
+func agentTestSummary(runs []map[string]any, capabilities []map[string]any, profiles []map[string]any, authoring profile.ConfigAuthoring) map[string]any {
 	statusCounts := map[string]int{}
 	failureKinds := map[string]int{}
 	for _, run := range runs {
@@ -171,6 +274,7 @@ func agentTestSummary(runs []map[string]any, capabilities []map[string]any, prof
 		"capabilityCount":         len(capabilities),
 		"profileCount":            len(profiles),
 		"runCount":                len(runs),
+		"authoringContractCount":  boolCount(strings.TrimSpace(authoring.Role) != ""),
 		"configEventCount":        0,
 		"escalationEventCount":    0,
 		"acceptanceReportCount":   0,
@@ -180,4 +284,11 @@ func agentTestSummary(runs []map[string]any, capabilities []map[string]any, prof
 		"latestAcceptanceVerdict": "",
 		"latestAcceptanceStatus":  "",
 	}
+}
+
+func boolCount(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

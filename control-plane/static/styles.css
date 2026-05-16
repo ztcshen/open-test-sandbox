@@ -1322,6 +1322,16 @@ code {
   background: #fff;
   color: var(--muted);
   text-align: left;
+  text-decoration: none;
+}
+
+.workflow-progress-step em {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workflow-progress-step.selected {
@@ -3369,6 +3379,30 @@ code {
   overflow-wrap: anywhere;
 }
 
+.workflow-detail-step-config {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(102, 112, 133, 0.14);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.workflow-detail-step-config-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.workflow-detail-step-config-row > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 24px;
+  text-transform: uppercase;
+}
+
 .workflow-step-interface-hint {
   display: flex;
   align-items: center;
@@ -3980,12 +4014,13 @@ code {
 
 .workflow-step-request-response {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
 .workflow-step-request-response pre,
-.workflow-step-topology-graph pre {
+.workflow-step-topology-graph pre,
+.workflow-step-log-lines {
   max-height: 260px;
   margin-top: 8px;
   overflow: auto;
@@ -3993,6 +4028,57 @@ code {
   font-size: 11px;
   line-height: 1.45;
   white-space: pre-wrap;
+}
+
+.workflow-step-logs {
+  display: grid;
+  gap: 10px;
+}
+
+.workflow-step-log-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 10px;
+}
+
+.workflow-step-log-system {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(102, 112, 133, 0.16);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.workflow-step-log-system.found {
+  border-color: rgba(15, 138, 87, 0.26);
+}
+
+.workflow-step-log-system.missing {
+  border-color: rgba(102, 112, 133, 0.18);
+}
+
+.workflow-step-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.workflow-step-log-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.workflow-step-log-lines {
+  max-height: 320px;
+  padding: 10px;
+  border: 1px solid rgba(102, 112, 133, 0.16);
+  border-radius: 8px;
+  background: #0f172a;
+  color: #dbeafe;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .workflow-step-topology-head {
@@ -4374,6 +4460,23 @@ code {
   overflow-wrap: anywhere;
 }
 
+.workflow-run-summary-workflow {
+  grid-template-rows: auto auto auto;
+}
+
+.workflow-run-summary-workflow strong,
+.workflow-run-summary-workflow code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-run-summary-workflow code {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .workflow-run-shell {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
@@ -4395,6 +4498,71 @@ code {
 
 .workflow-run-steps.workflow-run-missing-grid {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.workflow-run-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.workflow-run-step:hover,
+.workflow-run-step:focus-visible,
+.workflow-run-step.active {
+  border-color: rgba(47, 111, 237, 0.36);
+  background: #f8fbff;
+  outline: none;
+}
+
+.workflow-run-step > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workflow-run-step strong,
+.workflow-run-step span,
+.workflow-run-step code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-run-step strong {
+  font-size: 12px;
+}
+
+.workflow-run-step span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workflow-run-step code {
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.workflow-run-step.passed code {
+  background: #ecfdf3;
+  color: #087443;
+}
+
+.workflow-run-step.failed code {
+  background: #fff1f0;
+  color: #b42318;
 }
 
 .workflow-run-step-card {
@@ -4947,9 +5115,9 @@ code {
 
 .environment-node-detail-grid {
   display: grid;
-  grid-template-columns: minmax(340px, 1fr) minmax(260px, 0.72fr) minmax(260px, 0.72fr);
-  gap: 10px;
-  max-width: 1360px;
+  grid-template-columns: minmax(360px, 1.05fr) minmax(340px, 0.85fr) minmax(320px, 0.72fr);
+  gap: 12px;
+  max-width: 1440px;
   margin: 0 auto 12px;
   align-items: stretch;
 }
@@ -4961,7 +5129,7 @@ code {
 .environment-node-detail-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px;
+  padding: 12px;
   background: #fff;
   box-shadow: var(--shadow);
 }
@@ -4977,23 +5145,119 @@ code {
 
 .environment-node-detail-list {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  gap: 5px 8px;
-  margin: 8px 0 0;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
   font-size: 12px;
+}
+
+.environment-detail-row {
+  min-width: 0;
+  border: 1px solid rgba(102, 112, 133, 0.12);
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: #fbfcfe;
 }
 
 .environment-node-detail-list dt {
   color: var(--muted);
   font-weight: 800;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
 .environment-node-detail-list dd {
+  display: block;
   margin: 0;
+  margin-top: 5px;
   min-width: 0;
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.35;
+}
+
+.environment-runtime-identity {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  margin-bottom: 0;
+}
+
+.environment-runtime-token,
+.environment-runtime-source,
+.environment-endpoint-list > div {
+  min-width: 0;
+  border: 1px solid rgba(102, 112, 133, 0.14);
+  border-radius: 8px;
+  padding: 10px 11px;
+  background: #fbfcfe;
+}
+
+.environment-runtime-token dt,
+.environment-runtime-source dt,
+.environment-endpoint-list span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.environment-runtime-token dd,
+.environment-runtime-source dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.environment-runtime-token code,
+.environment-endpoint-list code {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-runtime-source {
+  grid-column: 1 / -1;
+}
+
+.environment-runtime-source code {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-endpoint-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.environment-endpoint-list code {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .environment-node-detail-actions {
@@ -5095,7 +5359,7 @@ code {
 
 .environment-node-peer-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 6px;
   margin-top: 8px;
 }

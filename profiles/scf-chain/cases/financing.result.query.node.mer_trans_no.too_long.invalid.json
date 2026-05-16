@@ -1,5 +1,6 @@
 {
   "id": "financing.result.query.node.mer_trans_no.too_long.invalid",
   "displayName": "融资结果查询-mer_trans_no超长",
-  "nodeId": "scf.financing.result.query"
+  "nodeId": "scf.financing.result.query",
+  "requiredForAdmission": false
 }

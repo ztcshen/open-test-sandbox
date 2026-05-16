@@ -1,5 +1,6 @@
 {
   "id": "scf.loan.result.query",
   "displayName": "放款结果查询",
-  "serviceId": "retail-gateway"
+  "serviceId": "retail-gateway",
+  "timeoutMs": 1000
 }

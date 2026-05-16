@@ -1,5 +1,6 @@
 {
   "id": "repay.trial.repay_type.empty.invalid",
   "displayName": "还款试算-repay_type为空字符串",
-  "nodeId": "scf.repay.trial"
+  "nodeId": "scf.repay.trial",
+  "requiredForAdmission": false
 }

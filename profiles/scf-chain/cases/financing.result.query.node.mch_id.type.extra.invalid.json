@@ -1,5 +1,6 @@
 {
   "id": "financing.result.query.node.mch_id.type.extra.invalid",
   "displayName": "融资结果查询-mch_id类型错误候选",
-  "nodeId": "scf.financing.result.query"
+  "nodeId": "scf.financing.result.query",
+  "requiredForAdmission": false
 }

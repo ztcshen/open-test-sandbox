@@ -1,5 +1,6 @@
 {
   "id": "repay.apply.order_id.empty.extra.invalid",
   "displayName": "还款申请-order_id空字符串候选",
-  "nodeId": "scf.repay.apply"
+  "nodeId": "scf.repay.apply",
+  "requiredForAdmission": false
 }

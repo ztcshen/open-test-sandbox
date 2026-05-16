@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 
 const capabilityOrder = [
   "Evidence Diagnosis Index",
+  "Subagent Config Authoring",
   "Config Mutable",
   "Capability Gap",
   "Subagent Acceptance",
@@ -77,6 +78,7 @@ function Panel({ title, summary, action, className = "", children }) {
 function Ribbon({ summary }) {
   const items = [
     ["profiles", summary.profileCount || 0],
+    ["authoring", summary.authoringContractCount || 0],
     ["runs", summary.runCount || 0],
     ["config events", summary.configEventCount || 0],
     ["escalations", summary.escalationEventCount || 0],
@@ -120,7 +122,7 @@ function CapabilityGrid({ capabilities }) {
 
 function ProfileList({ profiles }) {
   if (!profiles.length) {
-    return <Empty>configs/agent-test-profiles.json 暂无可显示 profile。</Empty>;
+    return <Empty>当前 profile 暂无 agent-test-profiles.json。</Empty>;
   }
   return (
     <div className="agent-profile-list">
@@ -130,10 +132,13 @@ function ProfileList({ profiles }) {
             <strong>{profile.title || profile.id}</strong>
             <code>{profile.id || "-"}</code>
           </div>
-          <p>{`${profile.stepCount || 0} steps · ${profile.mysqlProbeCount || 0} probes · ${(profile.allowedChanges || []).length} allowed config changes`}</p>
+          <p>{`${profile.stepCount || 0} steps · ${profile.probeCount ?? profile.mysqlProbeCount ?? 0} probes · ${(profile.allowedChanges || []).length} allowed config changes`}</p>
           <div className="agent-chip-row">
             {(profile.requiredConfig || []).map((cfg) => (
               <Chip key={`${cfg.kind}:${cfg.key}`}>{`${cfg.kind}:${cfg.key}`}</Chip>
+            ))}
+            {(profile.allowedChanges || []).slice(0, 4).map((change) => (
+              <Chip key={`${change.kind}:${change.key}`}>{`${change.kind}:${change.key}`}</Chip>
             ))}
             {(profile.evidenceKinds || []).map((kind) => (
               <Chip key={kind}>{kind}</Chip>
@@ -141,6 +146,46 @@ function ProfileList({ profiles }) {
           </div>
         </article>
       ))}
+    </div>
+  );
+}
+
+function AuthoringContract({ authoring }) {
+  if (!authoring?.role) {
+    return <Empty>当前 profile 暂无配置 authoring contract。</Empty>;
+  }
+  const facts = [
+    ["role", authoring.role],
+    ["guide", authoring.guidePath],
+    ["write scopes", (authoring.allowedWritePaths || []).length],
+    ["friction", (authoring.frictionCategories || []).length],
+  ];
+  return (
+    <div className="agent-profile-list">
+      <article className="agent-profile-item">
+        <div className="agent-card-top">
+          <strong>{authoring.role}</strong>
+          <Status value={authoring.requiresDedicatedSubagent ? "dedicated" : "open"} />
+        </div>
+        <p>{authoring.summary || ""}</p>
+        <div className="agent-chip-row">
+          {facts.map(([label, value]) => (
+            <Chip key={label}>{`${label}:${blankDash(value)}`}</Chip>
+          ))}
+        </div>
+      </article>
+      <article className="agent-profile-item">
+        <div className="agent-card-top">
+          <strong>Subagent boundary</strong>
+          <Status value={authoring.prohibitsMainAgentAuthoring ? "enforced" : "advisory"} />
+        </div>
+        <p>{(authoring.subagentResponsibilities || []).join(" · ")}</p>
+        <div className="agent-chip-row">
+          {(authoring.handoffRequiredFields || []).map((field) => (
+            <Chip key={field}>{field}</Chip>
+          ))}
+        </div>
+      </article>
     </div>
   );
 }
@@ -219,7 +264,7 @@ function CaseEvidence({ caseRuns }) {
   return (
     <div className="agent-case-evidence-list">
       {caseRuns.slice(0, 6).map((run) => (
-        <a className={`agent-case-evidence-item ${statusTone(run.status)}`} href={`/evidence-viewer.html?caseRun=${encodeURIComponent(run.runId || "")}`} key={run.runId}>
+        <a className={`agent-case-evidence-item ${statusTone(run.status)}`} href={`/evidence-viewer.html?${new URLSearchParams({ caseRun: run.runId || "", caseId: run.caseId || "" }).toString()}`} key={run.runId}>
           <div className="agent-card-top">
             <strong>{run.caseId || run.runId || "-"}</strong>
             <Status value={run.status} />
@@ -355,6 +400,9 @@ function AgentTestApp() {
           action={<a className="button-link" href="/case-runs.html">查看全部</a>}
         >
           <CaseEvidence caseRuns={cases} />
+        </Panel>
+        <Panel title="Config Authoring Contract" summary={data.configAuthoring?.role ? data.configAuthoring.summary || data.configAuthoring.role : "暂无配置 authoring contract"}>
+          <AuthoringContract authoring={data.configAuthoring || {}} />
         </Panel>
         <Panel title="后端能力" summary={(data.capabilities || []).length ? `${(data.capabilities || []).length} 项后端能力已接入` : "暂无能力定义"}>
           <CapabilityGrid capabilities={data.capabilities || []} />

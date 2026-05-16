@@ -1,5 +1,6 @@
 {
   "id": "financing.trial.credit_contract_type.invalid.invalid",
   "displayName": "融资试算-credit_contract_type非法枚举",
-  "nodeId": "scf.financing.trial"
+  "nodeId": "scf.financing.trial",
+  "requiredForAdmission": false
 }

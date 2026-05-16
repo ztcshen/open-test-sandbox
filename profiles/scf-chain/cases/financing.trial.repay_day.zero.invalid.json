@@ -1,5 +1,6 @@
 {
   "id": "financing.trial.repay_day.zero.invalid",
   "displayName": "融资试算-repay_day小于最小值",
-  "nodeId": "scf.financing.trial"
+  "nodeId": "scf.financing.trial",
+  "requiredForAdmission": false
 }

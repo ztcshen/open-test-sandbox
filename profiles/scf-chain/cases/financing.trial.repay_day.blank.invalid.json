@@ -1,5 +1,6 @@
 {
   "id": "financing.trial.repay_day.blank.invalid",
   "displayName": "融资试算-repay_day为空",
-  "nodeId": "scf.financing.trial"
+  "nodeId": "scf.financing.trial",
+  "requiredForAdmission": false
 }

@@ -1,5 +1,6 @@
 {
   "id": "financing.result.query.node.order_id.too_long.invalid",
   "displayName": "融资结果查询-order_id超长",
-  "nodeId": "scf.financing.result.query"
+  "nodeId": "scf.financing.result.query",
+  "requiredForAdmission": false
 }

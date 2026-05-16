@@ -1,5 +1,6 @@
 {
   "id": "loan.result.query.order_id.missing.invalid",
   "displayName": "放款结果查询-order_id缺失",
-  "nodeId": "scf.loan.result.query"
+  "nodeId": "scf.loan.result.query",
+  "requiredForAdmission": false
 }

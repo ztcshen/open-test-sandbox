@@ -1,5 +1,6 @@
 {
   "id": "scf.repay.result.query",
   "displayName": "还款结果查询",
-  "serviceId": "retail-gateway"
+  "serviceId": "retail-gateway",
+  "timeoutMs": 1500
 }

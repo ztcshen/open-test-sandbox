@@ -1,5 +1,6 @@
 {
   "id": "financing.apply.credit_contract_type.unsupported.extra.invalid",
   "displayName": "融资申请-credit_contract_type非法候选",
-  "nodeId": "scf.financing.apply"
+  "nodeId": "scf.financing.apply",
+  "requiredForAdmission": false
 }

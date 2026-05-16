@@ -1,5 +1,6 @@
 {
   "id": "repay.trial.mch_id.missing.invalid",
   "displayName": "还款试算-mch_id缺失",
-  "nodeId": "scf.repay.trial"
+  "nodeId": "scf.repay.trial",
+  "requiredForAdmission": false
 }

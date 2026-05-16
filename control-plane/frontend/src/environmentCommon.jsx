@@ -33,6 +33,10 @@ export function runtimeByService(snapshot = {}) {
   return new Map((snapshot.serviceRuntime || []).map((item) => [item.serviceId, item]));
 }
 
+export function envCopy(snapshot = {}, item = {}, key, fallback) {
+  return item?.presentation?.copy?.[key] || snapshot?.presentation?.copy?.[key] || fallback;
+}
+
 export function StatBox({ label, value }) {
   return (
     <div>

@@ -1,5 +1,6 @@
 {
   "id": "loan.result.query.payout_id.blank.invalid",
   "displayName": "放款结果查询-payout_id为空",
-  "nodeId": "scf.loan.result.query"
+  "nodeId": "scf.loan.result.query",
+  "requiredForAdmission": false
 }

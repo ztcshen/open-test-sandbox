@@ -37,7 +37,6 @@ type Assertions struct {
 type RunOptions struct {
 	CasePath    string
 	EvidenceDir string
-	DryRun      bool
 	RunID       string
 	BaseURL     string
 	Overrides   map[string]any
@@ -47,7 +46,6 @@ type RunResult struct {
 	RunID        string `json:"runId"`
 	CaseID       string `json:"caseId"`
 	Status       string `json:"status"`
-	DryRun       bool   `json:"dryRun"`
 	EvidencePath string `json:"evidencePath"`
 	StartedAt    string `json:"startedAt"`
 	FinishedAt   string `json:"finishedAt"`
@@ -79,7 +77,6 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 		RunID:        runID,
 		CaseID:       item.ID,
 		Status:       "passed",
-		DryRun:       options.DryRun,
 		EvidencePath: evidencePath,
 		StartedAt:    started.Format(time.RFC3339Nano),
 		CreatedAt:    started.Format(time.RFC3339Nano),
@@ -90,20 +87,18 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 	if err := writeJSON(filepath.Join(evidencePath, "request.json"), item.Request); err != nil {
 		return RunResult{}, err
 	}
-	if !options.DryRun {
-		response, assertions, err := executeHTTP(ctx, item, options.BaseURL)
-		if err != nil {
-			return RunResult{}, err
-		}
-		if assertions.Status != "passed" {
-			result.Status = "failed"
-		}
-		if err := writeJSON(filepath.Join(evidencePath, "response.json"), response); err != nil {
-			return RunResult{}, err
-		}
-		if err := writeJSON(filepath.Join(evidencePath, "assertions.json"), assertions); err != nil {
-			return RunResult{}, err
-		}
+	response, assertions, err := executeHTTP(ctx, item, options.BaseURL)
+	if err != nil {
+		return RunResult{}, err
+	}
+	if assertions.Status != "passed" {
+		result.Status = "failed"
+	}
+	if err := writeJSON(filepath.Join(evidencePath, "response.json"), response); err != nil {
+		return RunResult{}, err
+	}
+	if err := writeJSON(filepath.Join(evidencePath, "assertions.json"), assertions); err != nil {
+		return RunResult{}, err
 	}
 	finished := time.Now().UTC()
 	result.FinishedAt = finished.Format(time.RFC3339Nano)

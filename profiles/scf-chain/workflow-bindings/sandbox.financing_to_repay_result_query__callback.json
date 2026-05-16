@@ -3,5 +3,6 @@
   "stepId": "callback",
   "nodeId": "scf.financing.apply.llt.callback",
   "caseId": "callback.financing.apply.llt.approved",
-  "required": true
+  "required": true,
+  "sortOrder": 3
 }

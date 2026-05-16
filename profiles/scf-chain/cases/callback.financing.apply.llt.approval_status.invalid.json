@@ -1,5 +1,6 @@
 {
   "id": "callback.financing.apply.llt.approval_status.invalid",
   "displayName": "融资结果回调-approval_status非法",
-  "nodeId": "scf.financing.apply.llt.callback"
+  "nodeId": "scf.financing.apply.llt.callback",
+  "requiredForAdmission": false
 }

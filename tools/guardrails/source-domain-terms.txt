@@ -11,3 +11,6 @@ scf-loan
 scf-gateway
 account-channel
 sandboxctl
+dryRun
+dry-run
+dry run

@@ -3,5 +3,6 @@
   "stepId": "repay-query",
   "nodeId": "scf.repay.result.query",
   "caseId": "repay.result.query.default",
-  "required": true
+  "required": true,
+  "sortOrder": 10
 }

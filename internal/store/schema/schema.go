@@ -6,7 +6,7 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 2
+const CurrentVersion = 10
 
 func All() []Change {
 	return []Change{
@@ -317,6 +317,127 @@ create index if not exists idx_interface_node_case_dependency_case
 
 create index if not exists idx_interface_node_case_dependency_fixture
   on interface_node_case_dependency(fixture_profile_id, status);`,
+		},
+		{
+			Version: 3,
+			Name:    "add trace topology evidence",
+			SQL: `
+create table if not exists trace_topologies (
+  id text primary key,
+  workflow_run_id text not null,
+  workflow_id text not null default '',
+  step_id text not null default '',
+  case_id text not null default '',
+  request_id text not null default '',
+  trace_id text not null default '',
+  status text not null default 'unknown',
+  topology_json text not null default '{}',
+  text_topology text not null default '',
+  created_at text not null,
+  foreign key (workflow_run_id) references runs(id) on delete cascade
+);
+
+create index if not exists idx_trace_topologies_workflow_run
+  on trace_topologies(workflow_run_id, created_at, id);
+
+create index if not exists idx_trace_topologies_case
+  on trace_topologies(workflow_run_id, case_id, step_id);`,
+		},
+		{
+			Version: 4,
+			Name:    "add execution budgets",
+			SQL: `
+alter table workflow add column base_step_timeout_ms integer not null default 0;
+alter table workflow add column timeout_offset_ms integer not null default 0;
+alter table interface_node add column timeout_ms integer not null default 0;`,
+		},
+		{
+			Version: 5,
+			Name:    "add post process task records",
+			SQL: `
+create table if not exists post_process_tasks (
+  id text primary key,
+  run_id text not null,
+  workflow_id text not null default '',
+  step_id text not null default '',
+  case_id text not null default '',
+  kind text not null,
+  status text not null,
+  started_at text,
+  finished_at text,
+  duration_ms integer not null default 0,
+  error text not null default '',
+  summary_json text not null default '{}',
+  created_at text not null,
+  foreign key (run_id) references runs(id) on delete cascade
+);
+
+create index if not exists idx_post_process_tasks_run_created
+  on post_process_tasks(run_id, created_at, id);
+
+create index if not exists idx_post_process_tasks_kind_status
+  on post_process_tasks(kind, status, created_at);`,
+		},
+		{
+			Version: 6,
+			Name:    "add latest api case run lookup index",
+			SQL: `
+create index if not exists idx_api_case_runs_case_created
+  on api_case_runs(case_id, created_at, id);`,
+		},
+		{
+			Version: 7,
+			Name:    "add service source path config",
+			SQL: `
+alter table node_config add column source_path text not null default '';`,
+		},
+		{
+			Version: 8,
+			Name:    "add config version catalog",
+			SQL: `
+create table if not exists config_versions (
+  id text primary key,
+  profile_id text not null,
+  source_path text not null default '',
+  bundle_digest text not null default '',
+  summary_json text not null default '',
+  active integer not null default 0,
+  published_at text,
+  created_at text not null
+);
+
+create index if not exists idx_config_versions_active
+  on config_versions(active, published_at, id);
+
+create index if not exists idx_config_versions_profile_published
+  on config_versions(profile_id, published_at, id);`,
+		},
+		{
+			Version: 9,
+			Name:    "add configuration read models",
+			SQL: `
+create table if not exists config_read_model (
+  profile_id text not null,
+  model_key text not null,
+  config_version_id text not null default '',
+  payload_json text not null default '{}',
+  generated_at text,
+  updated_at text not null,
+  primary key (profile_id, model_key)
+);
+
+create index if not exists idx_config_read_model_version
+  on config_read_model(config_version_id, model_key);`,
+		},
+		{
+			Version: 10,
+			Name:    "add api case execution config",
+			SQL: `
+alter table interface_node_case add column case_path text not null default '';
+alter table interface_node_case add column base_url text not null default '';
+alter table interface_node_case add column evidence_dir text not null default '';
+alter table interface_node_case add column timeout_seconds integer not null default 0;
+alter table interface_node_case add column default_overrides_json text not null default '{}';`,
 		},
 	}
 }

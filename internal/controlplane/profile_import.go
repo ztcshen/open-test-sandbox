@@ -26,6 +26,7 @@ type profileImportResponse struct {
 	ImportedAt   time.Time            `json:"importedAt"`
 	Counts       profileImportCounts  `json:"counts"`
 	Store        profileImportStore   `json:"store"`
+	ReadModels   []string             `json:"readModels"`
 	Audit        *profileaudit.Report `json:"audit,omitempty"`
 }
 
@@ -105,8 +106,26 @@ func importProfileBundle(ctx context.Context, runtime store.Store, req profileIm
 	if err != nil {
 		return profile.Bundle{}, profileImportResponse{}, fmt.Errorf("store profile index %q: %w", bundle.ID, err)
 	}
-	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, importedAt)); err != nil {
+	catalog := profilecatalog.FromBundle(bundle, importedAt)
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
 		return profile.Bundle{}, profileImportResponse{}, fmt.Errorf("store profile catalog %q: %w", bundle.ID, err)
+	}
+	configVersion, err := runtime.UpsertConfigVersion(ctx, store.ConfigVersion{
+		ID:           profileImportConfigVersionID(bundle.ID, importedAt),
+		ProfileID:    bundle.ID,
+		SourcePath:   req.Path,
+		BundleDigest: digest,
+		SummaryJSON:  string(summary),
+		Active:       true,
+		PublishedAt:  importedAt,
+		CreatedAt:    importedAt,
+	})
+	if err != nil {
+		return profile.Bundle{}, profileImportResponse{}, fmt.Errorf("store config version %q: %w", bundle.ID, err)
+	}
+	readModelKeys, err := UpsertProfileReadModels(ctx, runtime, catalog, configVersion.ID, importedAt)
+	if err != nil {
+		return profile.Bundle{}, profileImportResponse{}, err
 	}
 	response := profileImportResponse{
 		ProfileID:    bundle.ID,
@@ -121,6 +140,7 @@ func importProfileBundle(ctx context.Context, runtime store.Store, req profileIm
 			ImportedAt:   index.ImportedAt,
 			UpdatedAt:    index.UpdatedAt,
 		},
+		ReadModels: readModelKeys,
 	}
 	if req.Audit {
 		auditReport, err := profileaudit.Audit(ctx, profileaudit.Options{
@@ -147,4 +167,12 @@ func profileImportCountsFrom(counts profile.Counts) profileImportCounts {
 		WorkflowBindings: counts.WorkflowBindings,
 		Fixtures:         counts.Fixtures,
 	}
+}
+
+func profileImportConfigVersionID(profileID string, publishedAt time.Time) string {
+	safeProfileID := strings.NewReplacer("/", "-", "\\", "-", " ", "-", ":", "-").Replace(strings.TrimSpace(profileID))
+	if safeProfileID == "" {
+		safeProfileID = "profile"
+	}
+	return "config." + safeProfileID + "." + publishedAt.UTC().Format("20060102T150405.000000000Z")
 }

@@ -1,5 +1,6 @@
 {
   "id": "callback.loan.apply.llt.payout_id.missing.invalid",
   "displayName": "放款结果回调-payout_id缺失",
-  "nodeId": "scf.loan.apply.llt.callback"
+  "nodeId": "scf.loan.apply.llt.callback",
+  "requiredForAdmission": false
 }

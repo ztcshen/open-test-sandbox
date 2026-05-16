@@ -1,5 +1,6 @@
 {
   "id": "financing.trial.client_mac.too_long.invalid",
   "displayName": "融资试算-client_mac超长",
-  "nodeId": "scf.financing.trial"
+  "nodeId": "scf.financing.trial",
+  "requiredForAdmission": false
 }

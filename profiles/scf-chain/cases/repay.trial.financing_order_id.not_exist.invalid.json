@@ -1,5 +1,6 @@
 {
   "id": "repay.trial.financing_order_id.not_exist.invalid",
   "displayName": "还款试算-financing_order_id不存在",
-  "nodeId": "scf.repay.trial"
+  "nodeId": "scf.repay.trial",
+  "requiredForAdmission": false
 }

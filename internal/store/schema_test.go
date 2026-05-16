@@ -61,6 +61,8 @@ func TestSQLiteSchemaIncludesTemplateConfigModel(t *testing.T) {
 		"fixture_profile",
 		"fixture_table_binding",
 		"interface_node_case_dependency",
+		"config_versions",
+		"config_read_model",
 	} {
 		if !tables[table] {
 			t.Fatalf("missing template config table %q in %#v", table, tables)

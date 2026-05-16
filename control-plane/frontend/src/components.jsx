@@ -11,6 +11,7 @@ import {
   Server,
   Workflow,
   Wrench,
+  X,
 } from "lucide-react";
 import { classNames, compactText } from "./api.js";
 import {
@@ -35,6 +36,7 @@ export const Icons = {
   Server,
   Workflow,
   Wrench,
+  X,
 };
 
 export function Shell({ children, className }) {
@@ -111,7 +113,7 @@ export function ServiceChips({ workflow, services }) {
         return (
           <a
             className={classNames("react-chip", !service && "warn")}
-            href={service?.role === "external" ? "/service-inventory.html" : `/environment-node.html?id=${encodeURIComponent(serviceId)}`}
+            href={service?.role === "external" ? `/service-inventory.html#service-${encodeURIComponent(service.id || serviceId)}` : `/environment-node.html?id=${encodeURIComponent(serviceId)}`}
             key={serviceId}
           >
             {service?.displayName || `${serviceId} · 未建模`}
@@ -122,7 +124,13 @@ export function ServiceChips({ workflow, services }) {
   );
 }
 
-export function WorkflowCard({ workflow, services, compact = false }) {
+function runtimeImpactTone(tone) {
+  if (tone === "ok") return "good";
+  if (tone === "bad") return "bad";
+  return "warn";
+}
+
+export function WorkflowCard({ workflow, services, compact = false, runtimeImpact, onRuntimeImpactClick }) {
   const kind = workflowKind(workflow);
   const latestRun = workflow.latestRun || null;
   const runCount = Number(workflow.runCount || 0);
@@ -143,6 +151,15 @@ export function WorkflowCard({ workflow, services, compact = false }) {
       <p>{compactText(workflow.description, "按业务阶段查看请求、返回、日志和证据。")}</p>
       <div className="react-service-chips">
         <span className={classNames("react-pill", runTone)}>{`${runCount} runs · ${runStatus}`}</span>
+        {runtimeImpact ? (
+          <button
+            className={classNames("react-pill", "workflow-impact-button", runtimeImpactTone(runtimeImpact.tone))}
+            type="button"
+            onClick={() => onRuntimeImpactClick?.(runtimeImpact.text)}
+          >
+            {runtimeImpact.text}
+          </button>
+        ) : null}
         {latestRun?.id ? (
           <a className="react-chip" href={`/workflow-run.html?id=${encodeURIComponent(latestRun.id)}`}>
             {latestRun.id}

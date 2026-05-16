@@ -1,5 +1,6 @@
 {
   "id": "financing.result.query.node.credit_contract_type.missing.extra.invalid",
   "displayName": "融资结果查询-credit_contract_type缺失候选",
-  "nodeId": "scf.financing.result.query"
+  "nodeId": "scf.financing.result.query",
+  "requiredForAdmission": false
 }

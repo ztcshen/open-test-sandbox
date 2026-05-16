@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { fetchJSON } from "./api.js";
+import { TopologyDiagram, topologyEdges } from "./topologyView.jsx";
 
 const STORAGE_PREFIX = "open-test-sandbox-evidence:";
 
@@ -9,6 +10,8 @@ function query() {
   return {
     key: params.get("key") || "",
     caseRun: params.get("caseRun") || params.get("runId") || "",
+    caseId: params.get("caseId") || "",
+    stepId: params.get("stepId") || params.get("step") || "",
   };
 }
 
@@ -76,9 +79,12 @@ function normalizeCaseEvidence(payload) {
 }
 
 async function loadPayload() {
-  const { key, caseRun } = query();
+  const { key, caseRun, caseId, stepId } = query();
   if (caseRun) {
-    return normalizeCaseEvidence(await fetchJSON(`/api/case/evidence?runId=${encodeURIComponent(caseRun)}`));
+    const params = new URLSearchParams({ runId: caseRun });
+    if (caseId) params.set("caseId", caseId);
+    if (stepId) params.set("stepId", stepId);
+    return normalizeCaseEvidence(await fetchJSON(`/api/case/evidence?${params.toString()}`));
   }
   if (!key.startsWith(STORAGE_PREFIX)) return null;
   try {
@@ -218,25 +224,32 @@ function SignalCard({ step, codeHints }) {
 
 function fixtureSummary(fixture = {}) {
   const applyRuns = Array.isArray(fixture.applyRuns) ? fixture.applyRuns : [];
+  const dependencies = Array.isArray(fixture.dependencies) ? fixture.dependencies : [];
+  const upstreamSteps = Array.isArray(fixture.upstreamSteps) ? fixture.upstreamSteps : [];
   const summary = fixture.summary || {};
   return {
     status: fixture.status || (applyRuns.length ? applyRuns[applyRuns.length - 1]?.status : "empty"),
     applyCount: Number(summary.applyCount || applyRuns.filter((run) => run.status === "applied").length || 0),
     restoreCount: Number(summary.restoreCount || applyRuns.filter((run) => run.status === "restored").length || 0),
     failedCount: Number(summary.failedCount || applyRuns.filter((run) => String(run.status || "").includes("failed")).length || 0),
+    dependencyCount: Number(summary.dependencyCount || dependencies.length || 0),
+    upstreamCount: Number(summary.upstreamCount || upstreamSteps.length || 0),
     applyRuns,
+    dependencies,
+    upstreamSteps,
   };
 }
 
 function FixtureEvidence({ fixture }) {
   const summary = fixtureSummary(fixture || emptyFixtureEvidence());
+  const hasConfiguredPlan = summary.dependencies.length || summary.upstreamSteps.length;
   return (
     <Card title="前置证据" meta={`${summary.status || "empty"} · ${summary.applyRuns.length} runs`} className="viewer-fixture-evidence">
       {summary.applyRuns.length ? (
         <>
           <div className="viewer-diagnostic-grid">
-            <Diagnostic label="FIXTURE STATUS" value={summary.status} detail={`${summary.applyCount} apply · ${summary.restoreCount} restore · ${summary.failedCount} failed`} />
-            <Diagnostic label="FIXTURE INSTANCE" value={summary.applyRuns[0]?.fixtureInstanceId || "-"} detail="来自运行前自动选取的前置数据包" />
+            <Diagnostic label="PRECONDITION STATUS" value={summary.status} detail={`${summary.applyCount} apply · ${summary.restoreCount} restore · ${summary.failedCount} failed`} />
+            <Diagnostic label="PRECONDITION INSTANCE" value={summary.applyRuns[0]?.fixtureInstanceId || "-"} detail="来自运行前自动选取的前置数据包" />
             <Diagnostic label="CLEANUP" value={summary.failedCount ? "needs attention" : "restored"} detail="执行后按运行前快照恢复现场" />
           </div>
           <div className="viewer-fixture-run-list">
@@ -251,113 +264,47 @@ function FixtureEvidence({ fixture }) {
             ))}
           </div>
         </>
+      ) : hasConfiguredPlan ? (
+        <>
+          <div className="viewer-diagnostic-grid">
+            <Diagnostic label="PRECONDITION STATUS" value={summary.status} detail="Catalog 已声明前置数据依赖" />
+            <Diagnostic label="DEPENDENCIES" value={String(summary.dependencyCount)} detail="运行前需要满足的数据包" />
+            <Diagnostic label="UPSTREAM STEPS" value={String(summary.upstreamCount)} detail="当前 Case 之前的 Workflow 步骤" />
+          </div>
+          {summary.dependencies.length ? (
+            <div className="viewer-fixture-run-list">
+              {summary.dependencies.map((dependency, index) => (
+                <article className="viewer-fixture-run" key={dependency.id || `${dependency.fixtureProfileId}-${index}`}>
+                  <div className="viewer-card-head">
+                    <h3>{dependency.profile?.name || dependency.fixtureProfileId || dependency.id}</h3>
+                    <span>{dependency.required ? "required" : "optional"}</span>
+                  </div>
+                  <pre className="viewer-pre">{prettyJSON({
+                    fixtureProfileId: dependency.fixtureProfileId,
+                    sourceWorkflowId: dependency.profile?.sourceWorkflowId,
+                    sourceUntilStep: dependency.profile?.sourceUntilStep,
+                    mappings: dependency.mappings || [],
+                    sourceSteps: dependency.profile?.sourceSteps || [],
+                  })}</pre>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {summary.upstreamSteps.length ? (
+            <div className="workflow-step-topology-edges">
+              {summary.upstreamSteps.map((step) => (
+                <article className="workflow-step-topology-edge confirmed" key={`${step.workflowId}-${step.stepId}`}>
+                  <strong>{step.stepId || "-"}</strong>
+                  <span>{"->"}</span>
+                  <strong>{step.nodeId || "-"}</strong>
+                  <code>{step.caseId || "-"}</code>
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </>
       ) : <p className="viewer-code-hint-empty">当前 Case 不需要前置证据，或本次运行没有应用前置数据。</p>}
     </Card>
-  );
-}
-
-function topologyEdges(topology = {}) {
-  return [
-    ...(topology.confirmedEdges || []).map((edge) => ({ ...edge, kind: "confirmed" })),
-    ...(topology.externalExits || []).map((edge) => ({ ...edge, kind: "external" })),
-    ...(topology.unresolvedExits || []).map((edge) => ({ ...edge, kind: "unresolved" })),
-  ];
-}
-
-function topologyNodes(topology = {}, edges = []) {
-  const nodeSet = new Set(topology.observedNodes || []);
-  edges.forEach((edge) => {
-    if (edge.source) nodeSet.add(edge.source);
-    if (edge.target) nodeSet.add(edge.target);
-  });
-  return [...nodeSet].filter(Boolean);
-}
-
-function ranks(nodes, edges) {
-  const rankMap = new Map(nodes.map((node) => [node, 0]));
-  for (let pass = 0; pass < nodes.length; pass += 1) {
-    let changed = false;
-    edges.forEach((edge) => {
-      if (!edge.source || !edge.target || !rankMap.has(edge.source) || !rankMap.has(edge.target)) return;
-      const nextRank = (rankMap.get(edge.source) || 0) + 1;
-      if (nextRank > (rankMap.get(edge.target) || 0)) {
-        rankMap.set(edge.target, nextRank);
-        changed = true;
-      }
-    });
-    if (!changed) break;
-  }
-  return rankMap;
-}
-
-function shortLabel(value, maxLength = 24) {
-  const out = String(value || "-");
-  return out.length > maxLength ? `${out.slice(0, maxLength - 1)}...` : out;
-}
-
-function TopologyDiagram({ topology }) {
-  const edges = topologyEdges(topology);
-  const nodes = topologyNodes(topology, edges);
-  if (!nodes.length) return <div className="empty-note">返回了记录，但没有可绘制节点。</div>;
-  const rankMap = ranks(nodes, edges);
-  const byRank = new Map();
-  nodes.forEach((node) => {
-    const rank = rankMap.get(node) || 0;
-    if (!byRank.has(rank)) byRank.set(rank, []);
-    byRank.get(rank).push(node);
-  });
-  byRank.forEach((rankNodes) => rankNodes.sort((left, right) => left.localeCompare(right)));
-  const nodeWidth = 148;
-  const nodeHeight = 46;
-  const xGap = 205;
-  const yGap = 82;
-  const marginX = 42;
-  const marginY = 36;
-  const maxRank = Math.max(0, ...byRank.keys());
-  const maxRows = Math.max(1, ...[...byRank.values()].map((rankNodes) => rankNodes.length));
-  const width = Math.max(760, marginX * 2 + nodeWidth + maxRank * xGap);
-  const height = Math.max(170, marginY * 2 + nodeHeight + (maxRows - 1) * yGap);
-  const positions = new Map();
-  byRank.forEach((rankNodes, rank) => {
-    const columnHeight = (rankNodes.length - 1) * yGap;
-    const startY = (height - columnHeight - nodeHeight) / 2;
-    rankNodes.forEach((node, index) => positions.set(node, { x: marginX + rank * xGap, y: startY + index * yGap }));
-  });
-  return (
-    <div className="workflow-step-topology-diagram">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Service topology graph">
-        <defs>
-          {["confirmed", "external", "unresolved"].map((kind) => (
-            <marker id={`evidence-arrow-${kind}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse" key={kind}>
-              <path d="M 0 0 L 10 5 L 0 10 z" className={`workflow-step-topology-arrow ${kind}`} />
-            </marker>
-          ))}
-        </defs>
-        {edges.map((edge, index) => {
-          const source = positions.get(edge.source);
-          const target = positions.get(edge.target);
-          if (!source || !target) return null;
-          const startX = source.x + nodeWidth;
-          const startY = source.y + nodeHeight / 2;
-          const endX = target.x;
-          const endY = target.y + nodeHeight / 2;
-          const control = Math.max(44, Math.abs(endX - startX) / 2);
-          return (
-            <g key={`${edge.source}-${edge.target}-${index}`}>
-              <path d={`M ${startX} ${startY} C ${startX + control} ${startY}, ${endX - control} ${endY}, ${endX} ${endY}`} className={`workflow-step-topology-path ${edge.kind}`} markerEnd={`url(#evidence-arrow-${edge.kind})`} />
-              <text x={(startX + endX) / 2} y={(startY + endY) / 2 - 8} className={`workflow-step-topology-path-label ${edge.kind}`} textAnchor="middle">{edge.component || edge.sourceComponent || edge.kind}</text>
-            </g>
-          );
-        })}
-        {[...positions.entries()].map(([node, position]) => (
-          <g className="workflow-step-topology-svg-node" key={node}>
-            <rect x={position.x} y={position.y} width={nodeWidth} height={nodeHeight} rx="8" />
-            <text x={position.x + 12} y={position.y + 20} className="workflow-step-topology-svg-node-title">{shortLabel(node, 22)}</text>
-            <text x={position.x + 12} y={position.y + 36} className="workflow-step-topology-svg-node-meta">{`rank ${rankMap.get(node) || 0}`}</text>
-          </g>
-        ))}
-      </svg>
-    </div>
   );
 }
 
@@ -366,7 +313,7 @@ function TopologyCard({ topology }) {
   const edges = topologyEdges(topology);
   return (
     <Card title="Topology" meta={`${topology.status || "-"} · ${topology.requestId || "-"} · ${topology.traceId || "-"}`} className="viewer-case-topology">
-      <TopologyDiagram topology={topology} />
+      <TopologyDiagram topology={topology} markerPrefix="evidence" />
       <div className="workflow-step-topology-edges">
         {edges.length ? edges.map((edge, index) => (
           <article className={`workflow-step-topology-edge ${edge.kind}`} key={`${edge.source}-${edge.target}-${index}`}>
@@ -404,7 +351,7 @@ function CaseDiagnostics({ diagnostics }) {
         <Diagnostic label="FAILURE KIND" value={summary.failure_kind || assertions.failure_kind || "none"} detail={summary.failure_reason || assertions.failure_reason || "no failure reason"} />
         <Diagnostic label="ASSERTIONS" value={failed.length ? `${failed.length} failed` : "passed"} detail={failed.join(", ") || "all tracked assertions passed"} />
         <Diagnostic label="SQL" value={mysql.ok === false ? "failed" : "ok"} detail={`${queryCount} queries · ${sqlRows} rows`} />
-        <Diagnostic label="FIXTURE" value={fixtureStats.status || "empty"} detail={`${fixtureStats.applyCount} apply · ${fixtureStats.restoreCount} restore`} />
+        <Diagnostic label="PRECONDITION" value={fixtureStats.status || "empty"} detail={`${fixtureStats.applyCount} apply · ${fixtureStats.restoreCount} restore · ${fixtureStats.dependencyCount} dependencies`} />
         <Diagnostic label="SERVICES" value={`${okServices}/${services.length || 0} ok`} detail={services.map((service) => `${service.id}:${service.health || service.state || "-"}`).join(" · ") || "no service snapshot"} />
         <Diagnostic label="REQUEST" value={request.sdk_operation || request.sdkOperation || request.method || "-"} detail={summary.evidence_path || "runtime case bundle"} />
       </div>

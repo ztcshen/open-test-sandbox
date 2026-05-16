@@ -1,5 +1,6 @@
 {
   "id": "scf.financing.result.query",
   "displayName": "融资结果查询",
-  "serviceId": "retail-gateway"
+  "serviceId": "retail-gateway",
+  "timeoutMs": 1500
 }

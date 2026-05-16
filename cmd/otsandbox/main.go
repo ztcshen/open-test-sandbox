@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,14 +29,16 @@ import (
 const version = "0.1.0"
 
 type profileImportReport struct {
-	ProfileID    string               `json:"profileId"`
-	BundlePath   string               `json:"bundlePath"`
-	BundleDigest string               `json:"bundleDigest"`
-	Counts       profileImportCounts  `json:"counts"`
-	StorePath    string               `json:"storePath"`
-	CatalogIndex profileCatalogIndex  `json:"catalogIndex"`
-	ImportedAt   time.Time            `json:"importedAt"`
-	Audit        *profileaudit.Report `json:"audit,omitempty"`
+	ProfileID     string               `json:"profileId"`
+	BundlePath    string               `json:"bundlePath"`
+	BundleDigest  string               `json:"bundleDigest"`
+	Counts        profileImportCounts  `json:"counts"`
+	StorePath     string               `json:"storePath"`
+	CatalogIndex  profileCatalogIndex  `json:"catalogIndex"`
+	ConfigVersion profileConfigVersion `json:"configVersion"`
+	ReadModels    []string             `json:"readModels"`
+	ImportedAt    time.Time            `json:"importedAt"`
+	Audit         *profileaudit.Report `json:"audit,omitempty"`
 }
 
 type profileImportCounts struct {
@@ -68,6 +71,16 @@ type profileCatalogIndexCounts struct {
 	TemplateConfigs  int `json:"templateConfigs"`
 }
 
+type profileConfigVersion struct {
+	ID           string    `json:"id"`
+	ProfileID    string    `json:"profileId"`
+	SourcePath   string    `json:"sourcePath"`
+	BundleDigest string    `json:"bundleDigest"`
+	Active       bool      `json:"active"`
+	PublishedAt  time.Time `json:"publishedAt"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printHelp()
@@ -86,6 +99,11 @@ func main() {
 		}
 	case "profile":
 		if err := runProfile(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	case "config":
+		if err := runConfig(context.Background(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
@@ -114,6 +132,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "interface-node":
+		if err := runInterfaceNode(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "serve":
 		if err := runServe(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -136,6 +159,7 @@ Usage:
   otsandbox profile inspect --profile PATH
   otsandbox profile audit --profile PATH [--store-url PATH] [--json]
   otsandbox profile import --from PATH [--store-url PATH] [--json] [--audit]
+  otsandbox config publish --from PATH [--store-url PATH] [--json] [--audit]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
   otsandbox workflow plan --profile PATH --workflow ID
@@ -143,7 +167,9 @@ Usage:
   otsandbox baseline get --profile ID --subject ID [--store-url PATH]
   otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store-url PATH]
   otsandbox template render --profile PATH --template ID [--fixture ID]
-  otsandbox case run --case PATH [--base-url URL] [--dry-run] [--override KEY=VALUE] [--evidence-dir PATH]
+  otsandbox interface-node case audit --profile PATH --node ID [--json]
+  otsandbox interface-node case apply --profile PATH --file PATH [--json]
+  otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
   otsandbox serve [--profile PATH] [--host HOST] [--port PORT] [--store-url PATH]
   otsandbox help`)
@@ -215,6 +241,18 @@ func runProfile(args []string) error {
 	}
 }
 
+func runConfig(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing config command")
+	}
+	switch args[0] {
+	case "publish", "apply":
+		return runConfigPublish(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown config command: %s", args[0])
+	}
+}
+
 func runProfileInspect(args []string) error {
 	flags := flag.NewFlagSet("profile inspect", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -233,6 +271,16 @@ func runProfileInspect(args []string) error {
 func runProfileImport(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile import", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	return runConfigPublishWithFlags(ctx, flags, args, "Imported profile")
+}
+
+func runConfigPublish(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("config publish", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	return runConfigPublishWithFlags(ctx, flags, args, "Published config")
+}
+
+func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []string, textPrefix string) error {
 	from := flags.String("from", "", "Profile bundle path")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -273,7 +321,25 @@ func runProfileImport(ctx context.Context, args []string) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, importedAt)); err != nil {
+	catalog := profilecatalog.FromBundle(bundle, importedAt)
+	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		return err
+	}
+	configVersion, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
+		ID:           configVersionID(bundle.ID, importedAt),
+		ProfileID:    bundle.ID,
+		SourcePath:   *from,
+		BundleDigest: digest,
+		SummaryJSON:  string(summary),
+		Active:       true,
+		PublishedAt:  importedAt,
+		CreatedAt:    importedAt,
+	})
+	if err != nil {
+		return err
+	}
+	readModelKeys, err := controlplane.UpsertProfileReadModels(ctx, s, catalog, configVersion.ID, importedAt)
+	if err != nil {
 		return err
 	}
 	catalogIndex, err := s.GetProfileCatalogIndex(ctx)
@@ -281,13 +347,15 @@ func runProfileImport(ctx context.Context, args []string) error {
 		return err
 	}
 	report := profileImportReport{
-		ProfileID:    bundle.ID,
-		BundlePath:   *from,
-		BundleDigest: digest,
-		Counts:       profileImportAssetCounts(bundle.Counts()),
-		StorePath:    cfg.Path,
-		CatalogIndex: profileCatalogIndexFromStore(catalogIndex),
-		ImportedAt:   importedAt,
+		ProfileID:     bundle.ID,
+		BundlePath:    *from,
+		BundleDigest:  digest,
+		Counts:        profileImportAssetCounts(bundle.Counts()),
+		StorePath:     cfg.Path,
+		CatalogIndex:  profileCatalogIndexFromStore(catalogIndex),
+		ConfigVersion: profileConfigVersionFromStore(configVersion),
+		ReadModels:    readModelKeys,
+		ImportedAt:    importedAt,
 	}
 	if *auditOutput {
 		auditReport, err := profileaudit.Audit(ctx, profileaudit.Options{
@@ -305,7 +373,7 @@ func runProfileImport(ctx context.Context, args []string) error {
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	}
-	fmt.Printf("Imported profile: %s\n", bundle.ID)
+	fmt.Printf("%s: %s\n", textPrefix, bundle.ID)
 	fmt.Printf("Digest: %s\n", digest)
 	if report.Audit != nil {
 		printProfileImportAudit(*report.Audit)
@@ -343,6 +411,26 @@ func profileCatalogIndexFromStore(index store.ProfileCatalogIndex) profileCatalo
 			TemplateConfigs:  index.Counts.TemplateConfigs,
 		},
 	}
+}
+
+func profileConfigVersionFromStore(item store.ConfigVersion) profileConfigVersion {
+	return profileConfigVersion{
+		ID:           item.ID,
+		ProfileID:    item.ProfileID,
+		SourcePath:   item.SourcePath,
+		BundleDigest: item.BundleDigest,
+		Active:       item.Active,
+		PublishedAt:  item.PublishedAt,
+		CreatedAt:    item.CreatedAt,
+	}
+}
+
+func configVersionID(profileID string, publishedAt time.Time) string {
+	safeProfileID := strings.NewReplacer("/", "-", "\\", "-", " ", "-", ":", "-").Replace(strings.TrimSpace(profileID))
+	if safeProfileID == "" {
+		safeProfileID = "profile"
+	}
+	return "config." + safeProfileID + "." + publishedAt.UTC().Format("20060102T150405.000000000Z")
 }
 
 func printProfileImportAudit(report profileaudit.Report) {
@@ -428,6 +516,323 @@ func printProfileAudit(report profileaudit.Report) {
 		}
 		fmt.Printf("API Case: %s Status: %s Passed: %t\n", item.CaseID, status, item.HasPassed)
 	}
+}
+
+type interfaceNodeCaseAuditReport struct {
+	OK         bool                          `json:"ok"`
+	ProfileID  string                        `json:"profileId"`
+	NodeID     string                        `json:"nodeId"`
+	Counts     interfaceNodeCaseAuditCounts  `json:"counts"`
+	Configured []interfaceNodeCaseConfigured `json:"configured"`
+	Missing    []interfaceNodeCaseMissing    `json:"missing"`
+}
+
+type interfaceNodeCaseAuditCounts struct {
+	Cases      int `json:"cases"`
+	Configured int `json:"configured"`
+	Missing    int `json:"missing"`
+}
+
+type interfaceNodeCaseConfigured struct {
+	CaseID   string `json:"caseId"`
+	ConfigID string `json:"configId"`
+}
+
+type interfaceNodeCaseMissing struct {
+	CaseID string `json:"caseId"`
+	Title  string `json:"title,omitempty"`
+}
+
+type interfaceNodeCaseApplyRequest struct {
+	TemplateConfigs []templateConfigInput `json:"templateConfigs"`
+}
+
+type templateConfigInput struct {
+	profile.TemplateConfig
+	Config json.RawMessage `json:"config,omitempty"`
+}
+
+func runInterfaceNode(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing interface-node command")
+	}
+	if args[0] != "case" {
+		return fmt.Errorf("unknown interface-node command: %s", args[0])
+	}
+	if len(args) < 2 {
+		return errors.New("missing interface-node case command")
+	}
+	switch args[1] {
+	case "audit":
+		return runInterfaceNodeCaseAudit(args[2:])
+	case "apply":
+		return runInterfaceNodeCaseApply(args[2:])
+	default:
+		return fmt.Errorf("unknown interface-node case command: %s", args[1])
+	}
+}
+
+func runInterfaceNodeCaseAudit(args []string) error {
+	flags := flag.NewFlagSet("interface-node case audit", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	nodeID := flags.String("node", "", "Interface node id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*profilePath) == "" {
+		return errors.New("--profile is required")
+	}
+	if strings.TrimSpace(*nodeID) == "" {
+		return errors.New("--node is required")
+	}
+	bundle, err := profile.Load(*profilePath)
+	if err != nil {
+		return err
+	}
+	report := auditInterfaceNodeCaseExecutionConfigs(bundle, *nodeID)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printInterfaceNodeCaseAudit(report)
+	return nil
+}
+
+func auditInterfaceNodeCaseExecutionConfigs(bundle profile.Bundle, nodeID string) interfaceNodeCaseAuditReport {
+	configs := caseExecutionConfigIDs(bundle.TemplateConfigs)
+	report := interfaceNodeCaseAuditReport{ProfileID: bundle.ID, NodeID: nodeID}
+	for _, item := range bundle.APICases {
+		if item.NodeID != nodeID {
+			continue
+		}
+		report.Counts.Cases++
+		if configID := configs[item.ID]; configID != "" {
+			report.Counts.Configured++
+			report.Configured = append(report.Configured, interfaceNodeCaseConfigured{CaseID: item.ID, ConfigID: configID})
+			continue
+		}
+		report.Counts.Missing++
+		report.Missing = append(report.Missing, interfaceNodeCaseMissing{CaseID: item.ID, Title: firstNonEmpty(item.DisplayName, item.ID)})
+	}
+	report.OK = report.Counts.Cases > 0 && report.Counts.Missing == 0
+	return report
+}
+
+func caseExecutionConfigIDs(configs []profile.TemplateConfig) map[string]string {
+	out := map[string]string{}
+	for _, config := range configs {
+		if config.Status != "" && config.Status != "active" {
+			continue
+		}
+		caseID, ok := caseExecutionConfigCaseID(config.ConfigJSON)
+		if ok {
+			out[caseID] = config.ID
+		}
+	}
+	return out
+}
+
+func caseExecutionConfigCaseID(configJSON string) (string, bool) {
+	var parsed struct {
+		CaseID        string `json:"caseId"`
+		CaseExecution struct {
+			Method string `json:"method"`
+			NodeID string `json:"nodeId"`
+			Path   string `json:"path"`
+		} `json:"caseExecution"`
+	}
+	if err := json.Unmarshal([]byte(configJSON), &parsed); err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(parsed.CaseID) == "" {
+		return "", false
+	}
+	if parsed.CaseExecution.Method == "" && parsed.CaseExecution.NodeID == "" && parsed.CaseExecution.Path == "" {
+		return "", false
+	}
+	return parsed.CaseID, true
+}
+
+func printInterfaceNodeCaseAudit(report interfaceNodeCaseAuditReport) {
+	fmt.Printf("Profile: %s\n", report.ProfileID)
+	fmt.Printf("Interface Node: %s\n", report.NodeID)
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Cases: %d\n", report.Counts.Cases)
+	fmt.Printf("Configured: %d\n", report.Counts.Configured)
+	fmt.Printf("Missing: %d\n", report.Counts.Missing)
+	for _, item := range report.Missing {
+		fmt.Printf("- missing case execution: %s\n", item.CaseID)
+	}
+}
+
+func runInterfaceNodeCaseApply(args []string) error {
+	flags := flag.NewFlagSet("interface-node case apply", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	requestPath := flags.String("file", "", "Case execution config bundle")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*profilePath) == "" {
+		return errors.New("--profile is required")
+	}
+	if strings.TrimSpace(*requestPath) == "" {
+		return errors.New("--file is required")
+	}
+	applied, err := applyInterfaceNodeCaseConfigs(*profilePath, *requestPath)
+	if err != nil {
+		return err
+	}
+	result := map[string]any{"profile": *profilePath, "file": *requestPath, "applied": applied}
+	if *jsonOutput {
+		return writeIndentedJSON(result)
+	}
+	fmt.Printf("Applied interface node case configs: %d\n", applied)
+	fmt.Printf("Profile: %s\n", *profilePath)
+	return nil
+}
+
+func applyInterfaceNodeCaseConfigs(profilePath string, requestPath string) (int, error) {
+	raw, err := os.ReadFile(requestPath)
+	if err != nil {
+		return 0, fmt.Errorf("read case config bundle %s: %w", requestPath, err)
+	}
+	var request interfaceNodeCaseApplyRequest
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return 0, fmt.Errorf("decode case config bundle %s: %w", requestPath, err)
+	}
+	if len(request.TemplateConfigs) == 0 {
+		return 0, errors.New("case config bundle must include templateConfigs")
+	}
+	configs := make([]profile.TemplateConfig, 0, len(request.TemplateConfigs))
+	for _, item := range request.TemplateConfigs {
+		config, err := normalizeTemplateConfigInput(item)
+		if err != nil {
+			return 0, err
+		}
+		configs = append(configs, config)
+	}
+	catalogPath := filepath.Join(profilePath, "catalog.json")
+	payload, existing, err := readCatalogTemplateConfigs(catalogPath)
+	if err != nil {
+		return 0, err
+	}
+	merged := mergeTemplateConfigs(existing, configs)
+	configRaw, err := json.Marshal(merged)
+	if err != nil {
+		return 0, err
+	}
+	payload["templateConfigs"] = configRaw
+	if _, ok := payload["schemaVersion"]; !ok {
+		payload["schemaVersion"] = json.RawMessage(`"1"`)
+	}
+	next, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return 0, err
+	}
+	next = append(next, '\n')
+	if err := os.WriteFile(catalogPath, next, 0o644); err != nil {
+		return 0, fmt.Errorf("write profile catalog %s: %w", catalogPath, err)
+	}
+	if _, err := profile.Load(profilePath); err != nil {
+		return 0, fmt.Errorf("profile catalog is invalid after apply: %w", err)
+	}
+	return len(configs), nil
+}
+
+func normalizeTemplateConfigInput(input templateConfigInput) (profile.TemplateConfig, error) {
+	config := input.TemplateConfig
+	if len(input.Config) > 0 {
+		compact, err := compactRawJSON(input.Config)
+		if err != nil {
+			return profile.TemplateConfig{}, fmt.Errorf("template config %q config is invalid: %w", config.ID, err)
+		}
+		config.ConfigJSON = compact
+	}
+	if strings.TrimSpace(config.ID) == "" {
+		return profile.TemplateConfig{}, errors.New("template config id is required")
+	}
+	if strings.TrimSpace(config.ConfigJSON) == "" {
+		return profile.TemplateConfig{}, fmt.Errorf("template config %q configJson is required", config.ID)
+	}
+	if caseID, ok := caseExecutionConfigCaseID(config.ConfigJSON); !ok {
+		return profile.TemplateConfig{}, fmt.Errorf("template config %q must contain caseId and caseExecution", config.ID)
+	} else if strings.TrimSpace(config.ScopeID) == "" {
+		config.ScopeID = caseID
+	}
+	if strings.TrimSpace(config.ScopeType) == "" {
+		config.ScopeType = "case"
+	}
+	if strings.TrimSpace(config.Status) == "" {
+		config.Status = "active"
+	}
+	return config, nil
+}
+
+func writeIndentedJSON(value any) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}
+
+func compactRawJSON(raw json.RawMessage) (string, error) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", err
+	}
+	compact, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(compact), nil
+}
+
+func readCatalogTemplateConfigs(path string) (map[string]json.RawMessage, []profile.TemplateConfig, error) {
+	payload := map[string]json.RawMessage{}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return payload, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("read profile catalog %s: %w", path, err)
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, nil, fmt.Errorf("decode profile catalog %s: %w", path, err)
+	}
+	var configs []profile.TemplateConfig
+	if rawConfigs, ok := payload["templateConfigs"]; ok {
+		if err := json.Unmarshal(rawConfigs, &configs); err != nil {
+			return nil, nil, fmt.Errorf("decode profile catalog templateConfigs %s: %w", path, err)
+		}
+	}
+	return payload, configs, nil
+}
+
+func mergeTemplateConfigs(existing []profile.TemplateConfig, updates []profile.TemplateConfig) []profile.TemplateConfig {
+	positions := map[string]int{}
+	out := make([]profile.TemplateConfig, 0, len(existing)+len(updates))
+	for _, item := range existing {
+		positions[item.ID] = len(out)
+		out = append(out, item)
+	}
+	for _, item := range updates {
+		if index, ok := positions[item.ID]; ok {
+			out[index] = item
+			continue
+		}
+		positions[item.ID] = len(out)
+		out = append(out, item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		left, right := out[i], out[j]
+		if left.SortOrder != right.SortOrder {
+			return left.SortOrder < right.SortOrder
+		}
+		return left.ID < right.ID
+	})
+	return out
 }
 
 func runWorkflow(args []string) error {
@@ -908,7 +1313,6 @@ func runCaseIncompleteBatches(ctx context.Context, args []string) error {
 
 type incompleteCaseReport struct {
 	OK       bool                 `json:"ok"`
-	DryRun   bool                 `json:"dryRun"`
 	Count    int                  `json:"count"`
 	Items    []incompleteCaseItem `json:"items"`
 	Warnings []string             `json:"warnings"`
@@ -948,7 +1352,6 @@ func incompleteCaseReportForStore(ctx context.Context, bundle profile.Bundle, s 
 	}
 	return incompleteCaseReport{
 		OK:       true,
-		DryRun:   true,
 		Count:    len(items),
 		Items:    items,
 		Warnings: []string{},
@@ -1024,7 +1427,6 @@ func runCaseRun(ctx context.Context, args []string) error {
 	baseURL := flags.String("base-url", "", "Base URL for live request execution")
 	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "cases"), "Evidence output directory")
 	runID := flags.String("run-id", "", "Run id")
-	dryRun := flags.Bool("dry-run", false, "Render evidence without sending a request")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	profileID := flags.String("profile", "default", "Profile id for store records")
 	flags.Var(&overrides, "override", "Request body override as key=value; repeat for multiple values")
@@ -1036,7 +1438,6 @@ func runCaseRun(ctx context.Context, args []string) error {
 		BaseURL:     *baseURL,
 		EvidenceDir: *evidenceDir,
 		RunID:       *runID,
-		DryRun:      *dryRun,
 		Overrides:   overrides.Values(),
 	})
 	if err != nil {
@@ -1305,10 +1706,11 @@ func runServe(args []string) error {
 }
 
 type serveConfig struct {
-	profilePath string
-	host        string
-	port        int
-	storeURL    string
+	profilePath     string
+	host            string
+	port            int
+	storeURL        string
+	traceGraphQLURL string
 }
 
 func serveHandlerFromArgs(args []string) (http.Handler, func() error, error) {
@@ -1322,21 +1724,18 @@ func serveHandlerFromArgs(args []string) (http.Handler, func() error, error) {
 func serveConfigFromArgs(args []string) (serveConfig, error) {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "profiles/empty", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Profile bundle path")
 	host := flags.String("host", "127.0.0.1", "HTTP host")
 	port := flags.Int("port", 18191, "HTTP port")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	traceGraphQLURL := flags.String("trace-graphql-url", os.Getenv("OTS_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
 	if err := flags.Parse(args); err != nil {
 		return serveConfig{}, err
 	}
-	return serveConfig{profilePath: *profilePath, host: *host, port: *port, storeURL: *storeURL}, nil
+	return serveConfig{profilePath: *profilePath, host: *host, port: *port, storeURL: *storeURL, traceGraphQLURL: *traceGraphQLURL}, nil
 }
 
 func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
-	bundle, err := profile.Load(cfg.profilePath)
-	if err != nil {
-		return nil, nil, err
-	}
 	storeCfg, err := sqlite.ParseConfigFromURL(cfg.storeURL)
 	if err != nil {
 		return nil, nil, err
@@ -1345,5 +1744,26 @@ func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return controlplane.NewWithStore(bundle, runtime), runtime.Close, nil
+	bundle, err := serveBundle(context.Background(), cfg.profilePath, runtime)
+	if err != nil {
+		_ = runtime.Close()
+		return nil, nil, err
+	}
+	return controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime, TraceGraphQLURL: cfg.traceGraphQLURL}), runtime.Close, nil
+}
+
+func serveBundle(ctx context.Context, profilePath string, runtime store.Store) (profile.Bundle, error) {
+	if strings.TrimSpace(profilePath) != "" {
+		return profile.Load(profilePath)
+	}
+	if runtime != nil {
+		catalog, err := runtime.GetProfileCatalog(ctx)
+		if err == nil && catalog.ProfileID != "" {
+			return profilecatalog.ToBundle(catalog), nil
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return profile.Bundle{}, err
+		}
+	}
+	return profile.Load(filepath.Join("profiles", "empty"))
 }

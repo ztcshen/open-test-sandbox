@@ -39,7 +39,9 @@ function formatSpeedup(value) {
 }
 
 function evidenceHref(run) {
-  return `/evidence-viewer.html?caseRun=${encodeURIComponent(run.runId || "")}`;
+  const params = new URLSearchParams({ caseRun: run.runId || "" });
+  if (run.caseId) params.set("caseId", run.caseId);
+  return `/evidence-viewer.html?${params.toString()}`;
 }
 
 function caseRunSearchText(run) {
@@ -179,7 +181,7 @@ function IncompleteBatches({ report }) {
     <>
       <div className="case-incomplete-batch-summary" aria-live="polite">
         <span>{report ? `incomplete batches: ${items.length}` : "incomplete batches: loading"}</span>
-        <code>dry-run: otsandbox case incomplete-batches</code>
+        <code>otsandbox case incomplete-batches</code>
       </div>
       <div className="case-incomplete-batch-list">
         {items.length
@@ -251,7 +253,7 @@ function CaseRunsApp() {
     try {
       return await requestJSON("/api/case/incomplete-batches");
     } catch (error) {
-      return { ok: false, dryRun: true, count: 0, items: [], warnings: [error.message] };
+      return { ok: false, count: 0, items: [], warnings: [error.message] };
     }
   }
 

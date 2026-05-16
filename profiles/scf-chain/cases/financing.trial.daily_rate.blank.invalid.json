@@ -1,5 +1,6 @@
 {
   "id": "financing.trial.daily_rate.blank.invalid",
   "displayName": "融资试算-daily_rate为空",
-  "nodeId": "scf.financing.trial"
+  "nodeId": "scf.financing.trial",
+  "requiredForAdmission": false
 }

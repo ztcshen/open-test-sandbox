@@ -3,5 +3,6 @@
   "stepId": "trial",
   "nodeId": "scf.financing.trial",
   "caseId": "financing.trial.default",
-  "required": true
+  "required": true,
+  "sortOrder": 1
 }

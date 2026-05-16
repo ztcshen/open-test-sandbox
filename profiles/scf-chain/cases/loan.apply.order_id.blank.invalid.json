@@ -1,5 +1,6 @@
 {
   "id": "loan.apply.order_id.blank.invalid",
   "displayName": "放款申请-order_id为空",
-  "nodeId": "scf.loan.apply"
+  "nodeId": "scf.loan.apply",
+  "requiredForAdmission": false
 }

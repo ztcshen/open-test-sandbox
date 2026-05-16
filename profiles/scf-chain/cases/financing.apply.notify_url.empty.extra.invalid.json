@@ -1,5 +1,6 @@
 {
   "id": "financing.apply.notify_url.empty.extra.invalid",
   "displayName": "融资申请-notify_url空字符串候选",
-  "nodeId": "scf.financing.apply"
+  "nodeId": "scf.financing.apply",
+  "requiredForAdmission": false
 }

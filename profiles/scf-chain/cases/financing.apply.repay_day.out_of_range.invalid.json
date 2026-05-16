@@ -1,5 +1,6 @@
 {
   "id": "financing.apply.repay_day.out_of_range.invalid",
   "displayName": "融资申请-repay_day越界",
-  "nodeId": "scf.financing.apply"
+  "nodeId": "scf.financing.apply",
+  "requiredForAdmission": false
 }

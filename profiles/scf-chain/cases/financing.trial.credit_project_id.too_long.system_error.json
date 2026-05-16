@@ -1,5 +1,6 @@
 {
   "id": "financing.trial.credit_project_id.too_long.system_error",
   "displayName": "融资试算-credit_project_id超长当前返回系统异常",
-  "nodeId": "scf.financing.trial"
+  "nodeId": "scf.financing.trial",
+  "requiredForAdmission": false
 }

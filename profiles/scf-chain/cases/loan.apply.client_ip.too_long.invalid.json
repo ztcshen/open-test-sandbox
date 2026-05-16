@@ -1,5 +1,6 @@
 {
   "id": "loan.apply.client_ip.too_long.invalid",
   "displayName": "放款申请-client_ip超长",
-  "nodeId": "scf.loan.apply"
+  "nodeId": "scf.loan.apply",
+  "requiredForAdmission": false
 }
