@@ -1,7 +1,0 @@
-{
-  "id": "sandbox.financing_to_repay_result_query",
-  "displayName": "融资到还款结果查询",
-  "description": "按业务阶段运行融资、放款、还款核心步骤，并查看请求、响应、日志和 WireMock 证据。",
-  "baseStepTimeoutMs": 3000,
-  "timeoutOffsetMs": 12500
-}

@@ -1,5 +1,0 @@
-{
-  "id": "workflow.financing_to_repay_apply",
-  "displayName": "融资申请到还款申请、还款确认查询与还款结果查询",
-  "description": "先发融资申请，轮询审批通过后发起放款，轮询放款成功后再发起还款，并依次查询还款确认结果与还款结果。"
-}

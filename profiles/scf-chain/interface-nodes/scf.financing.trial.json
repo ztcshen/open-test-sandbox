@@ -1,6 +1,0 @@
-{
-  "id": "scf.financing.trial",
-  "displayName": "融资试算",
-  "serviceId": "retail-gateway",
-  "timeoutMs": 1500
-}

@@ -1,6 +1,0 @@
-{
-  "id": "dep.callback.loan.apply.llt.payout_status.invalid.loan.applied",
-  "caseId": "callback.loan.apply.llt.payout_status.invalid",
-  "fixtureId": "fixture.financing.loan.applied",
-  "mappingsJson": "[{\"from\":\"$.exports.financing_order_id\",\"to\":\"$.request.financing_order_id\"},{\"from\":\"$.exports.outer_business_no\",\"to\":\"$.request.outer_business_no\"},{\"from\":\"$.exports.payout_id\",\"to\":\"$.request.payout_id\"}]"
-}

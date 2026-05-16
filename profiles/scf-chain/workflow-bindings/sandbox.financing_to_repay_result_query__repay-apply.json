@@ -1,8 +1,0 @@
-{
-  "workflowId": "sandbox.financing_to_repay_result_query",
-  "stepId": "repay-apply",
-  "nodeId": "scf.repay.apply",
-  "caseId": "repay.apply.default",
-  "required": true,
-  "sortOrder": 9
-}

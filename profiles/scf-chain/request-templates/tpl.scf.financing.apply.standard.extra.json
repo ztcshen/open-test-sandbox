@@ -1,8 +1,0 @@
-{
-  "id": "tpl.scf.financing.apply.standard.extra",
-  "displayName": "融资申请标准候选请求模板",
-  "nodeId": "scf.financing.apply",
-  "method": "POST",
-  "path": "/v1/supplychain/financing/apply",
-  "templateJson": "{\"mch_id\":\"1300033460\",\"order_id\":\"{{serial:FA}}\",\"credit_contract_type\":\"LLT\",\"notify_url\":\"https://example.invalid/scf/financing/notify\",\"loan_apply_infos\":[{\"mer_trans_no\":\"{{serial:GEN}}\",\"credit_contract_id\":\"{{override:credit_contract_id|1000001}}\",\"credit_project_id\":\"{{override:credit_project_id|688968}}\",\"loan_amount\":12000,\"repay_day\":15,\"repayment_type\":1,\"receipt_account_infos\":[{}],\"trade_infos\":[{}]}]}"
-}

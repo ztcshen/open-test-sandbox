@@ -1,8 +1,0 @@
-{
-  "id": "tpl.scf.repay.apply.standard.extra",
-  "displayName": "还款申请标准候选请求模板",
-  "nodeId": "scf.repay.apply",
-  "method": "POST",
-  "path": "/v1/supplychain/repay/confirm",
-  "templateJson": "{\"mch_id\":\"1300033460\",\"order_id\":\"{{serial:RA}}\",\"batch_no\":\"{{serial:RB}}\",\"total_amount\":12000,\"financing_repay_infos\":[{\"financing_order_id\":\"{{override:financing_order_id|1199601409234384}}\",\"outer_business_no\":\"{{serial:OBN}}\",\"repay_amount\":12000,\"repay_principal\":12000,\"repay_interest\":0,\"repay_penalty\":0,\"repay_type\":\"1\",\"repay_way\":\"1\",\"repay_confirm_type\":\"1\"}]}"
-}

@@ -11,7 +11,7 @@ generic, profile-driven, and local-first.
 - Generic Control plane for loaded profiles.
 - External profile export fixture and profile import index.
 - Runtime Evidence index import from a legacy SQLite source.
-- Generic API Case dry-run and HTTP runner.
+- Generic API Case preview and HTTP runner.
 - API Case Store indexing.
 - Local quickstart example.
 - API Case format documentation.
@@ -121,7 +121,7 @@ generic, profile-driven, and local-first.
   interface-node coverage APIs and renders mapped/unmapped step rows plus a
   coverage-gap JSON entrypoint.
 - Workflow detail runner slice: `workflow-detail.html` now runs Workflow steps
-  through the generic Test Kit dry-run path, saves a Store-backed Workflow run,
+  through the generic Test Kit preview path, saves a Store-backed Workflow run,
   and links to the saved run evidence page.
 - API Case post-run refresh slice: `api-cases.html` now refreshes Store-backed
   case run capability state after one-click runs while preserving the selected
@@ -140,6 +140,57 @@ generic, profile-driven, and local-first.
   template-config Store tables.
 - CLI profile catalog indexing slice: CLI and API profile imports now share the
   same profile-to-Store catalog projection path.
+- External profile init slice: `profile init` creates a neutral external bundle
+  skeleton and refuses output under the core repository profile directory.
+- Audit-gated publish slice: CLI and Control plane imports can now require a
+  clean pre-publish profile audit before writing Store/read-model state.
+- Profile verification slice: `profile verify` now audits an external bundle,
+  publishes it through the strict Store path, and checks profile index,
+  catalog index, active config, and base read-model persistence.
+- Control plane profile verify slice: `POST /api/profile/verify` and the
+  workbench Profile panel now expose the same audit-gated publish and read-model
+  persistence checks.
+- External profile placement slice: `profile install` and `profile list` define
+  the standard local profile home outside core (`$HOME/.otsandbox/profiles` by
+  default, overrideable with `OTSANDBOX_PROFILE_HOME` or `--profile-home`).
+  Profile-facing publish, audit, verify, and inspect commands can resolve either
+  a filesystem path or an installed profile id.
+- Control plane profile placement slice: profile home install/list/resolve logic
+  now lives in `internal/profilehome`, `serve --profile` can resolve installed
+  profile ids, and the workbench/API can install, list, import, and verify
+  external bundles through the same profile-home rules.
+- Runtime acceptance gate slice: `profile verify --require-case-runs`,
+  `POST /api/profile/verify` with `requireCaseRuns`, and the workbench
+  `要求用例已通过` option now require every declared API Case to have a latest
+  passed Store run before acceptance succeeds.
+- Workflow runtime acceptance gate slice: `profile verify --require-workflow-runs`,
+  `POST /api/profile/verify` with `requireWorkflowRuns`, and the workbench
+  `要求工作流已通过` option now apply the same latest-passed Store run gate to
+  every declared Workflow.
+- Profile verification diagnostics slice: CLI JSON output, `POST
+  /api/profile/verify`, and the workbench now keep structured `summary` and
+  per-check details for failed acceptance runs, so missing runtime gates are
+  visible without rerunning or inspecting logs.
+- Profile install hygiene slice: `profile init` writes ignore rules for local
+  runtime files, and `profile install` skips generated runtime state, local
+  databases, logs, and VCS directories when copying bundles into profile home.
+- Profile home tolerance slice: `profile list`, `GET /api/profile/installed`,
+  and the workbench selector now report malformed installed bundles as invalid
+  items instead of failing the whole profile-home listing.
+- Profile packaging slice: `profile pack` creates a clean `.tar.gz`
+  distributable from either a filesystem path or installed profile id, using
+  the same runtime/VCS filtering rules as profile installation.
+- Profile archive install slice: `profile install --from bundle.tar.gz` can
+  install packed profile archives into profile home and rejects unsafe archive
+  entries that would escape the extracted profile root.
+- Control plane profile archive publish slice: `POST /api/profile/import` and
+  `POST /api/profile/verify` can accept packed profile archives, install them
+  into profile home, then publish or verify the installed bundle in the
+  Store/read-model path.
+- CLI profile archive acceptance slice: `profile audit`, `profile import`,
+  `profile verify`, and `config publish` can accept packed profile archives
+  directly, install them into profile home, and use the stable installed path
+  for audit and Store/read-model publication.
 
 ## Open Task Queue
 

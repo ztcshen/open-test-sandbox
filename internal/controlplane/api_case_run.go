@@ -84,7 +84,7 @@ func recordAPICaseRun(ctx context.Context, runtime store.Store, profileID string
 	}); err != nil {
 		return err
 	}
-	caseRunID := result.RunID + ".case"
+	caseRunID := apiCaseRunRecordID(result.RunID)
 	if _, err := runtime.RecordAPICaseRun(ctx, store.APICaseRun{
 		ID:                   caseRunID,
 		RunID:                result.RunID,
@@ -212,6 +212,13 @@ func apiCaseViewerURL(result apicase.RunResult) string {
 		return ""
 	}
 	return "/evidence-viewer.html?caseRun=" + url.QueryEscape(result.RunID)
+}
+
+func apiCaseRunRecordID(runID string) string {
+	if strings.TrimSpace(runID) == "" {
+		return ""
+	}
+	return runID + ".case"
 }
 
 func apiCaseResultTime(value string, fallback time.Time) time.Time {

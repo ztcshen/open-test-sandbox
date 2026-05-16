@@ -6,7 +6,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +22,7 @@ import (
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/profileaudit"
 	"open-test-sandbox/internal/profilecatalog"
+	"open-test-sandbox/internal/profilehome"
 	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
@@ -79,6 +82,36 @@ type profileConfigVersion struct {
 	Active       bool      `json:"active"`
 	PublishedAt  time.Time `json:"publishedAt"`
 	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type profileVerifyReport struct {
+	OK        bool                 `json:"ok"`
+	Error     string               `json:"error,omitempty"`
+	ProfileID string               `json:"profileId"`
+	Audit     profileaudit.Report  `json:"audit"`
+	Publish   profileImportReport  `json:"publish"`
+	Summary   profileVerifySummary `json:"summary"`
+	Checks    []profileVerifyCheck `json:"checks"`
+}
+
+type profileVerifySummary struct {
+	TotalChecks          int    `json:"totalChecks"`
+	PassedChecks         int    `json:"passedChecks"`
+	FailedChecks         int    `json:"failedChecks"`
+	RequiredCaseRuns     bool   `json:"requiredCaseRuns"`
+	RequiredWorkflowRuns bool   `json:"requiredWorkflowRuns"`
+	FirstFailed          string `json:"firstFailed,omitempty"`
+}
+
+type profileVerifyCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+type profileVerifyOptions struct {
+	RequireCaseRuns     bool
+	RequireWorkflowRuns bool
 }
 
 func main() {
@@ -156,23 +189,36 @@ Usage:
   otsandbox version
   otsandbox store status [--store-url PATH]
   otsandbox store upgrade [--store-url PATH]
-  otsandbox profile inspect --profile PATH
-  otsandbox profile audit --profile PATH [--store-url PATH] [--json]
-  otsandbox profile import --from PATH [--store-url PATH] [--json] [--audit]
-  otsandbox config publish --from PATH [--store-url PATH] [--json] [--audit]
+  otsandbox profile init --output PATH [--id ID] [--display-name NAME] [--force]
+  otsandbox profile install --from PATH [--profile-home PATH] [--force]
+  otsandbox profile pack --profile PATH_OR_ID --output PATH [--profile-home PATH] [--force]
+  otsandbox profile list [--profile-home PATH] [--json]
+  otsandbox profile inspect --profile PATH_OR_ID [--profile-home PATH]
+  otsandbox profile audit --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--force]
+  otsandbox profile verify --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
+  otsandbox profile import --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
+  otsandbox config publish --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
+  otsandbox workflow discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--json]
   otsandbox workflow plan --profile PATH --workflow ID
   otsandbox workflow audit --profile PATH --workflow ID [--store-url PATH] [--json]
+  otsandbox workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--json]
   otsandbox baseline get --profile ID --subject ID [--store-url PATH]
   otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store-url PATH]
   otsandbox template render --profile PATH --template ID [--fixture ID]
+  otsandbox interface-node discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--json]
   otsandbox interface-node case audit --profile PATH --node ID [--json]
   otsandbox interface-node case apply --profile PATH --file PATH [--json]
+  otsandbox interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
-  otsandbox serve [--profile PATH] [--host HOST] [--port PORT] [--store-url PATH]
-  otsandbox help`)
+  otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store-url PATH]
+  otsandbox help
+
+Serve reads profile catalog data from the local Store. When --profile is set,
+the external bundle is first published into the Store/read-model, then served
+from that indexed view.`)
 }
 
 func runStore(ctx context.Context, args []string) error {
@@ -230,12 +276,22 @@ func runProfile(args []string) error {
 	}
 
 	switch args[0] {
+	case "init":
+		return runProfileInit(args[1:])
+	case "install":
+		return runProfileInstall(args[1:])
+	case "pack":
+		return runProfilePack(args[1:])
+	case "list":
+		return runProfileList(args[1:])
 	case "inspect":
 		return runProfileInspect(args[1:])
 	case "audit":
 		return runProfileAudit(context.Background(), args[1:])
 	case "import":
 		return runProfileImport(context.Background(), args[1:])
+	case "verify":
+		return runProfileVerify(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown profile command: %s", args[0])
 	}
@@ -253,18 +309,310 @@ func runConfig(ctx context.Context, args []string) error {
 	}
 }
 
+func runProfileInit(args []string) error {
+	flags := flag.NewFlagSet("profile init", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	outputPath := flags.String("output", "", "External profile bundle output path")
+	profileID := flags.String("id", "local", "Profile id")
+	displayName := flags.String("display-name", "Local Profile", "Profile display name")
+	force := flags.Bool("force", false, "Overwrite generated files when they already exist")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := initProfileBundle(*outputPath, *profileID, *displayName, *force)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Initialized external profile bundle: %s\n", report.ID)
+	fmt.Printf("Path: %s\n", report.Path)
+	fmt.Printf("Manifest: %s\n", filepath.Join(report.Path, "profile.json"))
+	return nil
+}
+
+type profileInitReport struct {
+	ID   string
+	Path string
+}
+
+type profileInstallReport = profilehome.InstallReport
+
+type profilePackReport = profilehome.PackReport
+
+type profileListReport = profilehome.ListReport
+
+type profileListItem = profilehome.ListItem
+
+func initProfileBundle(outputPath string, profileID string, displayName string, force bool) (profileInitReport, error) {
+	outputPath = strings.TrimSpace(outputPath)
+	profileID = strings.TrimSpace(profileID)
+	displayName = strings.TrimSpace(displayName)
+	if outputPath == "" {
+		return profileInitReport{}, errors.New("--output is required")
+	}
+	if profileID == "" {
+		return profileInitReport{}, errors.New("--id must not be empty")
+	}
+	if displayName == "" {
+		return profileInitReport{}, errors.New("--display-name must not be empty")
+	}
+	if isCoreProfilesPath(outputPath) {
+		return profileInitReport{}, errors.New("profile bundles must be initialized outside this core repository")
+	}
+	if err := os.MkdirAll(outputPath, 0o755); err != nil {
+		return profileInitReport{}, err
+	}
+	for _, dir := range []string{
+		"services",
+		"workflows",
+		"interface-nodes",
+		"cases",
+		"request-templates",
+		"case-dependencies",
+		"workflow-bindings",
+		"fixtures",
+	} {
+		if err := os.MkdirAll(filepath.Join(outputPath, dir), 0o755); err != nil {
+			return profileInitReport{}, err
+		}
+	}
+	manifestPath := filepath.Join(outputPath, "profile.json")
+	if _, err := os.Stat(manifestPath); err == nil && !force {
+		return profileInitReport{}, fmt.Errorf("%s already exists; pass --force to overwrite generated files", manifestPath)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return profileInitReport{}, err
+	}
+	manifest := profile.Bundle{
+		ID:               profileID,
+		DisplayName:      displayName,
+		Description:      "External profile bundle generated by Open Test Sandbox.",
+		Services:         []profile.Service{},
+		Workflows:        []profile.Workflow{},
+		InterfaceNodes:   []profile.InterfaceNode{},
+		APICases:         []profile.APICase{},
+		RequestTemplates: []profile.RequestTemplate{},
+		CaseDependencies: []profile.CaseDependency{},
+		WorkflowBindings: []profile.WorkflowBinding{},
+		Fixtures:         []profile.Fixture{},
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return profileInitReport{}, err
+	}
+	if err := os.WriteFile(manifestPath, append(raw, '\n'), 0o644); err != nil {
+		return profileInitReport{}, err
+	}
+	readmePath := filepath.Join(outputPath, "README.md")
+	if _, err := os.Stat(readmePath); errors.Is(err, os.ErrNotExist) || force {
+		body := "# External Profile Bundle\n\nPublish this bundle into a local Store before serving it through Open Test Sandbox:\n\n```sh\notsandbox config publish --from . --store-url .runtime/store.sqlite\notsandbox serve --store-url .runtime/store.sqlite\n```\n"
+		if err := os.WriteFile(readmePath, []byte(body), 0o644); err != nil {
+			return profileInitReport{}, err
+		}
+	} else if err != nil {
+		return profileInitReport{}, err
+	}
+	ignorePath := filepath.Join(outputPath, ".gitignore")
+	if _, err := os.Stat(ignorePath); errors.Is(err, os.ErrNotExist) || force {
+		body := ".runtime/\n*.sqlite\n*.sqlite-*\n*.db\n*.db-*\n*.log\n"
+		if err := os.WriteFile(ignorePath, []byte(body), 0o644); err != nil {
+			return profileInitReport{}, err
+		}
+	} else if err != nil {
+		return profileInitReport{}, err
+	}
+	absPath, err := filepath.Abs(outputPath)
+	if err != nil {
+		return profileInitReport{}, err
+	}
+	return profileInitReport{ID: profileID, Path: absPath}, nil
+}
+
+func runProfileInstall(args []string) error {
+	flags := flag.NewFlagSet("profile install", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	from := flags.String("from", "", "External profile bundle path")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	force := flags.Bool("force", false, "Replace an already installed profile")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := installProfileBundle(*from, *profileHome, *force)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Installed profile: %s\n", report.ID)
+	fmt.Printf("Path: %s\n", report.TargetPath)
+	fmt.Printf("Digest: %s\n", report.BundleDigest)
+	return nil
+}
+
+func runProfilePack(args []string) error {
+	flags := flag.NewFlagSet("profile pack", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profileRef := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	outputPath := flags.String("output", "", "Archive output path")
+	force := flags.Bool("force", false, "Replace an existing archive")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := packProfileBundle(*profileRef, *profileHome, *outputPath, *force)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Packed profile: %s\n", report.ID)
+	fmt.Printf("Archive: %s\n", report.OutputPath)
+	fmt.Printf("Files: %d\n", report.FileCount)
+	fmt.Printf("Digest: %s\n", report.BundleDigest)
+	return nil
+}
+
+func runProfileList(args []string) error {
+	flags := flag.NewFlagSet("profile list", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := listInstalledProfiles(*profileHome)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Profile Home: %s\n", report.ProfileHome)
+	if len(report.Profiles) == 0 {
+		fmt.Println("Profiles: 0")
+		return nil
+	}
+	for _, item := range report.Profiles {
+		if !item.Valid {
+			fmt.Printf("- %s (invalid) %s: %s\n", item.ID, item.Path, item.Error)
+			continue
+		}
+		fmt.Printf("- %s (%s) %s\n", item.ID, item.DisplayName, item.Path)
+	}
+	return nil
+}
+
+func installProfileBundle(from string, profileHome string, force bool) (profileInstallReport, error) {
+	return profilehome.Install(from, profileHome, force)
+}
+
+func packProfileBundle(profileRef string, profileHome string, outputPath string, force bool) (profilePackReport, error) {
+	return profilehome.Pack(profileRef, profileHome, outputPath, force)
+}
+
+func listInstalledProfiles(profileHome string) (profileListReport, error) {
+	return profilehome.List(profileHome)
+}
+
+func resolveProfileHome(value string) (string, error) {
+	return profilehome.ResolveHome(value)
+}
+
+func resolveProfileReference(value string, profileHome string) (string, error) {
+	return profilehome.ResolveReference(value, profileHome)
+}
+
+func materializeProfileReference(value string, profileHome string, force bool) (string, error) {
+	resolved, err := resolveProfileReference(value, profileHome)
+	if err != nil {
+		return "", err
+	}
+	if !profilehome.IsArchivePath(resolved) {
+		return resolved, nil
+	}
+	report, err := installProfileBundle(resolved, profileHome, force)
+	if err != nil {
+		return "", err
+	}
+	return report.TargetPath, nil
+}
+
+func isCoreProfilesPath(path string) bool {
+	return profilehome.IsCoreProfilesPath(path)
+}
+
 func runProfileInspect(args []string) error {
 	flags := flag.NewFlagSet("profile inspect", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, err := profile.Load(*profilePath)
+	resolvedProfilePath, err := resolveProfileReference(*profilePath, *profileHome)
+	if err != nil {
+		return err
+	}
+	bundle, err := profile.Load(resolvedProfilePath)
 	if err != nil {
 		return err
 	}
 	printProfile(bundle)
+	return nil
+}
+
+func runProfileVerify(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("profile verify", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	requireCaseRuns := flags.Bool("require-case-runs", false, "Require every API Case in the profile to have a latest passed Store run")
+	requireWorkflowRuns := flags.Bool("require-workflow-runs", false, "Require every Workflow in the profile to have a latest passed Store run")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	if err != nil {
+		return err
+	}
+	cfg = cfg.Resolve()
+	s, err := sqlite.Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	resolvedProfilePath, err := materializeProfileReference(*profilePath, *profileHome, *force)
+	if err != nil {
+		return err
+	}
+	report, err := verifyProfileBundle(ctx, s, resolvedProfilePath, cfg.Path, profileVerifyOptions{
+		RequireCaseRuns:     *requireCaseRuns,
+		RequireWorkflowRuns: *requireWorkflowRuns,
+	})
+	if err != nil {
+		if *jsonOutput && report.ProfileID != "" {
+			if report.Error == "" {
+				report.Error = err.Error()
+			}
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			if encodeErr := encoder.Encode(report); encodeErr != nil {
+				return encodeErr
+			}
+		}
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	printProfileVerify(report)
 	return nil
 }
 
@@ -282,18 +630,13 @@ func runConfigPublish(ctx context.Context, args []string) error {
 
 func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []string, textPrefix string) error {
 	from := flags.String("from", "", "Profile bundle path")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	auditOutput := flags.Bool("audit", false, "Run profile audit after import")
+	requireAuditOK := flags.Bool("require-audit-ok", false, "Fail before writing the Store unless profile audit has no issues")
+	force := flags.Bool("force", false, "Replace an installed profile when --from points to a packed archive")
 	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	bundle, err := profile.Load(*from)
-	if err != nil {
-		return err
-	}
-	digest, err := profile.BundleDigest(*from)
-	if err != nil {
 		return err
 	}
 	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
@@ -307,28 +650,70 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 	}
 	defer s.Close()
 
-	summary, err := json.Marshal(bundle.Counts())
+	resolvedFrom, err := materializeProfileReference(*from, *profileHome, *force)
 	if err != nil {
 		return err
+	}
+	report, err := publishProfileBundleToStore(ctx, s, resolvedFrom, cfg.Path, *auditOutput, *requireAuditOK)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	fmt.Printf("%s: %s\n", textPrefix, report.ProfileID)
+	fmt.Printf("Digest: %s\n", report.BundleDigest)
+	if report.Audit != nil {
+		printProfileImportAudit(*report.Audit)
+	}
+	return nil
+}
+
+func publishProfileBundleToStore(ctx context.Context, s store.Store, from string, storePath string, auditOutput bool, requireAuditOK bool) (profileImportReport, error) {
+	bundle, err := profile.Load(from)
+	if err != nil {
+		return profileImportReport{}, err
+	}
+	if requireAuditOK {
+		auditReport, err := profileaudit.Audit(ctx, profileaudit.Options{
+			Bundle:     bundle,
+			BundlePath: from,
+		})
+		if err != nil {
+			return profileImportReport{}, err
+		}
+		if !auditReport.OK {
+			return profileImportReport{}, fmt.Errorf("profile audit failed for profile %q: %s", bundle.ID, profileaudit.FailureSummary(auditReport))
+		}
+	}
+	digest, err := profile.BundleDigest(from)
+	if err != nil {
+		return profileImportReport{}, err
+	}
+	summary, err := json.Marshal(bundle.Counts())
+	if err != nil {
+		return profileImportReport{}, err
 	}
 	importedAt := time.Now().UTC()
 	if _, err := s.UpsertProfileIndex(ctx, store.ProfileIndex{
 		ProfileID:    bundle.ID,
-		BundlePath:   *from,
+		BundlePath:   from,
 		BundleDigest: digest,
 		SummaryJSON:  string(summary),
 		ImportedAt:   importedAt,
 	}); err != nil {
-		return err
+		return profileImportReport{}, err
 	}
 	catalog := profilecatalog.FromBundle(bundle, importedAt)
 	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
-		return err
+		return profileImportReport{}, err
 	}
 	configVersion, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
 		ID:           configVersionID(bundle.ID, importedAt),
 		ProfileID:    bundle.ID,
-		SourcePath:   *from,
+		SourcePath:   from,
 		BundleDigest: digest,
 		SummaryJSON:  string(summary),
 		Active:       true,
@@ -336,49 +721,254 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 		CreatedAt:    importedAt,
 	})
 	if err != nil {
-		return err
+		return profileImportReport{}, err
 	}
 	readModelKeys, err := controlplane.UpsertProfileReadModels(ctx, s, catalog, configVersion.ID, importedAt)
 	if err != nil {
-		return err
+		return profileImportReport{}, err
 	}
 	catalogIndex, err := s.GetProfileCatalogIndex(ctx)
 	if err != nil {
-		return err
+		return profileImportReport{}, err
 	}
 	report := profileImportReport{
 		ProfileID:     bundle.ID,
-		BundlePath:    *from,
+		BundlePath:    from,
 		BundleDigest:  digest,
 		Counts:        profileImportAssetCounts(bundle.Counts()),
-		StorePath:     cfg.Path,
+		StorePath:     storePath,
 		CatalogIndex:  profileCatalogIndexFromStore(catalogIndex),
 		ConfigVersion: profileConfigVersionFromStore(configVersion),
 		ReadModels:    readModelKeys,
 		ImportedAt:    importedAt,
 	}
-	if *auditOutput {
+	if auditOutput {
 		auditReport, err := profileaudit.Audit(ctx, profileaudit.Options{
 			Bundle:     bundle,
-			BundlePath: *from,
+			BundlePath: from,
 			Store:      s,
 		})
 		if err != nil {
-			return err
+			return profileImportReport{}, err
 		}
 		report.Audit = &auditReport
 	}
-	if *jsonOutput {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(report)
+	return report, nil
+}
+
+func verifyProfileBundle(ctx context.Context, s store.Store, profilePath string, storePath string, options profileVerifyOptions) (profileVerifyReport, error) {
+	bundle, err := profile.Load(profilePath)
+	if err != nil {
+		return profileVerifyReport{}, err
 	}
-	fmt.Printf("%s: %s\n", textPrefix, bundle.ID)
-	fmt.Printf("Digest: %s\n", digest)
-	if report.Audit != nil {
-		printProfileImportAudit(*report.Audit)
+	auditReport, err := profileaudit.Audit(ctx, profileaudit.Options{
+		Bundle:     bundle,
+		BundlePath: profilePath,
+	})
+	if err != nil {
+		return profileVerifyReport{}, err
 	}
-	return nil
+	if !auditReport.OK {
+		return profileVerifyReport{}, fmt.Errorf("profile audit failed for profile %q: %s", bundle.ID, profileaudit.FailureSummary(auditReport))
+	}
+	publishReport, err := publishProfileBundleToStore(ctx, s, profilePath, storePath, true, true)
+	if err != nil {
+		return profileVerifyReport{}, err
+	}
+	checks, err := verifyPublishedProfile(ctx, s, bundle, publishReport, options)
+	if err != nil {
+		return profileVerifyReport{}, err
+	}
+	report := profileVerifyReport{
+		OK:        profileChecksOK(checks),
+		ProfileID: bundle.ID,
+		Audit:     *publishReport.Audit,
+		Publish:   publishReport,
+		Summary:   summarizeProfileVerification(checks, options),
+		Checks:    checks,
+	}
+	if !report.OK {
+		report.Error = fmt.Sprintf("profile verification failed for profile %q: %s", bundle.ID, firstFailedProfileCheck(checks))
+		return report, fmt.Errorf("profile verification failed for profile %q: %s", bundle.ID, firstFailedProfileCheck(checks))
+	}
+	return report, nil
+}
+
+func summarizeProfileVerification(checks []profileVerifyCheck, options profileVerifyOptions) profileVerifySummary {
+	summary := profileVerifySummary{
+		TotalChecks:          len(checks),
+		RequiredCaseRuns:     options.RequireCaseRuns,
+		RequiredWorkflowRuns: options.RequireWorkflowRuns,
+	}
+	for _, check := range checks {
+		if check.OK {
+			summary.PassedChecks++
+			continue
+		}
+		summary.FailedChecks++
+		if summary.FirstFailed == "" {
+			summary.FirstFailed = check.Name
+		}
+	}
+	return summary
+}
+
+func verifyPublishedProfile(ctx context.Context, s store.Store, bundle profile.Bundle, report profileImportReport, options profileVerifyOptions) ([]profileVerifyCheck, error) {
+	checks := make([]profileVerifyCheck, 0, 6)
+	index, err := s.GetProfileIndex(ctx, report.ProfileID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			checks = appendProfileCheck(checks, "profile-index", false, "profile index was not written")
+			return checks, nil
+		}
+		return nil, err
+	}
+	checks = appendProfileCheck(checks, "profile-index", index.BundleDigest == report.BundleDigest, "profile index digest matches published bundle")
+
+	catalogIndex, err := s.GetProfileCatalogIndex(ctx)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			checks = appendProfileCheck(checks, "catalog-index", false, "catalog index was not written")
+		} else {
+			return nil, err
+		}
+	} else {
+		checks = appendProfileCheck(checks, "catalog-index", catalogIndex.ProfileID == report.ProfileID, "catalog index points to active profile")
+	}
+
+	activeConfig, err := s.GetActiveConfigVersion(ctx)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			checks = appendProfileCheck(checks, "active-config", false, "active config version was not written")
+		} else {
+			return nil, err
+		}
+	} else {
+		ok := activeConfig.ID == report.ConfigVersion.ID && activeConfig.ProfileID == report.ProfileID && activeConfig.BundleDigest == report.BundleDigest
+		checks = appendProfileCheck(checks, "active-config", ok, "active config version matches published bundle")
+	}
+
+	for _, key := range []string{profilecatalog.ReadModelInterfaceNodes, controlplane.ReadModelCatalog, controlplane.ReadModelDashboard} {
+		model, err := s.GetReadModel(ctx, report.ProfileID, key)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				checks = appendProfileCheck(checks, "read-model:"+key, false, "read model was not written")
+				continue
+			}
+			return nil, err
+		}
+		ok := model.ConfigVersionID == report.ConfigVersion.ID && strings.TrimSpace(model.PayloadJSON) != ""
+		checks = appendProfileCheck(checks, "read-model:"+key, ok, "read model exists for published config version")
+	}
+	if options.RequireCaseRuns {
+		caseRunChecks, err := verifyProfileAPICaseRuns(ctx, s, bundle)
+		if err != nil {
+			return nil, err
+		}
+		checks = append(checks, caseRunChecks...)
+	}
+	if options.RequireWorkflowRuns {
+		workflowChecks, err := verifyProfileWorkflowRuns(ctx, s, bundle)
+		if err != nil {
+			return nil, err
+		}
+		checks = append(checks, workflowChecks...)
+	}
+	return checks, nil
+}
+
+func verifyProfileWorkflowRuns(ctx context.Context, s store.Store, bundle profile.Bundle) ([]profileVerifyCheck, error) {
+	if len(bundle.Workflows) == 0 {
+		return []profileVerifyCheck{{Name: "workflow-runs", OK: true, Detail: "profile declares no workflows"}}, nil
+	}
+	runs, err := s.ListRuns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	latestByWorkflow := map[string]store.Run{}
+	for _, item := range runs {
+		if item.WorkflowID == "" {
+			continue
+		}
+		current, ok := latestByWorkflow[item.WorkflowID]
+		if !ok || item.CreatedAt.After(current.CreatedAt) || (item.CreatedAt.Equal(current.CreatedAt) && item.ID > current.ID) {
+			latestByWorkflow[item.WorkflowID] = item
+		}
+	}
+	checks := make([]profileVerifyCheck, 0, len(bundle.Workflows))
+	for _, item := range bundle.Workflows {
+		run, ok := latestByWorkflow[item.ID]
+		if !ok || !isPassedStatus(run.Status) {
+			checks = appendProfileCheck(checks, "workflow-run:"+item.ID, false, "no passed run recorded in Store")
+			continue
+		}
+		checks = appendProfileCheck(checks, "workflow-run:"+item.ID, true, "latest Workflow run passed")
+	}
+	return checks, nil
+}
+
+func verifyProfileAPICaseRuns(ctx context.Context, s store.Store, bundle profile.Bundle) ([]profileVerifyCheck, error) {
+	if len(bundle.APICases) == 0 {
+		return []profileVerifyCheck{{Name: "api-case-runs", OK: true, Detail: "profile declares no API cases"}}, nil
+	}
+	latestStore, ok := s.(interface {
+		ListLatestAPICaseRuns(context.Context) ([]store.APICaseRun, error)
+	})
+	if !ok {
+		return nil, errors.New("runtime store does not support latest API case run lookup")
+	}
+	latestRuns, err := latestStore.ListLatestAPICaseRuns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	latestByCase := map[string]store.APICaseRun{}
+	for _, item := range latestRuns {
+		latestByCase[item.CaseID] = item
+	}
+	checks := make([]profileVerifyCheck, 0, len(bundle.APICases))
+	for _, item := range bundle.APICases {
+		run, ok := latestByCase[item.ID]
+		if !ok || !isPassedStatus(run.Status) {
+			checks = appendProfileCheck(checks, "api-case-run:"+item.ID, false, "no passed run recorded in Store")
+			continue
+		}
+		checks = appendProfileCheck(checks, "api-case-run:"+item.ID, true, "latest API case run passed")
+	}
+	return checks, nil
+}
+
+func isPassedStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "pass", "passed", "success", "ok":
+		return true
+	default:
+		return false
+	}
+}
+
+func appendProfileCheck(checks []profileVerifyCheck, name string, ok bool, detail string) []profileVerifyCheck {
+	return append(checks, profileVerifyCheck{Name: name, OK: ok, Detail: detail})
+}
+
+func profileChecksOK(checks []profileVerifyCheck) bool {
+	if len(checks) == 0 {
+		return false
+	}
+	for _, check := range checks {
+		if !check.OK {
+			return false
+		}
+	}
+	return true
+}
+
+func firstFailedProfileCheck(checks []profileVerifyCheck) string {
+	for _, check := range checks {
+		if !check.OK {
+			return check.Name + ": " + check.Detail
+		}
+	}
+	return "no checks passed"
 }
 
 func profileImportAssetCounts(counts profile.Counts) profileImportCounts {
@@ -441,6 +1031,28 @@ func printProfileImportAudit(report profileaudit.Report) {
 	}
 }
 
+func printProfileVerify(report profileVerifyReport) {
+	fmt.Printf("Profile Verification: %s\n", report.ProfileID)
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Audit OK: %t\n", report.Audit.OK)
+	fmt.Printf("Published Config: %s\n", report.Publish.ConfigVersion.ID)
+	fmt.Printf("Read Models: %s\n", strings.Join(report.Publish.ReadModels, ", "))
+	fmt.Printf("Checks: %d passed / %d total", report.Summary.PassedChecks, report.Summary.TotalChecks)
+	if report.Summary.FailedChecks > 0 {
+		fmt.Printf(" (%d failed", report.Summary.FailedChecks)
+		if report.Summary.FirstFailed != "" {
+			fmt.Printf(", first failed: %s", report.Summary.FirstFailed)
+		}
+		fmt.Print(")")
+	}
+	fmt.Println()
+	fmt.Printf("Runtime Gates: api-cases=%t workflows=%t\n", report.Summary.RequiredCaseRuns, report.Summary.RequiredWorkflowRuns)
+	fmt.Println("Checks:")
+	for _, check := range report.Checks {
+		fmt.Printf("- %s: %t (%s)\n", check.Name, check.OK, check.Detail)
+	}
+}
+
 func printProfile(bundle profile.Bundle) {
 	counts := bundle.Counts()
 	fmt.Printf("Profile: %s\n", bundle.ID)
@@ -459,19 +1071,25 @@ func runProfileAudit(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile audit", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, err := profile.Load(*profilePath)
+	resolvedProfilePath, err := materializeProfileReference(*profilePath, *profileHome, *force)
+	if err != nil {
+		return err
+	}
+	bundle, err := profile.Load(resolvedProfilePath)
 	if err != nil {
 		return err
 	}
 
 	options := profileaudit.Options{
 		Bundle:     bundle,
-		BundlePath: *profilePath,
+		BundlePath: resolvedProfilePath,
 	}
 	if strings.TrimSpace(*storeURL) != "" {
 		s, err := openStore(ctx, *storeURL)
@@ -552,9 +1170,29 @@ type templateConfigInput struct {
 	Config json.RawMessage `json:"config,omitempty"`
 }
 
+type interfaceNodeListReport struct {
+	OK        bool                    `json:"ok"`
+	ProfileID string                  `json:"profileId"`
+	Count     int                     `json:"count"`
+	Items     []interfaceNodeListItem `json:"items"`
+}
+
+type interfaceNodeListItem struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName,omitempty"`
+	Operation   string `json:"operation,omitempty"`
+	Method      string `json:"method,omitempty"`
+	Path        string `json:"path,omitempty"`
+	ServiceID   string `json:"serviceId,omitempty"`
+	CaseCount   int    `json:"caseCount"`
+}
+
 func runInterfaceNode(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing interface-node command")
+	}
+	if args[0] == "discover" {
+		return runInterfaceNodeDiscover(context.Background(), args[1:])
 	}
 	if args[0] != "case" {
 		return fmt.Errorf("unknown interface-node command: %s", args[0])
@@ -567,9 +1205,70 @@ func runInterfaceNode(args []string) error {
 		return runInterfaceNodeCaseAudit(args[2:])
 	case "apply":
 		return runInterfaceNodeCaseApply(args[2:])
+	case "report":
+		return runInterfaceNodeCaseReport(context.Background(), args[2:])
 	default:
 		return fmt.Errorf("unknown interface-node case command: %s", args[1])
 	}
+}
+
+func runInterfaceNodeDiscover(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("interface-node discover", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, or operation")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	report := interfaceNodeList(bundle, *filter)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	for _, item := range report.Items {
+		fmt.Printf("%s\t%s\t%d\n", item.ID, item.DisplayName, item.CaseCount)
+	}
+	return nil
+}
+
+func interfaceNodeList(bundle profile.Bundle, filter string) interfaceNodeListReport {
+	caseCounts := map[string]int{}
+	for _, item := range bundle.APICases {
+		if strings.TrimSpace(item.NodeID) != "" {
+			caseCounts[item.NodeID]++
+		}
+	}
+	nodes := append([]profile.InterfaceNode(nil), bundle.InterfaceNodes...)
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].SortOrder != nodes[j].SortOrder {
+			return nodes[i].SortOrder < nodes[j].SortOrder
+		}
+		return nodes[i].ID < nodes[j].ID
+	})
+	report := interfaceNodeListReport{OK: true, ProfileID: bundle.ID}
+	for _, node := range nodes {
+		if !matchesDiscoveryFilter(filter, node.ID, node.DisplayName, node.Operation) {
+			continue
+		}
+		report.Items = append(report.Items, interfaceNodeListItem{
+			ID:          node.ID,
+			DisplayName: node.DisplayName,
+			Operation:   node.Operation,
+			Method:      node.Method,
+			Path:        node.Path,
+			ServiceID:   node.ServiceID,
+			CaseCount:   caseCounts[node.ID],
+		})
+	}
+	report.Count = len(report.Items)
+	return report
 }
 
 func runInterfaceNodeCaseAudit(args []string) error {
@@ -835,18 +1534,1148 @@ func mergeTemplateConfigs(existing []profile.TemplateConfig, updates []profile.T
 	return out
 }
 
+type interfaceNodeCaseReport struct {
+	OK             bool                          `json:"ok"`
+	ProfileID      string                        `json:"profileId"`
+	NodeID         string                        `json:"nodeId"`
+	NodeName       string                        `json:"nodeName"`
+	Operation      string                        `json:"operation,omitempty"`
+	Method         string                        `json:"method,omitempty"`
+	Path           string                        `json:"path,omitempty"`
+	ReportURL      string                        `json:"reportUrl"`
+	JSONReportURL  string                        `json:"jsonReportUrl"`
+	ElapsedMs      int64                         `json:"elapsedMs"`
+	GeneratedAt    time.Time                     `json:"generatedAt"`
+	Counts         interfaceNodeCaseReportCounts `json:"counts"`
+	Results        []interfaceNodeCaseReportItem `json:"results"`
+	Warnings       []string                      `json:"warnings,omitempty"`
+	SourceStoreURL string                        `json:"sourceStoreUrl,omitempty"`
+}
+
+type interfaceNodeCaseReportCounts struct {
+	Total          int `json:"total"`
+	Passed         int `json:"passed"`
+	Failed         int `json:"failed"`
+	DerivedConfigs int `json:"derivedConfigs"`
+}
+
+type interfaceNodeCaseReportItem struct {
+	CaseID      string `json:"caseId"`
+	Title       string `json:"title"`
+	RunID       string `json:"runId,omitempty"`
+	CaseRunID   string `json:"caseRunId,omitempty"`
+	ViewerURL   string `json:"viewerUrl,omitempty"`
+	DetailURL   string `json:"detailUrl,omitempty"`
+	Status      string `json:"status"`
+	HTTPCode    int    `json:"httpCode,omitempty"`
+	ElapsedMs   int64  `json:"elapsedMs"`
+	Method      string `json:"method,omitempty"`
+	Path        string `json:"path,omitempty"`
+	FullURL     string `json:"fullUrl,omitempty"`
+	BaseURL     string `json:"baseUrl,omitempty"`
+	Error       string `json:"error,omitempty"`
+	BodyPreview string `json:"bodyPreview,omitempty"`
+}
+
+func runInterfaceNodeCaseReport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("interface-node case report", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	nodeID := flags.String("node", "", "Interface node id")
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	baseURL := flags.String("base-url", "", "Base URL for live request execution")
+	outputDir := flags.String("output-dir", "", "Report output directory")
+	timeoutSeconds := flags.Int("timeout-seconds", 3, "Timeout per API Case")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*nodeID) == "" {
+		return errors.New("--node is required")
+	}
+	if *timeoutSeconds <= 0 {
+		return errors.New("--timeout-seconds must be greater than zero")
+	}
+
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	node, err := findInterfaceNodeByID(bundle.InterfaceNodes, *nodeID)
+	if err != nil {
+		return err
+	}
+	cases := interfaceNodeReportCases(bundle.APICases, node.ID)
+	if len(cases) == 0 {
+		return fmt.Errorf("no API cases found for interface node %s", node.ID)
+	}
+	derived := deriveInterfaceNodeCaseConfigs(bundle, node, cases)
+	bundle.TemplateConfigs = mergeTemplateConfigs(bundle.TemplateConfigs, derived)
+	if strings.TrimSpace(*outputDir) == "" {
+		*outputDir = filepath.Join(".runtime", "reports", "node."+safeReportID(node.ID)+"."+time.Now().UTC().Format("20060102T150405.000000000Z"))
+	}
+	absOutputDir, err := filepath.Abs(*outputDir)
+	if err != nil {
+		return err
+	}
+	report, err := executeInterfaceNodeCaseReport(ctx, bundle, node, cases, derived, sourceStore, *storeURL, *baseURL, absOutputDir, *timeoutSeconds)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printInterfaceNodeCaseReport(report)
+	return nil
+}
+
+func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profileHomeRef string, storeURL string) (profile.Bundle, *sqlite.Store, func(), error) {
+	cleanup := func() {}
+	var sourceStore *sqlite.Store
+	if strings.TrimSpace(storeURL) != "" {
+		opened, err := openStore(ctx, storeURL)
+		if err != nil {
+			return profile.Bundle{}, nil, cleanup, err
+		}
+		sourceStore = opened
+		cleanup = func() { _ = opened.Close() }
+	}
+	if strings.TrimSpace(profileRef) != "" {
+		resolvedProfilePath, err := resolveProfileReference(profileRef, profileHomeRef)
+		if err != nil {
+			cleanup()
+			return profile.Bundle{}, nil, func() {}, err
+		}
+		bundle, err := profile.Load(resolvedProfilePath)
+		if err != nil {
+			cleanup()
+			return profile.Bundle{}, nil, func() {}, err
+		}
+		return bundle, sourceStore, cleanup, nil
+	}
+	if sourceStore == nil {
+		return profile.Bundle{}, nil, cleanup, errors.New("--profile or --store-url is required")
+	}
+	bundle, err := serveBundle(ctx, sourceStore)
+	if err != nil {
+		cleanup()
+		return profile.Bundle{}, nil, func() {}, err
+	}
+	return bundle, sourceStore, cleanup, nil
+}
+
+func findInterfaceNodeByID(nodes []profile.InterfaceNode, id string) (profile.InterfaceNode, error) {
+	id = strings.TrimSpace(id)
+	for _, node := range nodes {
+		if node.ID == id {
+			return node, nil
+		}
+	}
+	return profile.InterfaceNode{}, fmt.Errorf("interface node not found: %s", id)
+}
+
+func normalizedDiscoveryText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimSuffix(value, "interface")
+	value = strings.TrimSuffix(value, "api")
+	value = strings.TrimSuffix(value, "接口")
+	replacer := strings.NewReplacer(" ", "", "-", "", "_", "", ".", "", "/", "")
+	return replacer.Replace(strings.TrimSpace(value))
+}
+
+func matchesDiscoveryFilter(filter string, values ...string) bool {
+	needle := normalizedDiscoveryText(filter)
+	if needle == "" {
+		return true
+	}
+	for _, value := range values {
+		haystack := normalizedDiscoveryText(value)
+		if haystack != "" && (strings.Contains(haystack, needle) || strings.Contains(needle, haystack)) {
+			return true
+		}
+	}
+	return false
+}
+
+func interfaceNodeReportCases(cases []profile.APICase, nodeID string) []profile.APICase {
+	out := make([]profile.APICase, 0)
+	for _, item := range cases {
+		if item.NodeID == nodeID {
+			out = append(out, item)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func deriveInterfaceNodeCaseConfigs(bundle profile.Bundle, node profile.InterfaceNode, cases []profile.APICase) []profile.TemplateConfig {
+	caseSet := map[string]profile.APICase{}
+	for _, item := range cases {
+		caseSet[item.ID] = item
+	}
+	configured := caseExecutionConfigIDs(bundle.TemplateConfigs)
+	base := map[string]any{}
+	for _, config := range bundle.TemplateConfigs {
+		caseID, ok := caseExecutionConfigCaseID(config.ConfigJSON)
+		if !ok {
+			continue
+		}
+		if _, belongs := caseSet[caseID]; !belongs {
+			continue
+		}
+		if err := json.Unmarshal([]byte(config.ConfigJSON), &base); err == nil && len(mapFromReportAny(base["caseExecution"])) > 0 {
+			break
+		}
+	}
+	if len(base) == 0 {
+		return nil
+	}
+	out := make([]profile.TemplateConfig, 0)
+	for _, item := range cases {
+		if configured[item.ID] != "" {
+			continue
+		}
+		configJSON, ok := derivedCaseExecutionConfigJSON(base, node, item)
+		if !ok {
+			continue
+		}
+		out = append(out, profile.TemplateConfig{
+			ID:         "cfg.generated." + safeReportID(item.ID),
+			TemplateID: "case-execution",
+			NodeID:     node.ID,
+			ScopeType:  "case",
+			ScopeID:    item.ID,
+			Title:      firstNonEmpty(item.DisplayName, item.ID) + " execution",
+			ConfigJSON: configJSON,
+			Status:     "active",
+			SortOrder:  item.SortOrder,
+		})
+	}
+	return out
+}
+
+func derivedCaseExecutionConfigJSON(base map[string]any, node profile.InterfaceNode, item profile.APICase) (string, bool) {
+	next := cloneMap(base)
+	next["caseId"] = item.ID
+	execution := mapFromReportAny(next["caseExecution"])
+	if len(execution) == 0 {
+		return "", false
+	}
+	mergePayloadTemplateIntoExecution(execution, item.PayloadTemplateJSON)
+	mergeExpectedConfigIntoExecution(execution, item.ExpectedJSON)
+	next["caseExecution"] = execution
+	if caseBlock := mapFromReportAny(next["case"]); len(caseBlock) > 0 {
+		caseBlock["id"] = item.ID
+		caseBlock["title"] = firstNonEmpty(item.DisplayName, item.ID)
+		if item.PayloadTemplateJSON != "" {
+			caseBlock["payload"] = rawJSONObject(item.PayloadTemplateJSON)
+		}
+		next["case"] = caseBlock
+	}
+	if strings.TrimSpace(valueString(next["action"])) == "" {
+		next["action"] = firstNonEmpty(node.Operation, node.ID)
+	}
+	raw, err := json.Marshal(next)
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
+}
+
+func mergePayloadTemplateIntoExecution(execution map[string]any, payloadJSON string) {
+	payload := rawJSONObject(payloadJSON)
+	if len(payload) == 0 {
+		return
+	}
+	if query := mapFromReportAny(payload["query"]); len(query) > 0 {
+		mergeReportMap(execution, "query", query)
+	}
+	if headers := mapFromReportAny(payload["headers"]); len(headers) > 0 {
+		mergeReportMap(execution, "headers", headers)
+	}
+	if body, ok := payload["body"]; ok {
+		if bodyMap := mapFromReportAny(body); len(bodyMap) > 0 {
+			mergeReportMap(execution, "body", bodyMap)
+		} else {
+			execution["body"] = body
+		}
+		return
+	}
+	if _, hasStructuredKeys := payload["query"]; hasStructuredKeys {
+		return
+	}
+	if strings.EqualFold(valueString(execution["method"]), "GET") {
+		mergeReportMap(execution, "query", payload)
+		return
+	}
+	mergeReportMap(execution, "body", payload)
+}
+
+func mergeExpectedConfigIntoExecution(execution map[string]any, expectedJSON string) {
+	expected := rawJSONObject(expectedJSON)
+	if len(expected) == 0 {
+		return
+	}
+	if codes := intSliceFromReportAny(firstReportValue(expected, "expectedHttpCodes", "expected_http_codes")); len(codes) > 0 {
+		values := make([]any, 0, len(codes))
+		for _, code := range codes {
+			values = append(values, code)
+		}
+		execution["expectedHttpCodes"] = values
+	}
+	for _, key := range []string{"requireRequestId", "require_request_id"} {
+		if value, ok := expected[key].(bool); ok {
+			execution["requireRequestId"] = value
+			break
+		}
+	}
+}
+
+func executeInterfaceNodeCaseReport(ctx context.Context, bundle profile.Bundle, node profile.InterfaceNode, cases []profile.APICase, derived []profile.TemplateConfig, sourceStore *sqlite.Store, sourceStoreURL string, baseURL string, outputDir string, timeoutSeconds int) (interfaceNodeCaseReport, error) {
+	started := time.Now()
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return interfaceNodeCaseReport{}, err
+	}
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(outputDir, "runtime.sqlite")})
+	if err != nil {
+		return interfaceNodeCaseReport{}, err
+	}
+	defer runtime.Close()
+	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
+		return interfaceNodeCaseReport{}, err
+	}
+	handler := controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	caseIDs := make([]string, 0, len(cases))
+	for _, item := range cases {
+		caseIDs = append(caseIDs, item.ID)
+	}
+	requestPayload := map[string]any{"caseIds": caseIDs, "baseUrl": baseURL, "timeoutSeconds": timeoutSeconds}
+	rawRequest, _ := json.Marshal(requestPayload)
+	response, err := http.Post(server.URL+"/api/test-kit/run-batch", "application/json", strings.NewReader(string(rawRequest)))
+	if err != nil {
+		return interfaceNodeCaseReport{}, err
+	}
+	defer response.Body.Close()
+	var rawBatch map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&rawBatch); err != nil {
+		return interfaceNodeCaseReport{}, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return interfaceNodeCaseReport{}, fmt.Errorf("case batch failed with http status %d", response.StatusCode)
+	}
+	report := interfaceNodeCaseReport{
+		OK:             boolFromReportAny(rawBatch["ok"]),
+		ProfileID:      bundle.ID,
+		NodeID:         node.ID,
+		NodeName:       firstNonEmpty(node.DisplayName, node.ID),
+		Operation:      node.Operation,
+		Method:         node.Method,
+		Path:           node.Path,
+		ElapsedMs:      time.Since(started).Milliseconds(),
+		GeneratedAt:    time.Now().UTC(),
+		SourceStoreURL: sourceStoreURL,
+		Counts: interfaceNodeCaseReportCounts{
+			Total:          len(cases),
+			DerivedConfigs: len(derived),
+		},
+	}
+	report.Results = interfaceNodeCaseReportItems(rawBatch["results"])
+	for _, item := range report.Results {
+		if item.Status == store.StatusPassed {
+			report.Counts.Passed++
+		} else {
+			report.Counts.Failed++
+		}
+	}
+	report.OK = report.Counts.Total > 0 && report.Counts.Failed == 0
+	if sourceStore == nil {
+		report.Warnings = append(report.Warnings, "source Store was not available; report used profile bundle only")
+	}
+	if err := writeInterfaceNodeCaseReportFiles(outputDir, &report); err != nil {
+		return interfaceNodeCaseReport{}, err
+	}
+	return report, nil
+}
+
+func interfaceNodeCaseReportItems(value any) []interfaceNodeCaseReportItem {
+	values, _ := value.([]any)
+	out := make([]interfaceNodeCaseReportItem, 0, len(values))
+	for _, raw := range values {
+		item := mapFromReportAny(raw)
+		result := mapFromReportAny(item["result"])
+		request := mapFromReportAny(result["request"])
+		response := mapFromReportAny(result["response"])
+		summary := mapFromReportAny(item["summary"])
+		status := valueString(item["status"])
+		if status == "" {
+			status = store.StatusFailed
+			if boolFromReportAny(item["ok"]) {
+				status = store.StatusPassed
+			}
+		}
+		out = append(out, interfaceNodeCaseReportItem{
+			CaseID:      valueString(item["caseId"]),
+			Title:       firstNonEmpty(valueString(item["title"]), valueString(item["caseId"])),
+			RunID:       valueString(item["runId"]),
+			CaseRunID:   valueString(item["caseRunId"]),
+			ViewerURL:   valueString(item["viewerUrl"]),
+			DetailURL:   valueString(item["detailUrl"]),
+			Status:      status,
+			HTTPCode:    firstPositiveInt(intFromReportAny(summary["httpCode"]), intFromReportAny(response["statusCode"])),
+			ElapsedMs:   int64(intFromReportAny(item["elapsedMs"])),
+			Method:      valueString(request["method"]),
+			Path:        valueString(request["path"]),
+			FullURL:     valueString(request["fullUrl"]),
+			BaseURL:     firstNonEmpty(valueString(summary["targetBaseUrl"]), valueString(request["baseUrl"])),
+			Error:       firstNonEmpty(valueString(item["error"]), valueString(summary["failureReason"])),
+			BodyPreview: truncateReportText(valueString(response["body"]), 160),
+		})
+	}
+	return out
+}
+
+func writeInterfaceNodeCaseReportFiles(outputDir string, report *interfaceNodeCaseReport) error {
+	jsonPath := filepath.Join(outputDir, "report.json")
+	htmlPath := filepath.Join(outputDir, "report.html")
+	report.JSONReportURL = jsonPath
+	report.ReportURL = htmlPath
+	raw, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(jsonPath, append(raw, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(htmlPath, []byte(renderInterfaceNodeCaseReportHTML(*report)), 0o644)
+}
+
+func renderInterfaceNodeCaseReportHTML(report interfaceNodeCaseReport) string {
+	var b strings.Builder
+	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><title>API Case Report</title><style>`)
+	b.WriteString(`body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:24px;color:#111827;background:#f8fafc}main{max-width:1280px;margin:auto}h1{font-size:24px;margin:0 0 4px}.meta{color:#4b5563;margin-bottom:16px}.summary{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.pill{border:1px solid #d1d5db;background:white;border-radius:6px;padding:6px 10px;font-size:13px}.ok{color:#047857}.bad{color:#b91c1c}table{width:100%;border-collapse:collapse;background:white;border:1px solid #d1d5db}th,td{border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;padding:7px 8px;font-size:13px}th{background:#f3f4f6;color:#374151}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.wrap{word-break:break-all}.small{font-size:12px;color:#6b7280}`)
+	b.WriteString(`</style></head><body><main>`)
+	b.WriteString(`<h1>` + html.EscapeString(report.NodeName) + `</h1>`)
+	b.WriteString(`<div class="meta">` + html.EscapeString(report.NodeID))
+	if report.Operation != "" {
+		b.WriteString(` · ` + html.EscapeString(report.Operation))
+	}
+	b.WriteString(`</div><div class="summary">`)
+	b.WriteString(reportPill("status", statusText(report.OK)))
+	b.WriteString(reportPill("total", strconv.Itoa(report.Counts.Total)))
+	b.WriteString(reportPill("passed", strconv.Itoa(report.Counts.Passed)))
+	b.WriteString(reportPill("failed", strconv.Itoa(report.Counts.Failed)))
+	b.WriteString(reportPill("derived configs", strconv.Itoa(report.Counts.DerivedConfigs)))
+	b.WriteString(reportPill("elapsed", fmt.Sprintf("%d ms", report.ElapsedMs)))
+	b.WriteString(`</div><table><thead><tr><th>#</th><th>Case</th><th>Status</th><th>HTTP</th><th>Elapsed</th><th>Evidence</th><th>Request</th><th>Response</th><th>Error</th></tr></thead><tbody>`)
+	for index, item := range report.Results {
+		statusClass := "bad"
+		if item.Status == store.StatusPassed {
+			statusClass = "ok"
+		}
+		b.WriteString(`<tr><td class="mono">` + strconv.Itoa(index+1) + `</td>`)
+		b.WriteString(`<td><div>` + html.EscapeString(item.Title) + `</div><div class="mono small wrap">` + html.EscapeString(item.CaseID) + `</div></td>`)
+		b.WriteString(`<td class="` + statusClass + `">` + html.EscapeString(item.Status) + `</td>`)
+		b.WriteString(`<td class="mono">` + strconv.Itoa(item.HTTPCode) + `</td>`)
+		b.WriteString(`<td class="mono">` + fmt.Sprintf("%d ms", item.ElapsedMs) + `</td>`)
+		b.WriteString(`<td class="mono wrap">`)
+		if item.DetailURL != "" {
+			b.WriteString(`<a href="` + html.EscapeString(item.DetailURL) + `">caseRunId</a><br>`)
+		}
+		b.WriteString(html.EscapeString(item.CaseRunID))
+		b.WriteString(`</td>`)
+		b.WriteString(`<td class="mono wrap">` + html.EscapeString(strings.TrimSpace(item.Method+" "+item.FullURL)) + `</td>`)
+		b.WriteString(`<td class="mono wrap">` + html.EscapeString(item.BodyPreview) + `</td>`)
+		b.WriteString(`<td class="wrap">` + html.EscapeString(item.Error) + `</td></tr>`)
+	}
+	b.WriteString(`</tbody></table></main></body></html>`)
+	return b.String()
+}
+
+func printInterfaceNodeCaseReport(report interfaceNodeCaseReport) {
+	fmt.Printf("API Case Report: %s\n", report.NodeID)
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Total: %d Passed: %d Failed: %d\n", report.Counts.Total, report.Counts.Passed, report.Counts.Failed)
+	fmt.Printf("Derived Configs: %d\n", report.Counts.DerivedConfigs)
+	fmt.Printf("Elapsed: %d ms\n", report.ElapsedMs)
+	fmt.Printf("Report: %s\n", report.ReportURL)
+}
+
+func reportPill(label string, value string) string {
+	return `<span class="pill"><span class="small">` + html.EscapeString(label) + `</span> ` + html.EscapeString(value) + `</span>`
+}
+
+func statusText(ok bool) string {
+	if ok {
+		return store.StatusPassed
+	}
+	return store.StatusFailed
+}
+
+func mapFromReportAny(value any) map[string]any {
+	typed, _ := value.(map[string]any)
+	if typed == nil {
+		return map[string]any{}
+	}
+	return typed
+}
+
+func rawJSONObject(value string) map[string]any {
+	out := map[string]any{}
+	if strings.TrimSpace(value) == "" {
+		return out
+	}
+	_ = json.Unmarshal([]byte(value), &out)
+	return out
+}
+
+func cloneMap(value map[string]any) map[string]any {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func mergeReportMap(target map[string]any, key string, values map[string]any) {
+	next := mapFromReportAny(target[key])
+	if len(next) == 0 {
+		next = map[string]any{}
+	}
+	for itemKey, itemValue := range values {
+		next[itemKey] = itemValue
+	}
+	target[key] = next
+}
+
+func firstReportValue(values map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, ok := values[key]; ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func intSliceFromReportAny(value any) []int {
+	switch typed := value.(type) {
+	case []any:
+		out := make([]int, 0, len(typed))
+		for _, item := range typed {
+			if number := intFromReportAny(item); number > 0 {
+				out = append(out, number)
+			}
+		}
+		return out
+	case []int:
+		return typed
+	default:
+		return nil
+	}
+}
+
+func intFromReportAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		out, _ := typed.Int64()
+		return int(out)
+	default:
+		return 0
+	}
+}
+
+func valueString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(value)
+	}
+}
+
+func boolFromReportAny(value any) bool {
+	typed, _ := value.(bool)
+	return typed
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func truncateReportText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	if limit <= 1 {
+		return value[:limit]
+	}
+	return value[:limit-3] + "..."
+}
+
+func safeReportID(value string) string {
+	var b strings.Builder
+	for _, item := range value {
+		if item >= 'a' && item <= 'z' || item >= 'A' && item <= 'Z' || item >= '0' && item <= '9' || item == '.' || item == '_' || item == '-' {
+			b.WriteRune(item)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	if b.Len() == 0 {
+		return "item"
+	}
+	return b.String()
+}
+
 func runWorkflow(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing workflow command")
 	}
 	switch args[0] {
+	case "discover":
+		return runWorkflowDiscover(context.Background(), args[1:])
 	case "plan":
 		return runWorkflowPlan(args[1:])
 	case "audit":
 		return runWorkflowAudit(context.Background(), args[1:])
+	case "report":
+		return runWorkflowReport(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown workflow command: %s", args[0])
 	}
+}
+
+type workflowListReport struct {
+	OK        bool               `json:"ok"`
+	ProfileID string             `json:"profileId"`
+	Count     int                `json:"count"`
+	Items     []workflowListItem `json:"items"`
+}
+
+type workflowListItem struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName,omitempty"`
+	Description string `json:"description,omitempty"`
+	StepCount   int    `json:"stepCount"`
+}
+
+func runWorkflowDiscover(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow discover", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, or description")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	report := workflowList(bundle, *filter)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	for _, item := range report.Items {
+		fmt.Printf("%s\t%s\t%d\n", item.ID, item.DisplayName, item.StepCount)
+	}
+	return nil
+}
+
+func workflowList(bundle profile.Bundle, filter string) workflowListReport {
+	stepCounts := map[string]int{}
+	for _, item := range bundle.WorkflowBindings {
+		if strings.TrimSpace(item.WorkflowID) != "" {
+			stepCounts[item.WorkflowID]++
+		}
+	}
+	workflows := append([]profile.Workflow(nil), bundle.Workflows...)
+	sort.SliceStable(workflows, func(i, j int) bool {
+		return workflows[i].ID < workflows[j].ID
+	})
+	report := workflowListReport{OK: true, ProfileID: bundle.ID}
+	for _, workflow := range workflows {
+		if !matchesDiscoveryFilter(filter, workflow.ID, workflow.DisplayName, workflow.Description) {
+			continue
+		}
+		report.Items = append(report.Items, workflowListItem{
+			ID:          workflow.ID,
+			DisplayName: workflow.DisplayName,
+			Description: workflow.Description,
+			StepCount:   stepCounts[workflow.ID],
+		})
+	}
+	report.Count = len(report.Items)
+	return report
+}
+
+type workflowCaseReport struct {
+	OK            bool                     `json:"ok"`
+	ProfileID     string                   `json:"profileId"`
+	WorkflowID    string                   `json:"workflowId"`
+	WorkflowName  string                   `json:"workflowName"`
+	RunID         string                   `json:"runId,omitempty"`
+	ReportURL     string                   `json:"reportUrl"`
+	JSONReportURL string                   `json:"jsonReportUrl"`
+	ElapsedMs     int64                    `json:"elapsedMs"`
+	GeneratedAt   time.Time                `json:"generatedAt"`
+	Counts        workflowCaseReportCounts `json:"counts"`
+	Steps         []workflowCaseReportStep `json:"steps"`
+}
+
+type workflowCaseReportCounts struct {
+	Total  int `json:"total"`
+	Passed int `json:"passed"`
+	Failed int `json:"failed"`
+}
+
+type workflowCaseReportStep struct {
+	StepID    string `json:"stepId"`
+	Title     string `json:"title"`
+	CaseID    string `json:"caseId"`
+	RunID     string `json:"runId,omitempty"`
+	CaseRunID string `json:"caseRunId,omitempty"`
+	ViewerURL string `json:"viewerUrl,omitempty"`
+	DetailURL string `json:"detailUrl,omitempty"`
+	Status    string `json:"status"`
+	HTTPCode  int    `json:"httpCode,omitempty"`
+	ElapsedMs int64  `json:"elapsedMs"`
+	Method    string `json:"method,omitempty"`
+	FullURL   string `json:"fullUrl,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+func runWorkflowReport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow report", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	workflowID := flags.String("workflow", "", "Workflow id")
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	baseURL := flags.String("base-url", "", "Base URL for live request execution")
+	outputDir := flags.String("output-dir", "", "Report output directory")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*workflowID) == "" {
+		return errors.New("--workflow is required")
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if strings.TrimSpace(*outputDir) == "" {
+		*outputDir = filepath.Join(".runtime", "reports", "workflow."+safeReportID(*workflowID)+"."+time.Now().UTC().Format("20060102T150405.000000000Z"))
+	}
+	absOutputDir, err := filepath.Abs(*outputDir)
+	if err != nil {
+		return err
+	}
+	report, err := executeWorkflowCaseReport(ctx, bundle, sourceStore, *workflowID, absOutputDir, *baseURL)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Workflow Report: %s\n", report.WorkflowID)
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Total: %d Passed: %d Failed: %d\n", report.Counts.Total, report.Counts.Passed, report.Counts.Failed)
+	fmt.Printf("Elapsed: %d ms\n", report.ElapsedMs)
+	fmt.Printf("Report: %s\n", report.ReportURL)
+	return nil
+}
+
+func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourceStore *sqlite.Store, workflowID string, outputDir string, baseURL string) (workflowCaseReport, error) {
+	started := time.Now()
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return workflowCaseReport{}, err
+	}
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(outputDir, "runtime.sqlite")})
+	if err != nil {
+		return workflowCaseReport{}, err
+	}
+	defer runtime.Close()
+	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
+		return workflowCaseReport{}, err
+	}
+	handler := controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	catalog, err := fetchReportMap(server.URL + "/api/catalog")
+	if err != nil {
+		return workflowCaseReport{}, err
+	}
+	workflow, err := findWorkflowByIDFromCatalog(catalog, workflowID)
+	if err != nil {
+		return workflowCaseReport{}, err
+	}
+	bindingCaseIDs := workflowBindingCaseIDs(bundle.WorkflowBindings, workflowID)
+	contextValues := map[string]any{}
+	rawSteps, _ := workflow["steps"].([]any)
+	steps := make([]map[string]any, 0, len(rawSteps))
+	stepReports := make([]workflowCaseReportStep, 0, len(rawSteps))
+	for _, rawStep := range rawSteps {
+		step := mapFromReportAny(rawStep)
+		caseID := runnableWorkflowCaseID(bundle.APICases, valueString(step["caseId"]), bindingCaseIDs[valueString(step["id"])])
+		if caseID == "" {
+			continue
+		}
+		timeoutSeconds := workflowStepTimeoutSeconds(workflow, step)
+		payload := map[string]any{
+			"caseId":         caseID,
+			"workflowId":     workflowID,
+			"stepId":         valueString(step["id"]),
+			"overrides":      contextValues,
+			"timeoutSeconds": timeoutSeconds,
+			"baseUrl":        baseURL,
+		}
+		result, err := postReportMap(server.URL+"/api/test-kit/run", payload)
+		if err != nil {
+			return workflowCaseReport{}, err
+		}
+		result["stepId"] = valueString(step["id"])
+		result["title"] = firstNonEmpty(valueString(step["displayName"]), valueString(step["id"]))
+		result["stepOk"] = boolFromReportAny(result["ok"])
+		steps = append(steps, result)
+		stepReports = append(stepReports, workflowReportStepItem(step, result))
+		for key, value := range workflowExportedValues(step, result) {
+			contextValues[key] = value
+		}
+		if !boolFromReportAny(result["ok"]) {
+			break
+		}
+	}
+	report := workflowCaseReport{
+		OK:           len(stepReports) == len(rawSteps),
+		ProfileID:    bundle.ID,
+		WorkflowID:   workflowID,
+		WorkflowName: firstNonEmpty(valueString(workflow["displayName"]), workflowID),
+		ElapsedMs:    time.Since(started).Milliseconds(),
+		GeneratedAt:  time.Now().UTC(),
+		Steps:        stepReports,
+		Counts:       workflowCaseReportCounts{Total: len(rawSteps)},
+	}
+	for _, item := range stepReports {
+		if item.Status == store.StatusPassed {
+			report.Counts.Passed++
+		} else {
+			report.Counts.Failed++
+			report.OK = false
+		}
+	}
+	if len(stepReports) != len(rawSteps) {
+		report.Counts.Failed += len(rawSteps) - len(stepReports)
+		report.OK = false
+	}
+	snapshot := map[string]any{
+		"workflowId": workflowID,
+		"status":     statusText(report.OK),
+		"ok":         report.OK,
+		"elapsedMs":  report.ElapsedMs,
+		"summary": map[string]any{
+			"expectedStepCount": len(rawSteps),
+			"stepCount":         len(stepReports),
+			"passed":            report.Counts.Passed,
+			"elapsedMs":         report.ElapsedMs,
+		},
+		"steps": steps,
+	}
+	if len(steps) > 0 {
+		if saved, err := postReportMap(server.URL+"/api/workflow-runs", snapshot); err == nil {
+			report.RunID = valueString(saved["workflowRunId"])
+			if sourceStore != nil && report.RunID != "" {
+				if run, runErr := runtime.GetRun(ctx, report.RunID); runErr == nil {
+					_, _ = sourceStore.CreateRun(ctx, run)
+				}
+				if caseRuns, caseErr := runtime.ListAPICaseRuns(ctx, report.RunID); caseErr == nil {
+					for _, item := range caseRuns {
+						_, _ = sourceStore.RecordAPICaseRun(ctx, item)
+					}
+				}
+			}
+		}
+	}
+	if err := writeWorkflowCaseReportFiles(outputDir, &report); err != nil {
+		return workflowCaseReport{}, err
+	}
+	return report, nil
+}
+
+func workflowBindingCaseIDs(bindings []profile.WorkflowBinding, workflowID string) map[string]string {
+	out := map[string]string{}
+	for _, item := range bindings {
+		if item.WorkflowID == workflowID && strings.TrimSpace(item.StepID) != "" && strings.TrimSpace(item.CaseID) != "" {
+			out[item.StepID] = item.CaseID
+		}
+	}
+	return out
+}
+
+func runnableWorkflowCaseID(cases []profile.APICase, candidates ...string) string {
+	known := map[string]bool{}
+	for _, item := range cases {
+		known[item.ID] = true
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" && known[candidate] {
+			return candidate
+		}
+	}
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func fetchReportMap(endpoint string) (map[string]any, error) {
+	response, err := http.Get(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("GET %s failed with http status %d", endpoint, response.StatusCode)
+	}
+	return payload, nil
+}
+
+func postReportMap(endpoint string, payload map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	response, err := http.Post(endpoint, "application/json", strings.NewReader(string(raw)))
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	var result map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	result["httpStatus"] = response.StatusCode
+	return result, nil
+}
+
+func findWorkflowByIDFromCatalog(catalog map[string]any, id string) (map[string]any, error) {
+	rawWorkflows, _ := catalog["workflows"].([]any)
+	id = strings.TrimSpace(id)
+	for _, raw := range rawWorkflows {
+		workflow := mapFromReportAny(raw)
+		if valueString(workflow["id"]) == id {
+			return workflow, nil
+		}
+	}
+	return nil, fmt.Errorf("workflow not found: %s", id)
+}
+
+func workflowStepTimeoutSeconds(workflow map[string]any, step map[string]any) int {
+	timeoutMs := firstPositiveInt(intFromReportAny(step["timeoutMs"]), intFromReportAny(workflow["baseStepTimeoutMs"]), 3000)
+	seconds := timeoutMs / 1000
+	if timeoutMs%1000 != 0 {
+		seconds++
+	}
+	if seconds <= 0 {
+		return 3
+	}
+	return seconds
+}
+
+func workflowReportStepItem(step map[string]any, result map[string]any) workflowCaseReportStep {
+	item := interfaceNodeCaseReportItems([]any{result})
+	status := store.StatusFailed
+	httpCode := 0
+	elapsedMs := int64(intFromReportAny(result["elapsedMs"]))
+	method := ""
+	fullURL := ""
+	errText := ""
+	runID := valueString(result["runId"])
+	caseRunID := valueString(result["caseRunId"])
+	viewerURL := valueString(result["viewerUrl"])
+	detailURL := valueString(result["detailUrl"])
+	if len(item) > 0 {
+		status = item[0].Status
+		httpCode = item[0].HTTPCode
+		elapsedMs = item[0].ElapsedMs
+		method = item[0].Method
+		fullURL = item[0].FullURL
+		errText = item[0].Error
+		runID = item[0].RunID
+		caseRunID = item[0].CaseRunID
+		viewerURL = item[0].ViewerURL
+		detailURL = item[0].DetailURL
+	}
+	return workflowCaseReportStep{
+		StepID:    valueString(step["id"]),
+		Title:     firstNonEmpty(valueString(step["displayName"]), valueString(step["id"])),
+		CaseID:    valueString(result["caseId"]),
+		RunID:     runID,
+		CaseRunID: caseRunID,
+		ViewerURL: viewerURL,
+		DetailURL: detailURL,
+		Status:    status,
+		HTTPCode:  httpCode,
+		ElapsedMs: elapsedMs,
+		Method:    method,
+		FullURL:   fullURL,
+		Error:     errText,
+	}
+}
+
+func workflowExportedValues(step map[string]any, result map[string]any) map[string]any {
+	out := map[string]any{}
+	rawExports, _ := step["exports"].([]any)
+	for _, rawExport := range rawExports {
+		item := mapFromReportAny(rawExport)
+		name := valueString(item["name"])
+		if name == "" {
+			continue
+		}
+		value := workflowValueAtPath(workflowExportRoot(result, valueString(item["from"])), valueString(item["path"]))
+		if value != nil && valueString(value) != "" {
+			out[name] = value
+		}
+	}
+	return out
+}
+
+func workflowExportRoot(result map[string]any, source string) any {
+	resultBlock := mapFromReportAny(result["result"])
+	request := mapFromReportAny(resultBlock["request"])
+	response := mapFromReportAny(resultBlock["response"])
+	responseBody := rawJSONObject(valueString(response["body"]))
+	switch source {
+	case "request", "requestBody":
+		return firstReportValue(request, "body")
+	case "requestQuery":
+		return firstReportValue(request, "query")
+	case "responseHeaders":
+		return firstReportValue(response, "headers")
+	case "response", "responseBody", "":
+		return responseBody
+	default:
+		return responseBody
+	}
+}
+
+func workflowValueAtPath(root any, path string) any {
+	if strings.TrimSpace(path) == "" {
+		return root
+	}
+	current := root
+	for _, part := range strings.Split(path, ".") {
+		switch typed := current.(type) {
+		case map[string]any:
+			current = typed[part]
+		case []any:
+			index, err := strconv.Atoi(part)
+			if err != nil || index < 0 || index >= len(typed) {
+				return nil
+			}
+			current = typed[index]
+		default:
+			return nil
+		}
+		if current == nil {
+			return nil
+		}
+	}
+	return current
+}
+
+func writeWorkflowCaseReportFiles(outputDir string, report *workflowCaseReport) error {
+	jsonPath := filepath.Join(outputDir, "report.json")
+	htmlPath := filepath.Join(outputDir, "report.html")
+	report.JSONReportURL = jsonPath
+	report.ReportURL = htmlPath
+	raw, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(jsonPath, append(raw, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(htmlPath, []byte(renderWorkflowCaseReportHTML(*report)), 0o644)
+}
+
+func renderWorkflowCaseReportHTML(report workflowCaseReport) string {
+	var b strings.Builder
+	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><title>Workflow Report</title><style>`)
+	b.WriteString(`body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:24px;color:#111827;background:#f8fafc}main{max-width:1280px;margin:auto}h1{font-size:24px;margin:0 0 4px}.meta{color:#4b5563;margin-bottom:16px}.summary{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.pill{border:1px solid #d1d5db;background:white;border-radius:6px;padding:6px 10px;font-size:13px}.ok{color:#047857}.bad{color:#b91c1c}table{width:100%;border-collapse:collapse;background:white;border:1px solid #d1d5db}th,td{border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;padding:7px 8px;font-size:13px}th{background:#f3f4f6;color:#374151}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.wrap{word-break:break-all}.small{font-size:12px;color:#6b7280}`)
+	b.WriteString(`</style></head><body><main>`)
+	b.WriteString(`<h1>` + html.EscapeString(report.WorkflowName) + `</h1>`)
+	b.WriteString(`<div class="meta">` + html.EscapeString(report.WorkflowID))
+	if report.RunID != "" {
+		b.WriteString(` · ` + html.EscapeString(report.RunID))
+	}
+	b.WriteString(`</div><div class="summary">`)
+	b.WriteString(reportPill("status", statusText(report.OK)))
+	b.WriteString(reportPill("steps", strconv.Itoa(report.Counts.Total)))
+	b.WriteString(reportPill("passed", strconv.Itoa(report.Counts.Passed)))
+	b.WriteString(reportPill("failed", strconv.Itoa(report.Counts.Failed)))
+	b.WriteString(reportPill("elapsed", fmt.Sprintf("%d ms", report.ElapsedMs)))
+	b.WriteString(`</div><table><thead><tr><th>#</th><th>Step</th><th>Case</th><th>Status</th><th>HTTP</th><th>Elapsed</th><th>Evidence</th><th>Request</th><th>Error</th></tr></thead><tbody>`)
+	for index, item := range report.Steps {
+		statusClass := "bad"
+		if item.Status == store.StatusPassed {
+			statusClass = "ok"
+		}
+		b.WriteString(`<tr><td class="mono">` + strconv.Itoa(index+1) + `</td>`)
+		b.WriteString(`<td><div>` + html.EscapeString(item.Title) + `</div><div class="mono small wrap">` + html.EscapeString(item.StepID) + `</div></td>`)
+		b.WriteString(`<td class="mono wrap">` + html.EscapeString(item.CaseID) + `</td>`)
+		b.WriteString(`<td class="` + statusClass + `">` + html.EscapeString(item.Status) + `</td>`)
+		b.WriteString(`<td class="mono">` + strconv.Itoa(item.HTTPCode) + `</td>`)
+		b.WriteString(`<td class="mono">` + fmt.Sprintf("%d ms", item.ElapsedMs) + `</td>`)
+		b.WriteString(`<td class="mono wrap">`)
+		if item.DetailURL != "" {
+			b.WriteString(`<a href="` + html.EscapeString(item.DetailURL) + `">caseRunId</a><br>`)
+		}
+		b.WriteString(html.EscapeString(item.CaseRunID))
+		b.WriteString(`</td>`)
+		b.WriteString(`<td class="mono wrap">` + html.EscapeString(strings.TrimSpace(item.Method+" "+item.FullURL)) + `</td>`)
+		b.WriteString(`<td class="wrap">` + html.EscapeString(item.Error) + `</td></tr>`)
+	}
+	b.WriteString(`</tbody></table></main></body></html>`)
+	return b.String()
 }
 
 func runWorkflowAudit(ctx context.Context, args []string) error {
@@ -1707,6 +3536,7 @@ func runServe(args []string) error {
 
 type serveConfig struct {
 	profilePath     string
+	profileHome     string
 	host            string
 	port            int
 	storeURL        string
@@ -1724,7 +3554,8 @@ func serveHandlerFromArgs(args []string) (http.Handler, func() error, error) {
 func serveConfigFromArgs(args []string) (serveConfig, error) {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	host := flags.String("host", "127.0.0.1", "HTTP host")
 	port := flags.Int("port", 18191, "HTTP port")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
@@ -1732,7 +3563,7 @@ func serveConfigFromArgs(args []string) (serveConfig, error) {
 	if err := flags.Parse(args); err != nil {
 		return serveConfig{}, err
 	}
-	return serveConfig{profilePath: *profilePath, host: *host, port: *port, storeURL: *storeURL, traceGraphQLURL: *traceGraphQLURL}, nil
+	return serveConfig{profilePath: *profilePath, profileHome: *profileHome, host: *host, port: *port, storeURL: *storeURL, traceGraphQLURL: *traceGraphQLURL}, nil
 }
 
 func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
@@ -1740,23 +3571,40 @@ func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	storeCfg = storeCfg.Resolve()
 	runtime, err := sqlite.Open(context.Background(), storeCfg)
 	if err != nil {
 		return nil, nil, err
 	}
-	bundle, err := serveBundle(context.Background(), cfg.profilePath, runtime)
+	ctx := context.Background()
+	if strings.TrimSpace(cfg.profilePath) != "" {
+		profilePath, err := resolveProfileReference(cfg.profilePath, cfg.profileHome)
+		if err != nil {
+			_ = runtime.Close()
+			return nil, nil, err
+		}
+		if _, err := publishProfileBundleToStore(ctx, runtime, profilePath, storeCfg.Path, false, false); err != nil {
+			_ = runtime.Close()
+			return nil, nil, err
+		}
+	}
+	bundle, err := serveBundle(ctx, runtime)
 	if err != nil {
 		_ = runtime.Close()
 		return nil, nil, err
 	}
-	return controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime, TraceGraphQLURL: cfg.traceGraphQLURL}), runtime.Close, nil
+	return controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime, TraceGraphQLURL: cfg.traceGraphQLURL, ProfileHome: cfg.profileHome}), runtime.Close, nil
 }
 
-func serveBundle(ctx context.Context, profilePath string, runtime store.Store) (profile.Bundle, error) {
-	if strings.TrimSpace(profilePath) != "" {
-		return profile.Load(profilePath)
-	}
+func serveBundle(ctx context.Context, runtime store.Store) (profile.Bundle, error) {
 	if runtime != nil {
+		if catalogIndex, err := runtime.GetProfileCatalogIndex(ctx); err == nil && strings.TrimSpace(catalogIndex.ProfileID) != "" {
+			if profileIndex, err := runtime.GetProfileIndex(ctx, catalogIndex.ProfileID); err == nil && strings.TrimSpace(profileIndex.BundlePath) != "" {
+				if bundle, err := profile.Load(profileIndex.BundlePath); err == nil {
+					return bundle, nil
+				}
+			}
+		}
 		catalog, err := runtime.GetProfileCatalog(ctx)
 		if err == nil && catalog.ProfileID != "" {
 			return profilecatalog.ToBundle(catalog), nil
@@ -1765,5 +3613,5 @@ func serveBundle(ctx context.Context, profilePath string, runtime store.Store) (
 			return profile.Bundle{}, err
 		}
 	}
-	return profile.Load(filepath.Join("profiles", "empty"))
+	return profile.EmptyBundle(), nil
 }

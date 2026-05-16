@@ -215,7 +215,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 
 	profile, err := s.UpsertProfileIndex(ctx, store.ProfileIndex{
 		ProfileID:    "empty",
-		BundlePath:   "profiles/empty",
+		BundlePath:   "/tmp/external-profile-bundles/empty",
 		BundleDigest: "sha256:bundle",
 		SummaryJSON:  `{"workflows":0}`,
 		ImportedAt:   started.Add(2 * time.Minute),
@@ -231,13 +231,13 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if err != nil {
 		t.Fatalf("get profile index: %v", err)
 	}
-	if loadedProfile.BundlePath != "profiles/empty" || loadedProfile.BundleDigest != "sha256:bundle" {
+	if loadedProfile.BundlePath != "/tmp/external-profile-bundles/empty" || loadedProfile.BundleDigest != "sha256:bundle" {
 		t.Fatalf("loaded profile index = %#v", loadedProfile)
 	}
 	version, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
 		ID:           "config.empty.001",
 		ProfileID:    "empty",
-		SourcePath:   "profiles/empty",
+		SourcePath:   "/tmp/external-profile-bundles/empty",
 		BundleDigest: "sha256:bundle",
 		SummaryJSON:  `{"services":1}`,
 		Active:       true,
@@ -294,7 +294,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 				ID:                   "case.alpha",
 				DisplayName:          "Case Alpha",
 				NodeID:               "node.alpha",
-				CasePath:             "profiles/sample/cases/case.alpha.json",
+				CasePath:             "cases/case.alpha.json",
 				BaseURL:              "http://127.0.0.1:18080",
 				EvidenceDir:          ".runtime/cases",
 				TimeoutSeconds:       12,
@@ -333,7 +333,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if len(catalog.Services) != 1 || catalog.Services[0].SourcePath != "/tmp/source/service.alpha" {
 		t.Fatalf("profile catalog services = %#v", catalog.Services)
 	}
-	if len(catalog.APICases) != 1 || catalog.APICases[0].CasePath != "profiles/sample/cases/case.alpha.json" || catalog.APICases[0].BaseURL != "http://127.0.0.1:18080" || catalog.APICases[0].EvidenceDir != ".runtime/cases" || catalog.APICases[0].TimeoutSeconds != 12 || catalog.APICases[0].DefaultOverridesJSON != `{"itemId":"item-001"}` {
+	if len(catalog.APICases) != 1 || catalog.APICases[0].CasePath != "cases/case.alpha.json" || catalog.APICases[0].BaseURL != "http://127.0.0.1:18080" || catalog.APICases[0].EvidenceDir != ".runtime/cases" || catalog.APICases[0].TimeoutSeconds != 12 || catalog.APICases[0].DefaultOverridesJSON != `{"itemId":"item-001"}` {
 		t.Fatalf("profile catalog api case run config = %#v", catalog.APICases)
 	}
 

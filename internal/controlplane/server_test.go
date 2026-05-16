@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/profilehome"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
 )
@@ -68,7 +70,7 @@ func TestServerExposesProfileAssetLists(t *testing.T) {
 				ID:             "case.alpha",
 				DisplayName:    "Case Alpha",
 				NodeID:         "node.alpha",
-				CasePath:       "profiles/sample/cases/case.alpha.json",
+				CasePath:       "cases/case.alpha.json",
 				BaseURL:        "http://127.0.0.1:18080",
 				EvidenceDir:    ".runtime/cases",
 				TimeoutSeconds: 30,
@@ -122,10 +124,11 @@ func TestServerImportsProfileBundleIntoRuntimeStore(t *testing.T) {
 	defer s.Close()
 	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
 	defer server.Close()
+	profileDir := writeEmptyProfileBundle(t)
 
-	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":"../../profiles/empty"}`, http.StatusOK)
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", fmt.Sprintf(`{"path":%q}`, profileDir), http.StatusOK)
 
-	if payload["profileId"] != "empty" || payload["bundlePath"] != "../../profiles/empty" {
+	if payload["profileId"] != "empty" || payload["bundlePath"] != profileDir {
 		t.Fatalf("import payload identity = %#v", payload)
 	}
 	if digest, ok := payload["bundleDigest"].(string); !ok || !strings.HasPrefix(digest, "sha256:") {
@@ -150,7 +153,7 @@ func TestServerImportsProfileBundleIntoRuntimeStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get profile index: %v", err)
 	}
-	if index.BundlePath != "../../profiles/empty" || !strings.HasPrefix(index.BundleDigest, "sha256:") || index.ImportedAt.IsZero() {
+	if index.BundlePath != profileDir || !strings.HasPrefix(index.BundleDigest, "sha256:") || index.ImportedAt.IsZero() {
 		t.Fatalf("profile index = %#v", index)
 	}
 }
@@ -245,6 +248,182 @@ func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
 	}
 }
 
+func TestServerListsInstalledProfilesFromProfileHome(t *testing.T) {
+	profileHome := t.TempDir()
+	installedDir := filepath.Join(profileHome, "sample")
+	writeWorkbenchSampleProfileAt(t, installedDir)
+	server := httptest.NewServer(controlplane.NewWithOptions(loadEmptyProfile(t), controlplane.Options{ProfileHome: profileHome}))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/profile/installed", http.StatusOK)
+
+	if payload["profileHome"] != profileHome {
+		t.Fatalf("installed profile home = %#v", payload)
+	}
+	items, ok := payload["profiles"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("installed profiles = %#v", payload["profiles"])
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("installed profile item = %#v", items[0])
+	}
+	counts, ok := item["counts"].(map[string]any)
+	if item["id"] != "sample" || item["displayName"] != "Sample Profile" || item["path"] != installedDir || !ok || counts["workflows"] != float64(1) || counts["apiCases"] != float64(1) {
+		t.Fatalf("installed profile item = %#v", item)
+	}
+	if digest, ok := item["bundleDigest"].(string); !ok || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("installed profile digest = %#v", item["bundleDigest"])
+	}
+}
+
+func TestServerListsInvalidInstalledProfileWithoutFailing(t *testing.T) {
+	profileHome := t.TempDir()
+	brokenDir := filepath.Join(profileHome, "broken")
+	if err := os.MkdirAll(brokenDir, 0o755); err != nil {
+		t.Fatalf("create broken profile dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brokenDir, "profile.json"), []byte(`{"id":`), 0o644); err != nil {
+		t.Fatalf("write broken profile: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithOptions(loadEmptyProfile(t), controlplane.Options{ProfileHome: profileHome}))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/profile/installed", http.StatusOK)
+
+	items, ok := payload["profiles"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("installed profiles = %#v", payload["profiles"])
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok || item["id"] != "broken" || item["path"] != brokenDir || item["valid"] != false || item["error"] == "" {
+		t.Fatalf("invalid installed profile item = %#v", items[0])
+	}
+}
+
+func TestServerInstallsProfileBundleIntoProfileHome(t *testing.T) {
+	sourceDir := writeWorkbenchSampleProfile(t)
+	profileHome := t.TempDir()
+	server := httptest.NewServer(controlplane.NewWithOptions(loadEmptyProfile(t), controlplane.Options{ProfileHome: profileHome}))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/install", `{"path":`+mustJSON(t, sourceDir)+`}`, http.StatusOK)
+
+	targetPath := filepath.Join(profileHome, "sample")
+	if payload["id"] != "sample" || payload["targetPath"] != targetPath {
+		t.Fatalf("install payload = %#v", payload)
+	}
+	if _, err := os.Stat(filepath.Join(targetPath, "profile.json")); err != nil {
+		t.Fatalf("installed manifest missing: %v", err)
+	}
+	list := decodeJSONResponse(t, server.URL+"/api/profile/installed", http.StatusOK)
+	items, ok := list["profiles"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("installed profiles after install = %#v", list)
+	}
+}
+
+func TestServerImportsPackedProfileArchiveIntoRuntimeStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	sourceDir := writeWorkbenchSampleProfile(t)
+	archivePath := filepath.Join(t.TempDir(), "sample-profile.tgz")
+	if _, err := profilehome.Pack(sourceDir, "", archivePath, false); err != nil {
+		t.Fatalf("pack sample profile: %v", err)
+	}
+	profileHome := t.TempDir()
+	server := httptest.NewServer(controlplane.NewWithOptions(loadEmptyProfile(t), controlplane.Options{Runtime: s, ProfileHome: profileHome}))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":`+mustJSON(t, archivePath)+`}`, http.StatusOK)
+
+	targetPath := filepath.Join(profileHome, "sample")
+	if payload["profileId"] != "sample" || payload["bundlePath"] != targetPath {
+		t.Fatalf("archive import payload = %#v", payload)
+	}
+	if _, err := os.Stat(filepath.Join(targetPath, "profile.json")); err != nil {
+		t.Fatalf("installed archive profile missing: %v", err)
+	}
+	index, err := s.GetProfileIndex(ctx, "sample")
+	if err != nil {
+		t.Fatalf("get profile index: %v", err)
+	}
+	if index.BundlePath != targetPath || !strings.HasPrefix(index.BundleDigest, "sha256:") {
+		t.Fatalf("archive profile index = %#v", index)
+	}
+	active := decodeJSONResponse(t, server.URL+"/api/profile", http.StatusOK)
+	if active["id"] != "sample" {
+		t.Fatalf("active profile after archive import = %#v", active)
+	}
+}
+
+func TestServerVerifiesPackedProfileArchiveIntoRuntimeStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	sourceDir := writeWorkbenchSampleProfile(t)
+	archivePath := filepath.Join(t.TempDir(), "sample-profile.tgz")
+	if _, err := profilehome.Pack(sourceDir, "", archivePath, false); err != nil {
+		t.Fatalf("pack sample profile: %v", err)
+	}
+	profileHome := t.TempDir()
+	server := httptest.NewServer(controlplane.NewWithOptions(loadEmptyProfile(t), controlplane.Options{Runtime: s, ProfileHome: profileHome}))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/verify", `{"path":`+mustJSON(t, archivePath)+`}`, http.StatusOK)
+
+	targetPath := filepath.Join(profileHome, "sample")
+	if payload["ok"] != true || payload["profileId"] != "sample" {
+		t.Fatalf("archive verify payload = %#v", payload)
+	}
+	publish, ok := payload["publish"].(map[string]any)
+	if !ok || publish["bundlePath"] != targetPath {
+		t.Fatalf("archive verify publish = %#v", payload["publish"])
+	}
+	index, err := s.GetProfileIndex(ctx, "sample")
+	if err != nil {
+		t.Fatalf("get verified archive profile index: %v", err)
+	}
+	if index.BundlePath != targetPath || !strings.HasPrefix(index.BundleDigest, "sha256:") {
+		t.Fatalf("verified archive profile index = %#v", index)
+	}
+}
+
+func TestServerCanVerifyInstalledProfileByID(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileHome := t.TempDir()
+	installedDir := filepath.Join(profileHome, "sample")
+	writeWorkbenchSampleProfileAt(t, installedDir)
+	server := httptest.NewServer(controlplane.NewWithOptions(loadEmptyProfile(t), controlplane.Options{Runtime: s, ProfileHome: profileHome}))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/verify", `{"path":"sample"}`, http.StatusOK)
+
+	if payload["ok"] != true || payload["profileId"] != "sample" {
+		t.Fatalf("verify installed profile payload = %#v", payload)
+	}
+	publish, ok := payload["publish"].(map[string]any)
+	if !ok || publish["bundlePath"] != installedDir {
+		t.Fatalf("verify installed profile publish = %#v", payload["publish"])
+	}
+	active := decodeJSONResponse(t, server.URL+"/api/profile", http.StatusOK)
+	if active["id"] != "sample" {
+		t.Fatalf("active profile after installed verify = %#v", active)
+	}
+}
+
 func TestServerImportsProfileBundleWithAudit(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
@@ -271,11 +450,222 @@ func TestServerImportsProfileBundleWithAudit(t *testing.T) {
 	}
 }
 
+func TestServerCanRequireCleanProfileAuditBeforeImport(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileDir := writeAuditSampleProfile(t)
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":`+mustJSON(t, profileDir)+`,"requireAuditOk":true}`, http.StatusBadRequest)
+
+	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "profile audit failed") {
+		t.Fatalf("strict import payload = %#v", payload)
+	}
+	if _, err := s.GetProfileIndex(ctx, "sample"); err == nil {
+		t.Fatalf("strict import wrote profile index")
+	} else if err != store.ErrNotFound {
+		t.Fatalf("get profile index after strict import: %v", err)
+	}
+}
+
+func TestServerVerifiesProfileBundleBeforeActivation(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileDir := writeEmptyProfileBundle(t)
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/verify", `{"path":`+mustJSON(t, profileDir)+`}`, http.StatusOK)
+
+	if payload["ok"] != true || payload["profileId"] != "empty" {
+		t.Fatalf("profile verify payload = %#v", payload)
+	}
+	audit, ok := payload["audit"].(map[string]any)
+	if !ok || audit["ok"] != true || audit["issueCount"] != float64(0) {
+		t.Fatalf("profile verify audit = %#v", payload["audit"])
+	}
+	publish, ok := payload["publish"].(map[string]any)
+	if !ok || publish["profileId"] != "empty" || publish["configVersion"] == nil {
+		t.Fatalf("profile verify publish = %#v", payload["publish"])
+	}
+	checks, ok := payload["checks"].([]any)
+	if !ok || len(checks) < 6 {
+		t.Fatalf("profile verify checks = %#v", payload["checks"])
+	}
+	for _, raw := range checks {
+		check, ok := raw.(map[string]any)
+		if !ok || check["ok"] != true || check["detail"] == "" {
+			t.Fatalf("profile verify check = %#v", raw)
+		}
+	}
+	index, err := s.GetProfileIndex(ctx, "empty")
+	if err != nil {
+		t.Fatalf("get verified profile index: %v", err)
+	}
+	if index.BundleDigest == "" {
+		t.Fatalf("verified profile index = %#v", index)
+	}
+	model, err := s.GetReadModel(ctx, "empty", controlplane.ReadModelDashboard)
+	if err != nil {
+		t.Fatalf("get verified dashboard read model: %v", err)
+	}
+	if model.ConfigVersionID == "" {
+		t.Fatalf("verified dashboard read model = %#v", model)
+	}
+}
+
+func TestServerProfileVerifyCanRequirePassedAPICaseRuns(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileDir := writeWorkbenchSampleProfile(t)
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run.alpha",
+		ProfileID:  "sample",
+		WorkflowID: "case.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  mustParseTime(t, "2026-05-14T01:00:00Z"),
+		FinishedAt: mustParseTime(t, "2026-05-14T01:00:01Z"),
+		CreatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
+		UpdatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
+	}); err != nil {
+		t.Fatalf("create api case run parent: %v", err)
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:         "case-run.alpha",
+		RunID:      "run.alpha",
+		CaseID:     "case.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  mustParseTime(t, "2026-05-14T01:00:00Z"),
+		FinishedAt: mustParseTime(t, "2026-05-14T01:00:01Z"),
+		CreatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
+	}); err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/verify", `{"path":`+mustJSON(t, profileDir)+`,"requireCaseRuns":true}`, http.StatusOK)
+
+	if payload["ok"] != true {
+		t.Fatalf("profile verify runtime payload = %#v", payload)
+	}
+	checks, ok := payload["checks"].([]any)
+	if !ok || !hasJSONCheck(checks, "api-case-run:case.alpha") {
+		t.Fatalf("profile verify runtime checks = %#v", payload["checks"])
+	}
+}
+
+func TestServerProfileVerifyFailureIncludesDiagnosticReport(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileDir := writeWorkbenchSampleProfile(t)
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/verify", `{"path":`+mustJSON(t, profileDir)+`,"requireCaseRuns":true}`, http.StatusBadRequest)
+
+	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "profile verification failed") {
+		t.Fatalf("profile verify failure payload = %#v", payload)
+	}
+	summary, ok := payload["summary"].(map[string]any)
+	if !ok || summary["firstFailed"] != "api-case-run:case.alpha" || summary["failedChecks"] != float64(1) {
+		t.Fatalf("profile verify failure summary = %#v", payload["summary"])
+	}
+	checks, ok := payload["checks"].([]any)
+	if !ok || !hasJSONFailedCheck(checks, "api-case-run:case.alpha") {
+		t.Fatalf("profile verify failure checks = %#v", payload["checks"])
+	}
+}
+
+func TestServerProfileVerifyCanRequirePassedWorkflowRuns(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileDir := writeWorkbenchSampleProfile(t)
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run.workflow.alpha",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  mustParseTime(t, "2026-05-14T02:00:00Z"),
+		FinishedAt: mustParseTime(t, "2026-05-14T02:00:01Z"),
+		CreatedAt:  mustParseTime(t, "2026-05-14T02:00:01Z"),
+		UpdatedAt:  mustParseTime(t, "2026-05-14T02:00:01Z"),
+	}); err != nil {
+		t.Fatalf("create workflow run: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/verify", `{"path":`+mustJSON(t, profileDir)+`,"requireWorkflowRuns":true}`, http.StatusOK)
+
+	if payload["ok"] != true {
+		t.Fatalf("profile verify workflow payload = %#v", payload)
+	}
+	checks, ok := payload["checks"].([]any)
+	if !ok || !hasJSONCheck(checks, "workflow-run:workflow.alpha") {
+		t.Fatalf("profile verify workflow checks = %#v", payload["checks"])
+	}
+	summary, ok := payload["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("profile verify workflow summary missing: %#v", payload)
+	}
+	if summary["totalChecks"] != float64(len(checks)) || summary["passedChecks"] != float64(len(checks)) || summary["failedChecks"] != float64(0) {
+		t.Fatalf("profile verify workflow summary counts = %#v checks=%d", summary, len(checks))
+	}
+	if summary["requiredWorkflowRuns"] != true || summary["requiredCaseRuns"] != false {
+		t.Fatalf("profile verify workflow summary gates = %#v", summary)
+	}
+}
+
+func TestServerProfileVerifyStopsBeforePublishWhenAuditFails(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileDir := writeAuditSampleProfile(t)
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/verify", `{"path":`+mustJSON(t, profileDir)+`}`, http.StatusBadRequest)
+
+	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "profile audit failed") {
+		t.Fatalf("profile verify failure payload = %#v", payload)
+	}
+	if _, err := s.GetProfileIndex(ctx, "sample"); err == nil {
+		t.Fatalf("profile verify wrote profile index after audit failure")
+	} else if err != store.ErrNotFound {
+		t.Fatalf("get profile index after verify failure: %v", err)
+	}
+}
+
 func TestServerRejectsProfileImportWithoutRuntimeStore(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
 	defer server.Close()
 
-	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":"../../profiles/empty"}`, http.StatusNotImplemented)
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":"/tmp/external-profile"}`, http.StatusNotImplemented)
 
 	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "runtime store") {
 		t.Fatalf("missing store payload = %#v", payload)
@@ -474,7 +864,6 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		want string
 	}{
 		{path: "/index.html", want: "react-sandbox-workbench-root"},
-		{path: "/agent-test.html", want: "react-agent-test-root"},
 		{path: "/agent-run.html", want: "react-agent-run-root"},
 		{path: "/api-cases.html", want: "react-api-cases-root"},
 		{path: "/case-runs.html", want: "react-case-runs-root"},
@@ -499,7 +888,6 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/assets/react/controlPlane.css", want: "react-control-plane"},
 		{path: "/assets/react/controlPlane.js", want: "Trace Evidence"},
 		{path: "/assets/react/agentRun.js", want: "/api/agent-test"},
-		{path: "/assets/react/agentTest.js", want: "/api/agent-test"},
 		{path: "/assets/react/apiCases.js", want: "/api/cases/capabilities"},
 		{path: "/assets/react/caseRuns.js", want: "/api/case/incomplete-batches"},
 		{path: "/assets/react/environmentNode.js", want: "/api/interface-nodes"},
@@ -535,6 +923,15 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		if !strings.Contains(string(raw), item.want) {
 			t.Fatalf("%s missing %q", item.path, item.want)
 		}
+	}
+
+	resp, err := http.Get(server.URL + "/agent-test.html")
+	if err != nil {
+		t.Fatalf("get removed agent test page: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("removed agent test page status = %d", resp.StatusCode)
 	}
 }
 
@@ -2056,12 +2453,33 @@ func TestServerPersistsBatchCaseRunsForInterfaceNodeGreenState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post batch: %v", err)
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	var batchPayload struct {
+		Results []struct {
+			RunID     string `json:"runId"`
+			CaseRunID string `json:"caseRunId"`
+			DetailURL string `json:"detailUrl"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&batchPayload); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
 	if err := resp.Body.Close(); err != nil {
 		t.Fatalf("close batch response: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("batch status = %d", resp.StatusCode)
+	}
+	if len(batchPayload.Results) != 3 {
+		t.Fatalf("batch results = %#v", batchPayload.Results)
+	}
+	for _, item := range batchPayload.Results {
+		if item.RunID == "" || item.CaseRunID != item.RunID+".case" || item.DetailURL != "/api/case-run/evidence?caseRunId="+url.QueryEscape(item.CaseRunID) {
+			t.Fatalf("batch case evidence handles = %#v", item)
+		}
+	}
+	detail := decodeJSONResponse(t, server.URL+batchPayload.Results[0].DetailURL, http.StatusOK)
+	if detail["ok"] != true {
+		t.Fatalf("batch case detail lookup = %#v", detail)
 	}
 
 	resp, err = http.Get(server.URL + "/api/interface-node?id=interface.alpha")
@@ -3153,8 +3571,8 @@ func TestServerExposesIncompleteAPICasesFromStore(t *testing.T) {
 		ID:          "sample",
 		DisplayName: "Sample Profile",
 		APICases: []profile.APICase{
-			{ID: "case.alpha", DisplayName: "Case Alpha", CasePath: "profiles/sample/cases/case.alpha.json"},
-			{ID: "case.beta", DisplayName: "Case Beta", CasePath: "profiles/sample/cases/case.beta.json"},
+			{ID: "case.alpha", DisplayName: "Case Alpha", CasePath: "cases/case.alpha.json"},
+			{ID: "case.beta", DisplayName: "Case Beta", CasePath: "cases/case.beta.json"},
 		},
 	}
 	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
@@ -3166,7 +3584,7 @@ func TestServerExposesIncompleteAPICasesFromStore(t *testing.T) {
 	}
 	items := payload["items"].([]any)
 	item := items[0].(map[string]any)
-	if item["id"] != "case.beta" || item["reason"] != "not-run" || !strings.Contains(item["suggestedCommand"].(string), "profiles/sample/cases/case.beta.json") {
+	if item["id"] != "case.beta" || item["reason"] != "not-run" || !strings.Contains(item["suggestedCommand"].(string), "cases/case.beta.json") {
 		t.Fatalf("incomplete case item = %#v", item)
 	}
 }
@@ -3314,6 +3732,100 @@ func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	}
 	if response["body"] != `{"ok":true}` {
 		t.Fatalf("case evidence response body = %#v", response)
+	}
+}
+
+func TestServerExposesFailedCaseRunEvidenceByCaseRunID(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	started := time.Date(2026, 5, 16, 8, 0, 0, 0, time.UTC)
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:           "run.alpha",
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusFailed,
+		EvidenceRoot: filepath.Join(t.TempDir(), "evidence"),
+		SummaryJSON:  `{"steps":[{"stepId":"step.alpha","caseId":"case.alpha"}]}`,
+		CreatedAt:    started,
+		UpdatedAt:    started,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   "case-run.alpha",
+		RunID:                "run.alpha",
+		CaseID:               "case.alpha",
+		Status:               store.StatusFailed,
+		RequestSummaryJSON:   `{"method":"POST","path":"/alpha","stepId":"step.alpha"}`,
+		AssertionSummaryJSON: `{"status":"failed","errorCount":1}`,
+		StartedAt:            started,
+		FinishedAt:           started.Add(300 * time.Millisecond),
+		CreatedAt:            started,
+	})
+	if err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+	evidenceDir := t.TempDir()
+	logPath := filepath.Join(evidenceDir, "runtime-logs.json")
+	if err := os.WriteFile(logPath, []byte(`{"systems":[{"id":"service.alpha","name":"Service Alpha","found":true,"coreLogs":["request.alpha failed in worker"]}]}`), 0o644); err != nil {
+		t.Fatalf("write runtime logs: %v", err)
+	}
+	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        "run.alpha.logs",
+		RunID:     "run.alpha",
+		CaseRunID: "case-run.alpha",
+		Kind:      "runtime_logs",
+		URI:       logPath,
+		MediaType: "application/json",
+		Summary:   `{"caseId":"case.alpha","stepId":"step.alpha","systems":1}`,
+		CreatedAt: started,
+	})
+	if err != nil {
+		t.Fatalf("record runtime logs: %v", err)
+	}
+	_, err = s.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            "topology.alpha",
+		WorkflowRunID: "run.alpha",
+		WorkflowID:    "workflow.alpha",
+		StepID:        "step.alpha",
+		CaseID:        "case.alpha",
+		RequestID:     "request.alpha",
+		TraceID:       "trace.alpha",
+		Status:        "complete",
+		TopologyJSON:  `{"status":"complete","confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.entry","service.worker"]}`,
+		TextTopology:  "service.entry -> service.worker",
+	})
+	if err != nil {
+		t.Fatalf("save topology: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case-run/evidence?caseRunId=case-run.alpha", http.StatusOK)
+	evidence := payload["evidence"].(map[string]any)
+	summary := evidence["summary"].(map[string]any)
+	if summary["case_run_id"] != "case-run.alpha" || summary["run_id"] != "run.alpha" || summary["status"] != store.StatusFailed {
+		t.Fatalf("failed case evidence summary = %#v", summary)
+	}
+	topology := evidence["topology"].(map[string]any)
+	if topology["traceId"] != "trace.alpha" || len(topology["confirmedEdges"].([]any)) != 1 {
+		t.Fatalf("failed case evidence topology = %#v", topology)
+	}
+	logs := evidence["logs"].([]any)
+	if len(logs) != 1 {
+		t.Fatalf("failed case evidence logs = %#v", evidence)
+	}
+	log := logs[0].(map[string]any)
+	systems := log["systems"].([]any)
+	if log["kind"] != "runtime_logs" || len(systems) != 1 || systems[0].(map[string]any)["found"] != true {
+		t.Fatalf("failed case evidence log details = %#v", logs)
 	}
 }
 
@@ -3750,7 +4262,7 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 				ID:             "case.alpha",
 				DisplayName:    "Case Alpha",
 				NodeID:         "node.alpha",
-				CasePath:       "profiles/sample/cases/case.alpha.json",
+				CasePath:       "cases/case.alpha.json",
 				BaseURL:        "http://127.0.0.1:18080",
 				EvidenceDir:    ".runtime/cases",
 				TimeoutSeconds: 30,
@@ -3797,7 +4309,7 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 	if len(payload.Cases) != 1 || payload.Cases[0].ID != "case.alpha" || payload.Cases[0].Operation != "Node Alpha" {
 		t.Fatalf("api case capabilities = %#v", payload.Cases)
 	}
-	if payload.Cases[0].CasePath != "profiles/sample/cases/case.alpha.json" || payload.Cases[0].BaseURL == "" || payload.Cases[0].EvidenceDir != ".runtime/cases" || payload.Cases[0].TimeoutSeconds != 30 || payload.Cases[0].DefaultOverrides["itemId"] != "item-001" {
+	if payload.Cases[0].CasePath != "cases/case.alpha.json" || payload.Cases[0].BaseURL == "" || payload.Cases[0].EvidenceDir != ".runtime/cases" || payload.Cases[0].TimeoutSeconds != 30 || payload.Cases[0].DefaultOverrides["itemId"] != "item-001" {
 		t.Fatalf("api case run config = %#v", payload.Cases[0])
 	}
 	if len(payload.Cases[0].Graph.Nodes) != 1 || payload.Cases[0].Graph.Nodes[0].ID != "service.alpha" || payload.Cases[0].Graph.Nodes[0].Role != "http" {
@@ -3826,7 +4338,7 @@ func TestServerExposesAPICaseCapabilitiesFromStoreCatalog(t *testing.T) {
 				ID:                   "case.alpha",
 				DisplayName:          "Case Alpha",
 				NodeID:               "node.alpha",
-				CasePath:             "profiles/sample/cases/case.alpha.json",
+				CasePath:             "cases/case.alpha.json",
 				BaseURL:              "http://127.0.0.1:18080",
 				EvidenceDir:          ".runtime/cases",
 				TimeoutSeconds:       30,
@@ -3847,7 +4359,7 @@ func TestServerExposesAPICaseCapabilitiesFromStoreCatalog(t *testing.T) {
 		t.Fatalf("api case capabilities from store = %#v", payload)
 	}
 	item := cases[0].(map[string]any)
-	if item["id"] != "case.alpha" || item["casePath"] != "profiles/sample/cases/case.alpha.json" || item["baseUrl"] != "http://127.0.0.1:18080" || item["evidenceDir"] != ".runtime/cases" || item["timeoutSeconds"] != float64(30) {
+	if item["id"] != "case.alpha" || item["casePath"] != "cases/case.alpha.json" || item["baseUrl"] != "http://127.0.0.1:18080" || item["evidenceDir"] != ".runtime/cases" || item["timeoutSeconds"] != float64(30) {
 		t.Fatalf("api case store run config = %#v", item)
 	}
 	overrides := item["defaultOverrides"].(map[string]any)
@@ -4035,13 +4547,501 @@ func TestServerRunsAPICaseAndIndexesStoreRecords(t *testing.T) {
 	}
 }
 
+func TestServerStartsAsyncAPICaseBatchRunForNodes(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/items":
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode target request: %v", err)
+			}
+			if request["id"] != "item-override" {
+				http.Error(w, "missing override", http.StatusUnprocessableEntity)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"created"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/items/item-override":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"found"}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer target.Close()
+
+	dir := t.TempDir()
+	firstCasePath := filepath.Join(dir, "case-alpha.json")
+	if err := os.WriteFile(firstCasePath, []byte(`{
+  "id": "case.alpha",
+  "title": "Create Item",
+  "request": {
+    "method": "POST",
+    "path": "/v1/items",
+    "headers": {"Content-Type": "application/json"},
+    "body": {"id": "item-001"}
+  },
+  "assertions": {
+    "expectedStatusCodes": [200],
+    "responseContains": ["created"]
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write first api case: %v", err)
+	}
+	secondCasePath := filepath.Join(dir, "case-beta.json")
+	if err := os.WriteFile(secondCasePath, []byte(`{
+  "id": "case.beta",
+  "title": "Find Item",
+  "request": {
+    "method": "GET",
+    "path": "/v1/items/item-override"
+  },
+  "assertions": {
+    "expectedStatusCodes": [200],
+    "responseContains": ["found"]
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write second api case: %v", err)
+	}
+
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+			{ID: "node.beta", DisplayName: "Node Beta"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", CasePath: firstCasePath, BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence")},
+			{ID: "case.beta", DisplayName: "Case Beta", NodeID: "node.beta", CasePath: secondCasePath, BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence")},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	body := `{"requestId":"change-001","nodeIds":["node.alpha","node.beta"],"overrides":{"id":"item-override"}}`
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		OK            bool   `json:"ok"`
+		BatchRunID    string `json:"batchRunId"`
+		RequestID     string `json:"requestId"`
+		Status        string `json:"status"`
+		ReportURL     string `json:"reportUrl"`
+		HTMLReportURL string `json:"htmlReportUrl"`
+		Total         int    `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode api case batch run response: %v", err)
+	}
+	if !created.OK || created.BatchRunID == "" || created.RequestID != "change-001" || created.ReportURL == "" || created.HTMLReportURL == "" || created.Total != 2 {
+		t.Fatalf("api case batch run response = %#v", created)
+	}
+
+	var report struct {
+		OK             bool   `json:"ok"`
+		Status         string `json:"status"`
+		HTMLReportPath string `json:"htmlReportPath"`
+		HTMLReportURL  string `json:"htmlReportUrl"`
+		Completed      int    `json:"completed"`
+		Passed         int    `json:"passed"`
+		Failed         int    `json:"failed"`
+		Cases          []struct {
+			CaseID    string `json:"caseId"`
+			CaseRunID string `json:"caseRunId"`
+			NodeID    string `json:"nodeId"`
+			RunID     string `json:"runId"`
+			Status    string `json:"status"`
+			ViewerURL string `json:"viewerUrl"`
+			DetailURL string `json:"detailUrl"`
+			ElapsedMs int64  `json:"elapsedMs"`
+		} `json:"cases"`
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		statusResp, err := http.Get(server.URL + created.ReportURL)
+		if err != nil {
+			t.Fatalf("get api case batch run report: %v", err)
+		}
+		if statusResp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(statusResp.Body)
+			statusResp.Body.Close()
+			t.Fatalf("api case batch report status = %d body=%s", statusResp.StatusCode, raw)
+		}
+		report = struct {
+			OK             bool   `json:"ok"`
+			Status         string `json:"status"`
+			HTMLReportPath string `json:"htmlReportPath"`
+			HTMLReportURL  string `json:"htmlReportUrl"`
+			Completed      int    `json:"completed"`
+			Passed         int    `json:"passed"`
+			Failed         int    `json:"failed"`
+			Cases          []struct {
+				CaseID    string `json:"caseId"`
+				CaseRunID string `json:"caseRunId"`
+				NodeID    string `json:"nodeId"`
+				RunID     string `json:"runId"`
+				Status    string `json:"status"`
+				ViewerURL string `json:"viewerUrl"`
+				DetailURL string `json:"detailUrl"`
+				ElapsedMs int64  `json:"elapsedMs"`
+			} `json:"cases"`
+		}{}
+		if err := json.NewDecoder(statusResp.Body).Decode(&report); err != nil {
+			statusResp.Body.Close()
+			t.Fatalf("decode api case batch report: %v", err)
+		}
+		statusResp.Body.Close()
+		if report.Status == store.StatusPassed || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !report.OK || report.Status != store.StatusPassed || report.Completed != 2 || report.Passed != 2 || report.Failed != 0 || len(report.Cases) != 2 {
+		t.Fatalf("api case batch report = %#v", report)
+	}
+	if report.HTMLReportPath == "" || !strings.HasPrefix(report.HTMLReportPath, filepath.Join(dir, "evidence")) || report.HTMLReportURL != created.HTMLReportURL {
+		t.Fatalf("api case batch html report fields = %#v", report)
+	}
+	htmlResp, err := http.Get(server.URL + report.HTMLReportURL)
+	if err != nil {
+		t.Fatalf("get api case batch html report: %v", err)
+	}
+	defer htmlResp.Body.Close()
+	if htmlResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(htmlResp.Body)
+		t.Fatalf("api case batch html status = %d body=%s", htmlResp.StatusCode, raw)
+	}
+	htmlRaw, err := io.ReadAll(htmlResp.Body)
+	if err != nil {
+		t.Fatalf("read api case batch html report: %v", err)
+	}
+	html := string(htmlRaw)
+	if !strings.Contains(html, "API Case Batch Report") || !strings.Contains(html, "change-001") || !strings.Contains(html, "case.alpha") || !strings.Contains(html, "case.beta") {
+		t.Fatalf("api case batch html report = %s", html)
+	}
+	if _, err := os.Stat(report.HTMLReportPath); err != nil {
+		t.Fatalf("stat api case batch html report: %v", err)
+	}
+	for _, item := range report.Cases {
+		if item.RunID == "" || item.CaseRunID != item.RunID+".case" || item.ViewerURL == "" || item.DetailURL == "" || item.Status != store.StatusPassed || item.ElapsedMs < 0 {
+			t.Fatalf("api case batch case report = %#v", item)
+		}
+	}
+
+	runs, err := s.ListRuns(ctx)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("stored runs = %#v", runs)
+	}
+}
+
+func TestServerStartsAsyncAPICaseBatchRunForAllNodeCases(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/node-cases/") {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer target.Close()
+
+	dir := t.TempDir()
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Create Item", Method: "GET", Path: "/v1/node-cases"},
+		},
+	}
+	for i := 1; i <= 3; i++ {
+		caseID := fmt.Sprintf("case.alpha.%02d", i)
+		casePath := filepath.Join(dir, caseID+".json")
+		if err := os.WriteFile(casePath, []byte(fmt.Sprintf(`{
+  "id": %q,
+  "title": "Node Case",
+  "request": {"method": "GET", "path": "/v1/node-cases/%02d"},
+  "assertions": {"expectedStatusCodes": [200], "responseContains": ["ok"]}
+}`, caseID, i)), 0o644); err != nil {
+			t.Fatalf("write api case: %v", err)
+		}
+		bundle.APICases = append(bundle.APICases, profile.APICase{
+			ID:          caseID,
+			DisplayName: fmt.Sprintf("Node Case %02d", i),
+			NodeID:      "node.alpha",
+			Scenario:    fmt.Sprintf("scenario-%02d", i),
+			CasePath:    casePath,
+			BaseURL:     target.URL,
+			EvidenceDir: filepath.Join(dir, "evidence"),
+		})
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	body := `{"requestId":"node-all-001","nodeIds":["node.alpha"]}`
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		ReportURL     string `json:"reportUrl"`
+		HTMLReportURL string `json:"htmlReportUrl"`
+		Total         int    `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if created.Total != 3 {
+		t.Fatalf("batch total = %d, want 3", created.Total)
+	}
+
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if !report.OK || report.Status != store.StatusPassed || report.Completed != 3 || report.Passed != 3 || len(report.Cases) != 3 {
+		t.Fatalf("node batch report = %#v", report)
+	}
+	if len(report.Nodes) != 1 || report.Nodes[0].DisplayName != "Node Alpha" || report.Nodes[0].Operation != "Create Item" || report.Nodes[0].Method != "GET" || report.Nodes[0].Path != "/v1/node-cases" {
+		t.Fatalf("node batch report nodes = %#v", report.Nodes)
+	}
+	if report.Cases[0].DisplayName != "Node Case 01" || report.Cases[0].Scenario != "scenario-01" || report.Cases[0].NodeDisplayName != "Node Alpha" || report.Cases[0].Operation != "Create Item" {
+		t.Fatalf("node batch report case metadata = %#v", report.Cases[0])
+	}
+	htmlResp, err := http.Get(server.URL + created.HTMLReportURL)
+	if err != nil {
+		t.Fatalf("get node batch html report: %v", err)
+	}
+	defer htmlResp.Body.Close()
+	htmlRaw, err := io.ReadAll(htmlResp.Body)
+	if err != nil {
+		t.Fatalf("read node batch html report: %v", err)
+	}
+	html := string(htmlRaw)
+	for _, want := range []string{"Node Alpha", "Create Item", "GET", "/v1/node-cases", "Node Case 01", "scenario-01"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("node batch html missing %q: %s", want, html)
+		}
+	}
+}
+
+func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/workflow-steps/") {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer target.Close()
+
+	dir := t.TempDir()
+	bundle := profile.Bundle{
+		ID: "sample",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.ten", DisplayName: "Ten Step Workflow"},
+		},
+	}
+	for i := 1; i <= 10; i++ {
+		stepID := fmt.Sprintf("step-%02d", i)
+		nodeID := fmt.Sprintf("node.step.%02d", i)
+		caseID := fmt.Sprintf("case.step.%02d", i)
+		casePath := filepath.Join(dir, caseID+".json")
+		if err := os.WriteFile(casePath, []byte(fmt.Sprintf(`{
+  "id": %q,
+  "title": "Workflow Step",
+  "request": {"method": "GET", "path": "/v1/workflow-steps/%02d"},
+  "assertions": {"expectedStatusCodes": [200], "responseContains": ["ok"]}
+}`, caseID, i)), 0o644); err != nil {
+			t.Fatalf("write api case: %v", err)
+		}
+		bundle.InterfaceNodes = append(bundle.InterfaceNodes, profile.InterfaceNode{ID: nodeID, DisplayName: nodeID})
+		bundle.APICases = append(bundle.APICases, profile.APICase{
+			ID:          caseID,
+			DisplayName: caseID,
+			NodeID:      nodeID,
+			CasePath:    casePath,
+			BaseURL:     target.URL,
+			EvidenceDir: filepath.Join(dir, "evidence"),
+		})
+		bundle.WorkflowBindings = append(bundle.WorkflowBindings, profile.WorkflowBinding{
+			WorkflowID: "workflow.ten",
+			StepID:     stepID,
+			NodeID:     nodeID,
+			CaseID:     caseID,
+			Required:   true,
+			SortOrder:  i,
+		})
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	body := `{"requestId":"workflow-001","workflowId":"workflow.ten"}`
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		ReportURL  string `json:"reportUrl"`
+		WorkflowID string `json:"workflowId"`
+		Total      int    `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if created.WorkflowID != "workflow.ten" || created.Total != 10 {
+		t.Fatalf("workflow batch response = %#v", created)
+	}
+
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if !report.OK || report.Status != store.StatusPassed || report.WorkflowID != "workflow.ten" || report.Completed != 10 || report.Passed != 10 || len(report.Cases) != 10 {
+		t.Fatalf("workflow batch report = %#v", report)
+	}
+	if report.Cases[0].StepID != "step-01" || report.Cases[9].StepID != "step-10" {
+		t.Fatalf("workflow step order = %#v", report.Cases)
+	}
+	runs, err := s.ListRuns(ctx)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 10 {
+		t.Fatalf("stored runs = %#v", runs)
+	}
+}
+
+type apiCaseBatchReportForTest struct {
+	OK         bool   `json:"ok"`
+	Status     string `json:"status"`
+	WorkflowID string `json:"workflowId"`
+	Completed  int    `json:"completed"`
+	Passed     int    `json:"passed"`
+	Failed     int    `json:"failed"`
+	Nodes      []struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"displayName"`
+		Operation   string `json:"operation"`
+		Method      string `json:"method"`
+		Path        string `json:"path"`
+	} `json:"nodes"`
+	Cases []struct {
+		CaseID          string `json:"caseId"`
+		DisplayName     string `json:"displayName"`
+		Scenario        string `json:"scenario"`
+		NodeID          string `json:"nodeId"`
+		NodeDisplayName string `json:"nodeDisplayName"`
+		Operation       string `json:"operation"`
+		Method          string `json:"method"`
+		Path            string `json:"path"`
+		StepID          string `json:"stepId"`
+		Status          string `json:"status"`
+		RunID           string `json:"runId"`
+	} `json:"cases"`
+}
+
+func waitAPICaseBatchReport(t *testing.T, reportURL string) apiCaseBatchReportForTest {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp, err := http.Get(reportURL)
+		if err != nil {
+			t.Fatalf("get batch report: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("batch report status = %d body=%s", resp.StatusCode, raw)
+		}
+		var report apiCaseBatchReportForTest
+		if err := json.NewDecoder(resp.Body).Decode(&report); err != nil {
+			resp.Body.Close()
+			t.Fatalf("decode batch report: %v", err)
+		}
+		resp.Body.Close()
+		if report.Status != store.StatusRunning || time.Now().After(deadline) {
+			return report
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestServerRejectsAsyncAPICaseBatchWithoutNodes(t *testing.T) {
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, nil))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(`{"requestId":"change-001"}`))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+}
+
 func loadEmptyProfile(t *testing.T) profile.Bundle {
 	t.Helper()
-	bundle, err := profile.Load(filepath.Join("..", "..", "profiles", "empty"))
-	if err != nil {
-		t.Fatalf("load empty profile: %v", err)
+	return profile.EmptyBundle()
+}
+
+func writeEmptyProfileBundle(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir empty profile: %v", err)
 	}
-	return bundle
+	raw := `{
+  "id": "empty",
+  "displayName": "Empty Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`
+	if err := os.WriteFile(filepath.Join(dir, "profile.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write empty profile: %v", err)
+	}
+	return dir
 }
 
 func decodeJSONResponse(t *testing.T, url string, wantStatus int) map[string]any {
@@ -4113,6 +5113,12 @@ func writeAuditSampleProfile(t *testing.T) string {
 func writeWorkbenchSampleProfile(t *testing.T) string {
 	t.Helper()
 	profileDir := filepath.Join(t.TempDir(), "profile")
+	writeWorkbenchSampleProfileAt(t, profileDir)
+	return profileDir
+}
+
+func writeWorkbenchSampleProfileAt(t *testing.T, profileDir string) {
+	t.Helper()
 	if err := os.MkdirAll(profileDir, 0o755); err != nil {
 		t.Fatalf("create profile dir: %v", err)
 	}
@@ -4131,7 +5137,6 @@ func writeWorkbenchSampleProfile(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.json"), []byte(raw), 0o644); err != nil {
 		t.Fatalf("write workbench sample profile: %v", err)
 	}
-	return profileDir
 }
 
 type failingListRunsStore struct {
@@ -4203,6 +5208,35 @@ func mustJSON(t *testing.T, value any) string {
 		t.Fatalf("marshal value: %v", err)
 	}
 	return string(raw)
+}
+
+func mustParseTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatalf("parse time %q: %v", value, err)
+	}
+	return parsed
+}
+
+func hasJSONCheck(items []any, name string) bool {
+	for _, item := range items {
+		check, ok := item.(map[string]any)
+		if ok && check["name"] == name && check["ok"] == true {
+			return true
+		}
+	}
+	return false
+}
+
+func hasJSONFailedCheck(items []any, name string) bool {
+	for _, item := range items {
+		check, ok := item.(map[string]any)
+		if ok && check["name"] == name && check["ok"] == false {
+			return true
+		}
+	}
+	return false
 }
 
 func sqliteCountRows(t *testing.T, dbPath string, table string) int {

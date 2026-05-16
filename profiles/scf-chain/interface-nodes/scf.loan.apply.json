@@ -1,6 +1,0 @@
-{
-  "id": "scf.loan.apply",
-  "displayName": "放款申请",
-  "serviceId": "retail-gateway",
-  "timeoutMs": 2000
-}

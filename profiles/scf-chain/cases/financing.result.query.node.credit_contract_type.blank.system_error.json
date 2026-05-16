@@ -1,6 +1,0 @@
-{
-  "id": "financing.result.query.node.credit_contract_type.blank.system_error",
-  "displayName": "融资结果查询-credit_contract_type为空当前返回系统异常",
-  "nodeId": "scf.financing.result.query",
-  "requiredForAdmission": false
-}

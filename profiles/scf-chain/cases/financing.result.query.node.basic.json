@@ -1,6 +1,0 @@
-{
-  "id": "financing.result.query.node.basic",
-  "displayName": "融资结果查询-基础链路",
-  "nodeId": "scf.financing.result.query",
-  "requiredForAdmission": true
-}

@@ -1,5 +1,0 @@
-{
-  "id": "workflow.merchant_financing_to_loan_query",
-  "displayName": "商户视角：融资申请到放款结果查询",
-  "description": "纯接口链路，不依赖本地数据库。融资申请后轮询融资结果到审批通过，再发起放款并轮询放款结果到成功。"
-}

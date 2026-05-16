@@ -1,6 +1,0 @@
-{
-  "id": "dep.callback.financing.apply.llt.approved.apply.submitted",
-  "caseId": "callback.financing.apply.llt.approved",
-  "fixtureId": "fixture.financing.apply.submitted",
-  "mappingsJson": "[{\"from\":\"$.exports.financing_order_id\",\"to\":\"$.request.financing_order_id\"}]"
-}

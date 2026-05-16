@@ -1,6 +1,0 @@
-{
-  "id": "dep.financing.result.query.basic.apply.approved",
-  "caseId": "financing.result.query.node.basic",
-  "fixtureId": "fixture.financing.apply.approved",
-  "mappingsJson": "[{\"from\":\"$.exports.order_id\",\"to\":\"$.request.order_id\"},{\"from\":\"$.exports.financing_order_id\",\"to\":\"$.request.financing_order_id\"},{\"from\":\"$.exports.mer_trans_no\",\"to\":\"$.request.mer_trans_no\"}]"
-}

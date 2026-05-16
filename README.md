@@ -4,8 +4,8 @@ Open Test Sandbox is a local-first integration test workbench for
 template-driven Workflows, API Cases, fixtures, and Evidence.
 
 The project is intentionally small at the start. The first milestone is a
-neutral core that can load profiles, run tests, and record reproducible
-Evidence without baking any one business domain into the product.
+neutral core that can load external profile bundles, run tests, and record
+reproducible Evidence without baking any one business domain into the product.
 
 ## Quick Start
 
@@ -22,11 +22,36 @@ tmpdir=$(mktemp -d)
 ./bin/otsandbox.sh store upgrade --store-url "$tmpdir/store.sqlite"
 ```
 
-Inspect the empty profile bundle:
+Publish an external profile bundle into the local Store:
 
 ```sh
-./bin/otsandbox.sh profile inspect --profile profiles/empty
+PROFILE_DIR=$(mktemp -d)/sample-profile
+./bin/otsandbox.sh profile init --output "$PROFILE_DIR" --id sample
+./bin/otsandbox.sh profile install --from "$PROFILE_DIR"
+./bin/otsandbox.sh profile list
+./bin/otsandbox.sh profile pack --profile sample --output "$tmpdir/sample-profile.tar.gz"
+./bin/otsandbox.sh profile verify --profile sample --store-url "$tmpdir/store.sqlite"
+./bin/otsandbox.sh serve --profile sample --store-url "$tmpdir/store.sqlite"
 ```
+
+When a profile has runnable API Cases and the local Store already contains run
+records, add `--require-case-runs` to make verification fail unless each case's
+latest run passed. Add `--require-workflow-runs` to require each declared
+Workflow's latest Store run to have passed as well.
+
+The core repository intentionally does not contain bundled profiles. Keep
+business or team-specific bundles in a separate location or repository, then
+install them into the local profile home, publish them through `profile verify`,
+`config publish`, or the Control plane import API, so the UI reads the generated
+Store/read-model.
+Profile installation copies source profile assets only; local runtime state
+such as `.runtime/`, SQLite/database files, logs, and VCS directories is skipped.
+Use `profile pack` to create the same clean distributable archive from either a
+profile path or an installed profile id. `profile install --from bundle.tar.gz`
+installs that archive into another profile home with the same filtering rules;
+`profile audit`, `profile import`, `profile verify`, `config publish`, and the
+matching Control plane APIs can also accept the archive path and will install it
+before auditing or publishing Store/read-model data.
 
 Run an API Case and write an Evidence bundle:
 
@@ -50,7 +75,7 @@ Store backend support is documented in
 - Keep the default developer experience local and lightweight.
 - Use SQLite as the default local Store.
 - Add PostgreSQL as an optional team or hosted Store.
-- Treat profile bundles as reviewable source assets.
+- Treat profile bundles as reviewable source assets outside this core repo.
 - Treat runtime databases and Evidence files as generated state.
 
 ## Current Status
@@ -61,6 +86,8 @@ The project now has:
 - a SQLite Store with schema upgrades, contract tests, Evidence queries, baseline
   gates, and backend URL validation;
 - a profile loader for manifest and split-asset bundles;
+- external profile bundle initialization, local profile-home installation,
+  audit-gated publishing, Store/read-model publishing, and CLI verification;
 - API Case execution with reproducible Evidence and Store indexes;
 - request template rendering from profile-owned fixture data;
 - workflow planning from profile-owned bindings;

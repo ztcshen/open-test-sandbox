@@ -1,6 +1,0 @@
-{
-  "id": "dep.repay.apply.batch_no.too_long.extra.repay.trial.ready",
-  "caseId": "repay.apply.batch_no.too_long.extra.invalid",
-  "fixtureId": "fixture.repay.trial.ready",
-  "mappingsJson": "[{\"from\":\"$.exports.financing_order_id\",\"to\":\"$.request.financing_order_id\"},{\"from\":\"$.exports.total_amount\",\"to\":\"$.request.total_amount\"},{\"from\":\"$.exports.repay_amount\",\"to\":\"$.request.repay_amount\"},{\"from\":\"$.exports.repay_interest\",\"to\":\"$.request.repay_interest\"},{\"from\":\"$.exports.repay_penalty\",\"to\":\"$.request.repay_penalty\"}]"
-}

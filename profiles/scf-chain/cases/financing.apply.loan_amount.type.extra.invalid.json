@@ -1,6 +1,0 @@
-{
-  "id": "financing.apply.loan_amount.type.extra.invalid",
-  "displayName": "融资申请-loan_amount类型错误候选",
-  "nodeId": "scf.financing.apply",
-  "requiredForAdmission": false
-}

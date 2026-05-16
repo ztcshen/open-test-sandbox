@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.credit_contract_type.too_long.invalid",
-  "displayName": "放款申请-credit_contract_type超长",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

@@ -1,6 +1,0 @@
-{
-  "id": "financing.trial.loan_amount.non_numeric.invalid",
-  "displayName": "融资试算-loan_amount非数字",
-  "nodeId": "scf.financing.trial",
-  "requiredForAdmission": false
-}

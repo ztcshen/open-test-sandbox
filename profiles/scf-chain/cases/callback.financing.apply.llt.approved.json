@@ -1,5 +1,0 @@
-{
-  "id": "callback.financing.apply.llt.approved",
-  "displayName": "粒粒通回调-融资审批通过(account-channel)",
-  "nodeId": "scf.financing.apply.llt.callback"
-}

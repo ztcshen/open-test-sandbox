@@ -1,8 +1,0 @@
-{
-  "workflowId": "sandbox.financing_to_repay_result_query",
-  "stepId": "loan-query",
-  "nodeId": "scf.loan.result.query",
-  "caseId": "loan.result.query.by_payout_id",
-  "required": true,
-  "sortOrder": 7
-}

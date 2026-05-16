@@ -31,6 +31,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 type Options struct {
 	Runtime         store.Store
 	TraceGraphQLURL string
+	ProfileHome     string
 }
 
 func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
@@ -39,12 +40,34 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 	profiles := newProfileState(bundle)
 	runtime := options.Runtime
 	collector := traceCollector{GraphQLURL: options.TraceGraphQLURL}
+	caseBatchRunner := newAPICaseBatchRunner()
 	mux.HandleFunc("/api/profile/import", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleProfileImport(w, r, runtime, profiles.Replace)
+		handleProfileImport(w, r, runtime, profiles.Replace, options.ProfileHome)
+	})
+	mux.HandleFunc("/api/profile/verify", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileVerify(w, r, runtime, profiles.Replace, options.ProfileHome)
+	})
+	mux.HandleFunc("/api/profile/install", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileInstall(w, r, options.ProfileHome)
+	})
+	mux.HandleFunc("/api/profile/installed", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleInstalledProfiles(w, r, options.ProfileHome)
 	})
 	mux.HandleFunc("/api/profile", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -179,6 +202,13 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 		}
 		handleCaseEvidence(w, r, runtime)
 	})
+	mux.HandleFunc("/api/case-run/evidence", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleCaseRunEvidence(w, r, runtime)
+	})
 	mux.HandleFunc("/api/case/timing", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -218,6 +248,20 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 			return
 		}
 		handleAPICaseRun(w, r, profiles.Current(), runtime)
+	})
+	mux.HandleFunc("/api/cases/batch-runs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleAPICaseBatchRunStart(w, r, profiles.Current(), runtime, caseBatchRunner)
+	})
+	mux.HandleFunc("/api/cases/batch-runs/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleAPICaseBatchRunReport(w, r, caseBatchRunner)
 	})
 	mux.HandleFunc("/api/test-kit/run", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -358,7 +402,6 @@ func (s *profileState) Replace(bundle profile.Bundle) {
 
 var staticFileNames = []string{
 	"index.html",
-	"agent-test.html",
 	"agent-run.html",
 	"api-cases.html",
 	"case-runs.html",

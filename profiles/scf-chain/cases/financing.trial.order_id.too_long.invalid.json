@@ -1,6 +1,0 @@
-{
-  "id": "financing.trial.order_id.too_long.invalid",
-  "displayName": "融资试算-order_id超长",
-  "nodeId": "scf.financing.trial",
-  "requiredForAdmission": false
-}

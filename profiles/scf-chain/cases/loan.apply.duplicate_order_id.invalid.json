@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.duplicate_order_id.invalid",
-  "displayName": "放款申请-order_id重复参数校验",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

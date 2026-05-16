@@ -1,5 +1,0 @@
-{
-  "id": "financing.trial.client_ip.blank.accepted",
-  "displayName": "融资试算-client_ip为空仍可试算",
-  "nodeId": "scf.financing.trial"
-}

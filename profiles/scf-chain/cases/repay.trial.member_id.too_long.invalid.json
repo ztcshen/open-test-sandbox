@@ -1,6 +1,0 @@
-{
-  "id": "repay.trial.member_id.too_long.invalid",
-  "displayName": "还款试算-member_id超长",
-  "nodeId": "scf.repay.trial",
-  "requiredForAdmission": false
-}

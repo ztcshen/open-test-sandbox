@@ -1,6 +1,0 @@
-{
-  "id": "callback.loan.apply.llt.payout_id.blank.invalid",
-  "displayName": "放款结果回调-action非法",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "requiredForAdmission": false
-}

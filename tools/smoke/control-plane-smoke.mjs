@@ -102,8 +102,90 @@ async function checkPage(browser, baseURL, pageSpec) {
     if (text.length < 20) {
       throw new Error(`${pageSpec.path} rendered too little text: ${JSON.stringify(text)}`);
     }
+    for (const presentText of pageSpec.presentText || []) {
+      if (!text.includes(presentText)) {
+        throw new Error(`${pageSpec.path} missing expected text: ${presentText}`);
+      }
+    }
+    for (const absentText of pageSpec.absentText || []) {
+      if (text.includes(absentText)) {
+        throw new Error(`${pageSpec.path} still renders removed text: ${absentText}`);
+      }
+    }
+    for (const absentHref of pageSpec.absentHrefs || []) {
+      const count = await page.locator(`a[href*="${absentHref}"]`).count();
+      if (count > 0) {
+        throw new Error(`${pageSpec.path} still links to removed href: ${absentHref}`);
+      }
+    }
     if (errors.length > 0) {
       throw new Error(`${pageSpec.path} browser errors:\n${errors.join("\n")}`);
+    }
+  } finally {
+    await page.close();
+  }
+}
+
+async function checkWorkbenchVerify(browser, baseURL, profileDir) {
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  try {
+    const response = await page.goto(`${baseURL}/index.html`, { waitUntil: "networkidle" });
+    if (!response?.ok()) {
+      throw new Error(`/index.html returned ${response?.status()}`);
+    }
+    await page.locator("input[type='text']").first().fill(profileDir);
+    await page.getByRole("button", { name: "验收并发布" }).click();
+    await page.getByText("all passed").waitFor();
+    await page.getByText("profile-index").waitFor();
+    await page.getByText("case runs optional").waitFor();
+    await page.getByText("workflow runs optional").waitFor();
+    await page.getByLabel("要求用例已通过").check();
+    await page.getByRole("button", { name: "验收并发布" }).click();
+    await page.getByText("1 failed").waitFor();
+    await page.getByText("case runs required").waitFor();
+    await page.getByText("api-case-run:case.alpha", { exact: true }).waitFor();
+    const unexpectedErrors = errors.filter((item) => !item.includes("400 (Bad Request)"));
+    if (unexpectedErrors.length > 0) {
+      throw new Error(`/index.html verify action browser errors:\n${unexpectedErrors.join("\n")}`);
+    }
+  } finally {
+    await page.close();
+  }
+}
+
+async function checkWorkbenchInvalidInstalledProfile(browser, baseURL, profileHome) {
+  const brokenDir = path.join(profileHome, "broken");
+  await mkdir(brokenDir, { recursive: true });
+  await writeFile(path.join(brokenDir, "profile.json"), `{"id":`);
+
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  try {
+    const response = await page.goto(`${baseURL}/index.html`, { waitUntil: "networkidle" });
+    if (!response?.ok()) {
+      throw new Error(`/index.html returned ${response?.status()}`);
+    }
+    await page.locator("select option").filter({ hasText: "broken · invalid" }).waitFor({ state: "attached" });
+    const invalidOption = await page.locator("select").evaluate((select) => {
+      const option = Array.from(select.options).find((item) => item.textContent.includes("broken · invalid"));
+      return option ? { disabled: option.disabled, text: option.textContent } : null;
+    });
+    if (!invalidOption?.disabled) {
+      throw new Error(`invalid installed profile option should be disabled: ${JSON.stringify(invalidOption)}`);
+    }
+    if (errors.length > 0) {
+      throw new Error(`/index.html invalid profile browser errors:\n${errors.join("\n")}`);
     }
   } finally {
     await page.close();
@@ -140,10 +222,11 @@ async function main() {
 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "otsandbox-smoke-"));
   const profileDir = await writeSmokeProfile(tempDir);
+  const profileHome = path.join(tempDir, "profile-home");
   const storePath = path.join(tempDir, "store.sqlite");
   const port = await freePort();
   const baseURL = `http://127.0.0.1:${port}`;
-  const server = spawn("go", ["run", "./cmd/otsandbox", "serve", "--profile", profileDir, "--store-url", storePath, "--host", "127.0.0.1", "--port", String(port)], {
+  const server = spawn("go", ["run", "./cmd/otsandbox", "serve", "--profile", profileDir, "--profile-home", profileHome, "--store-url", storePath, "--host", "127.0.0.1", "--port", String(port)], {
     cwd: rootDir,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
@@ -172,7 +255,7 @@ async function main() {
     const browser = await chromium.launch({ headless: true });
     try {
       const pages = [
-        { path: "/index.html", root: "#react-sandbox-workbench-root" },
+        { path: "/index.html", root: "#react-sandbox-workbench-root", presentText: ["安装到本地", "要求用例已通过", "要求工作流已通过", "验收并发布"], absentText: ["Agent Test Kit"], absentHrefs: ["agent-test.html"] },
         { path: "/dashboard.html", root: "#react-dashboard-root" },
         { path: "/workflows.html", root: "#react-workflows-root" },
         { path: "/workflow-detail.html?id=workflow.alpha", root: "#react-workflow-detail-root" },
@@ -180,10 +263,15 @@ async function main() {
         { path: "/workflow-blueprint-new.html", root: "#react-workflow-blueprint-demo-root" },
         { path: "/api-cases.html", root: "#react-api-cases-root" },
         { path: "/interface-nodes.html", root: "#react-interface-nodes-root" },
-        { path: "/agent-test.html", root: "#react-agent-test-root" },
       ];
       for (const page of pages) {
         await checkPage(browser, baseURL, page);
+      }
+      await checkWorkbenchVerify(browser, baseURL, profileDir);
+      await checkWorkbenchInvalidInstalledProfile(browser, baseURL, profileHome);
+      const removedPage = await fetch(`${baseURL}/agent-test.html`);
+      if (removedPage.status !== 404) {
+        throw new Error(`/agent-test.html returned ${removedPage.status}, want 404`);
       }
     } finally {
       await browser.close();

@@ -1,6 +1,0 @@
-{
-  "id": "loan.result.query.payout_id.not_exist.invalid",
-  "displayName": "放款结果查询-payout_id不存在",
-  "nodeId": "scf.loan.result.query",
-  "requiredForAdmission": false
-}

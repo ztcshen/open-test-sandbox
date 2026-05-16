@@ -1,6 +1,0 @@
-{
-  "id": "callback.loan.apply.llt.outer_business_no.blank.invalid",
-  "displayName": "放款结果回调-outer_business_no为空",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "requiredForAdmission": false
-}

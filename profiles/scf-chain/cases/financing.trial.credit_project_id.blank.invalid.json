@@ -1,6 +1,0 @@
-{
-  "id": "financing.trial.credit_project_id.blank.invalid",
-  "displayName": "融资试算-credit_project_id为空",
-  "nodeId": "scf.financing.trial",
-  "requiredForAdmission": false
-}

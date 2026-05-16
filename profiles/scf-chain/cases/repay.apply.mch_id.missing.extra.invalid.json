@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.mch_id.missing.extra.invalid",
-  "displayName": "还款申请-mch_id缺失候选",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

@@ -1,8 +1,0 @@
-{
-  "id": "tpl.callback.financing.apply.llt.standard",
-  "displayName": "融资结果回调标准请求",
-  "nodeId": "scf.financing.apply.llt.callback",
-  "method": "POST",
-  "path": "/__sandbox/llt/callback",
-  "templateJson": "{\"financing_order_id\":\"{{override:financing_order_id|1163295452351680}}\",\"approval_status\":2,\"action\":20001,\"member_id\":1000001,\"transaction_id\":\"{{serial:FACL}}\",\"receiver_public_key\":\"04ffc1d58f4669bedc0f5e3c45f74b52ee9a3cdc34fc1c541da6c124e44e72f7b9e5fbdf2167a2d3c9845401b2d91300b99ad05f252da0e1a78202a94381604b12\",\"sign_required\":false,\"expect_protocol_notice_center\":true}"
-}

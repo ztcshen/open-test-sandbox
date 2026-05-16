@@ -2,7 +2,7 @@
 
 Open Test Sandbox uses SQLite as the default local Store. The Store holds
 runtime indexes, run records, imported profile indexes, and baseline gate state;
-profile bundles and Evidence files remain file-first source artifacts.
+external profile bundles and Evidence files remain file-first source artifacts.
 
 ## Supported URLs
 
@@ -21,4 +21,4 @@ such as `postgres://...` as a local filename.
 
 PostgreSQL is reserved for a future team or hosted Store. Adding it should keep
 SQLite as the default and route backend-specific behavior behind the generic
-Store interface rather than changing profile bundle files.
+Store interface rather than changing external profile bundle files.

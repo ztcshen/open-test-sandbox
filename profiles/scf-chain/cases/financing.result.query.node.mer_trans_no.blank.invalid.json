@@ -1,6 +1,0 @@
-{
-  "id": "financing.result.query.node.mer_trans_no.blank.invalid",
-  "displayName": "融资结果查询-mer_trans_no为空",
-  "nodeId": "scf.financing.result.query",
-  "requiredForAdmission": false
-}

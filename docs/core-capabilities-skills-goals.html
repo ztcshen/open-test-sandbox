@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Test Sandbox Core Capabilities, Skills, and Goals</title>
+  <style>
+    :root {
+      --bg: #f7f4ed;
+      --paper: #fffdf8;
+      --surface: #ffffff;
+      --surface-soft: #f0eadf;
+      --ink: #22251f;
+      --muted: #687066;
+      --line: rgba(34, 37, 31, 0.14);
+      --line-strong: rgba(34, 37, 31, 0.22);
+      --blue: #1e3a5f;
+      --blue-soft: #e7eef6;
+      --gold: #b78221;
+      --gold-soft: #f7ead0;
+      --green: #0f766e;
+      --green-soft: #dff3ee;
+      --rose: #be123c;
+      --rose-soft: #f7dfe6;
+      --shadow: 0 22px 58px rgba(34, 37, 31, 0.1);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #151914;
+        --paper: #1c211b;
+        --surface: #222821;
+        --surface-soft: #171c16;
+        --ink: #f5f0e8;
+        --muted: #b7bdaf;
+        --line: rgba(245, 240, 232, 0.14);
+        --line-strong: rgba(245, 240, 232, 0.24);
+        --blue: #9fb9dc;
+        --blue-soft: rgba(159, 185, 220, 0.14);
+        --gold: #dfb75e;
+        --gold-soft: rgba(223, 183, 94, 0.14);
+        --green: #7ed8ca;
+        --green-soft: rgba(126, 216, 202, 0.13);
+        --rose: #f08ca0;
+        --rose-soft: rgba(240, 140, 160, 0.14);
+        --shadow: 0 22px 58px rgba(0, 0, 0, 0.34);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        linear-gradient(rgba(30, 58, 95, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(30, 58, 95, 0.045) 1px, transparent 1px),
+        radial-gradient(circle at 18% 0%, rgba(183, 130, 33, 0.17), transparent 34rem),
+        radial-gradient(circle at 88% 14%, rgba(15, 118, 110, 0.12), transparent 30rem),
+        var(--bg);
+      background-size: 30px 30px, 30px 30px, auto, auto, auto;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    code,
+    .mono,
+    .tag,
+    th {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .page {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 34px 22px 72px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.25fr 0.75fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .panel {
+      background: color-mix(in srgb, var(--paper) 94%, transparent);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-main {
+      position: relative;
+      overflow: hidden;
+      border-radius: 22px;
+      padding: 32px;
+    }
+
+    .hero-main:after {
+      content: "";
+      position: absolute;
+      right: -78px;
+      top: -92px;
+      width: 270px;
+      height: 270px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: radial-gradient(circle, var(--blue-soft), transparent 64%);
+    }
+
+    .eyebrow {
+      color: var(--gold);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      position: relative;
+      z-index: 1;
+      max-width: 820px;
+      margin: 12px 0 14px;
+      font-size: clamp(34px, 5vw, 64px);
+      line-height: 0.98;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      position: relative;
+      z-index: 1;
+      max-width: 900px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.7;
+    }
+
+    .hero-side {
+      display: grid;
+      gap: 12px;
+      border-radius: 22px;
+      padding: 18px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      padding: 16px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 30px;
+      line-height: 1;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 0 16px;
+      backdrop-filter: blur(10px);
+    }
+
+    .nav a {
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--paper);
+      padding: 8px 11px;
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    section {
+      margin: 28px 0;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 25px;
+      letter-spacing: 0;
+    }
+
+    .note {
+      max-width: 680px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .step {
+      position: relative;
+      min-height: 140px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+      padding: 15px;
+    }
+
+    .step:not(:last-child):after {
+      content: "";
+      position: absolute;
+      right: -13px;
+      top: 50%;
+      width: 13px;
+      height: 1px;
+      background: var(--line-strong);
+    }
+
+    .tag {
+      display: inline-flex;
+      margin-bottom: 11px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      padding: 6px 8px;
+      font-size: 11px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .step p,
+    .card p,
+    .skill-card p,
+    .goal-card p,
+    .rule p {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card,
+    .skill-card,
+    .goal-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      padding: 18px;
+    }
+
+    .kicker {
+      margin-bottom: 10px;
+      color: var(--gold);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .cmds {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 14px;
+    }
+
+    .cmds code,
+    .pill {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--ink);
+      padding: 6px 8px;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .skills {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .skill-card {
+      min-height: 190px;
+    }
+
+    .skill-card .number {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      margin-bottom: 12px;
+      border-radius: 9px;
+      background: var(--gold-soft);
+      color: var(--gold);
+      font-weight: 800;
+    }
+
+    .table-wrap {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 12px 13px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    th {
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 5px 7px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .ready {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .active {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .next {
+      background: var(--gold-soft);
+      color: var(--gold);
+    }
+
+    .risk {
+      background: var(--rose-soft);
+      color: var(--rose);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 16px;
+    }
+
+    .rule-stack,
+    .goals {
+      display: grid;
+      gap: 12px;
+    }
+
+    .rule {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      padding: 15px;
+    }
+
+    .rule strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .goal-card {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .goal-card .phase {
+      color: var(--blue);
+      font-weight: 800;
+    }
+
+    .footer {
+      margin-top: 30px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--paper);
+      padding: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    @media (max-width: 1080px) {
+      .hero,
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+
+      .pipeline {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .step:after {
+        display: none;
+      }
+
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .skills {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 680px) {
+      .page {
+        padding: 22px 14px 52px;
+      }
+
+      .hero-main {
+        padding: 24px;
+      }
+
+      .pipeline,
+      .grid,
+      .skills,
+      .goal-card {
+        grid-template-columns: 1fr;
+      }
+
+      th,
+      td {
+        padding: 10px 9px;
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="hero-main panel">
+        <div class="eyebrow">Open Test Sandbox Core</div>
+        <h1>核心能力、技能说明与迭代目标</h1>
+        <p class="lead">这是一份放在核心仓库里的可视化说明：帮助维护者、测试 agent 和接入团队快速理解后端能力边界、协作技能、质量守卫和下一阶段目标。核心保持通用、外部配置驱动、本地优先；具体团队内容只应进入外部配置包或本地 Store。</p>
+      </div>
+      <aside class="hero-side panel">
+        <div class="metric"><strong>Core</strong><span>CLI + Control plane + Store + Runner + Evidence + Reports</span></div>
+        <div class="metric"><strong>Local-first</strong><span>默认 SQLite，本地报告和证据可复现。</span></div>
+        <div class="metric"><strong>Profile-driven</strong><span>核心不携带团队场景，配置从外部发布。</span></div>
+      </aside>
+    </header>
+
+    <nav class="nav" aria-label="Page navigation">
+      <a href="#path">主路径</a>
+      <a href="#core">核心能力</a>
+      <a href="#skills">技能说明</a>
+      <a href="#commands">命令面</a>
+      <a href="#rules">核心规则</a>
+      <a href="#goals">迭代目标</a>
+    </nav>
+
+    <section id="path">
+      <div class="section-head">
+        <h2>一条标准 agent 路径</h2>
+        <p class="note">报告生成不应隐藏目标解析。agent 先发现候选，再用精确 ID 执行报告；失败用例进入报告，不阻断报告产出。</p>
+      </div>
+      <div class="pipeline">
+        <article class="step"><span class="tag">Discover</span><h3>发现可测目标</h3><p>用 <code>discover</code> 命令从 Store/catalog 中搜索接口节点或工作流候选。</p></article>
+        <article class="step"><span class="tag">Select</span><h3>选择精确 ID</h3><p>从 JSON 结果中读取 <code>id</code>，后续 report 命令只接受 ID。</p></article>
+        <article class="step"><span class="tag">Execute</span><h3>执行用例集合</h3><p>接口节点执行全部关联用例；工作流按绑定步骤执行。</p></article>
+        <article class="step"><span class="tag">Record</span><h3>写入本地索引</h3><p>运行、用例结果、证据摘要和后处理任务进入 Store。</p></article>
+        <article class="step"><span class="tag">Render</span><h3>生成临时报告</h3><p>HTML 给人看，JSON 给机器读；失败原因被保留在报告内。</p></article>
+        <article class="step"><span class="tag">Review</span><h3>审阅与回归</h3><p>报告、证据、日志和拓扑共同支撑后续分析。</p></article>
+      </div>
+    </section>
+
+    <section id="core">
+      <div class="section-head">
+        <h2>核心能力分层</h2>
+        <p class="note">当前核心后端已经具备完整的“配置发布 -> 发现目标 -> 执行 -> 记录 -> 报告”闭环。</p>
+      </div>
+      <div class="grid">
+        <article class="card"><div class="kicker">Configuration</div><h3>外部配置包生命周期</h3><p>创建、安装、打包、审计、校验、发布。配置文件保留为可审阅源资产，Store 作为索引和运行态视图。</p><div class="cmds"><code>profile init</code><code>profile install</code><code>profile pack</code><code>config publish</code></div></article>
+        <article class="card"><div class="kicker">Catalog</div><h3>目录与 read-model</h3><p>将外部配置转换为服务、工作流、接口节点、用例、夹具、绑定和模板配置目录，并生成页面可读模型。</p><div class="cmds"><code>/api/catalog</code><code>/api/dashboard</code><code>GetProfileCatalog</code></div></article>
+        <article class="card"><div class="kicker">Discovery</div><h3>目标发现</h3><p>面向 agent 的第一步能力。支持过滤候选，但不替 report 命令做隐式解析。</p><div class="cmds"><code>interface-node discover</code><code>workflow discover</code></div></article>
+        <article class="card"><div class="kicker">Execution</div><h3>用例与工作流执行</h3><p>支持独立 API case、接口节点全量报告、工作流报告、HTTP batch runner 和测试适配执行。</p><div class="cmds"><code>case run</code><code>case report</code><code>workflow report</code><code>/api/test-kit/run</code></div></article>
+        <article class="card"><div class="kicker">Evidence</div><h3>证据与观测</h3><p>记录请求、响应、运行摘要、日志索引、拓扑和后处理任务，为页面和报告提供事实来源。</p><div class="cmds"><code>evidence list</code><code>/api/case/evidence</code><code>/api/trace-topology/collect</code></div></article>
+        <article class="card"><div class="kicker">Quality</div><h3>质量守卫</h3><p>通过测试、审计、schema contract、禁词扫描和 dirty worktree 纪律保护核心通用性。</p><div class="cmds"><code>go test ./...</code><code>check_no_source_domain_core.sh</code><code>git diff --check</code></div></article>
+      </div>
+    </section>
+
+    <section id="skills">
+      <div class="section-head">
+        <h2>技能说明</h2>
+        <p class="note">这里的“技能”指项目内推荐的 agent 工作方式，不是把团队场景写死在核心里。</p>
+      </div>
+      <div class="skills">
+        <article class="skill-card"><span class="number">1</span><h3>发现技能</h3><p>读取项目简介和命令帮助，调用 <code>discover</code> 搜索候选目标，再从结果中选择精确 ID。</p></article>
+        <article class="skill-card"><span class="number">2</span><h3>报告技能</h3><p>使用精确 ID 生成 HTML/JSON 报告。报告是产物，用例失败是内容，不是 CLI 崩溃。</p></article>
+        <article class="skill-card"><span class="number">3</span><h3>配置技能</h3><p>维护外部配置包，先审计和验证，再发布到 Store/read-model。核心不直接承载团队场景。</p></article>
+        <article class="skill-card"><span class="number">4</span><h3>证据技能</h3><p>从 Store 和 evidence 文件定位请求、响应、运行摘要、日志与拓扑，形成可复查结论。</p></article>
+        <article class="skill-card"><span class="number">5</span><h3>守卫技能</h3><p>每个后端切片都要有测试和守卫，避免通用核心被团队词汇或临时运行产物污染。</p></article>
+      </div>
+    </section>
+
+    <section id="commands">
+      <div class="section-head">
+        <h2>核心命令面</h2>
+        <p class="note">命令面是 agent 和 CI 的首选入口；Control plane API 面向页面和长期服务模式。</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>能力域</th><th>命令</th><th>用途</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td>Store</td><td><code>store status</code>, <code>store upgrade</code></td><td>检查和升级本地 SQLite schema。</td><td><span class="status ready">ready</span></td></tr>
+            <tr><td>Profile</td><td><code>profile init</code>, <code>install</code>, <code>pack</code>, <code>verify</code></td><td>管理外部配置包，并过滤运行产物。</td><td><span class="status ready">ready</span></td></tr>
+            <tr><td>Publish</td><td><code>profile import</code>, <code>config publish</code></td><td>将外部配置发布为 Store catalog 和 read-model。</td><td><span class="status ready">ready</span></td></tr>
+            <tr><td>Discover</td><td><code>interface-node discover</code>, <code>workflow discover</code></td><td>搜索可测目标，返回精确 ID。</td><td><span class="status active">active</span></td></tr>
+            <tr><td>Report</td><td><code>interface-node case report</code>, <code>workflow report</code></td><td>按 ID 生成临时 HTML/JSON 报告。</td><td><span class="status active">active</span></td></tr>
+            <tr><td>Case</td><td><code>case run</code>, <code>case incomplete-batches</code></td><td>运行单个通用 API case，或检查未完成覆盖。</td><td><span class="status ready">ready</span></td></tr>
+            <tr><td>Evidence</td><td><code>evidence import</code>, <code>evidence list</code></td><td>导入历史证据并查询运行记录。</td><td><span class="status ready">ready</span></td></tr>
+            <tr><td>Serve</td><td><code>serve</code></td><td>启动 Control plane，将 Store/read-model 提供给页面和 API。</td><td><span class="status ready">ready</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="rules">
+      <div class="section-head">
+        <h2>核心规则</h2>
+        <p class="note">这些规则决定项目能否保持开源友好、跨团队可复用、可长期维护。</p>
+      </div>
+      <div class="two-col">
+        <div class="rule-stack">
+          <div class="rule"><strong>核心保持通用</strong><p>核心代码、默认资产和文档不写入具体团队领域词。团队内容只能在外部配置包或本地运行数据中出现。</p></div>
+          <div class="rule"><strong>文件优先，数据库索引</strong><p>配置包是可审阅源资产；Store 保存索引、read-model 和运行事实，不取代配置源。</p></div>
+          <div class="rule"><strong>本地优先</strong><p>默认 SQLite 和本地 evidence，保证离线可跑、可复现、易调试。</p></div>
+          <div class="rule"><strong>报告不等于全绿</strong><p>报告生成成功表示工具链可用；报告内的失败项表示被测系统或配置需要分析。</p></div>
+        </div>
+        <div class="rule-stack">
+          <div class="rule"><strong>先发现，再执行</strong><p>agent 必须先使用 <code>discover</code> 获取候选，再把精确 ID 传给 <code>report</code>。</p></div>
+          <div class="rule"><strong>小切片要可验证</strong><p>行为变化先写测试，跑聚焦测试，再跑全量测试和守卫。</p></div>
+          <div class="rule"><strong>运行产物不提交</strong><p>Evidence、日志、SQLite 数据库和临时报告属于运行态，不进入核心源码。</p></div>
+          <div class="rule"><strong>前后端共享 Store 视图</strong><p>页面读取 Store/read-model，CLI 和 API 共同维护同一份运行事实。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="goals">
+      <div class="section-head">
+        <h2>迭代目标</h2>
+        <p class="note">目标按“现在可交付、下一阶段强化、后续平台化”分层，避免把简单功能做复杂。</p>
+      </div>
+      <div class="goals">
+        <article class="goal-card"><div class="phase">Now</div><div><h3>稳定 agent 验收闭环</h3><p>固定 <code>discover -> report</code> 作为测试 agent 默认流程；确保接口节点全量报告、工作流报告、失败保留、HTML/JSON 输出稳定。</p></div></article>
+        <article class="goal-card"><div class="phase">Next</div><div><h3>强化前置数据与上下文传递</h3><p>继续把 fixture、case dependency、workflow exports 和 Store 运行记录整合成通用前置数据能力，不写团队规则到核心。</p></div></article>
+        <article class="goal-card"><div class="phase">Next</div><div><h3>后处理异步化</h3><p>拓扑、日志裁剪、报告补全等重处理任务落入 post-process task，记录耗时和状态，避免页面和 runner 被慢操作拖住。</p></div></article>
+        <article class="goal-card"><div class="phase">Later</div><div><h3>团队模式 Store</h3><p>保持 SQLite 默认，补可选团队 Store 后端，让同一套 Store interface 支持本地和多人协作。</p></div></article>
+        <article class="goal-card"><div class="phase">Later</div><div><h3>公开发布准备</h3><p>完善 profile 格式文档、报告样式、守卫说明、最小示例和贡献指南，让项目可被其他团队直接接入。</p></div></article>
+      </div>
+    </section>
+
+    <footer class="footer">
+      Source of truth: this page summarizes the current core module shape in <code>cmd/otsandbox</code>, <code>internal/controlplane</code>, <code>internal/store</code>, and <code>docs</code>. Keep this document generic; place team-specific scenarios in external profile bundles.
+    </footer>
+  </main>
+</body>
+</html>

@@ -57,6 +57,7 @@ func handleTestKitRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
+		attachCaseRunEvidenceHandles(result, runID)
 		if runID != "" {
 			scheduleTestKitTraceTopology(runtime, collector, runID, payload, result)
 		}
@@ -86,10 +87,12 @@ func handleTestKitRunBatch(w http.ResponseWriter, r *http.Request, bundle profil
 			"timeoutSeconds": payload["timeoutSeconds"],
 		}
 		result, _ := testKitCaseResult(r.Context(), bundle, runtime, itemPayload)
-		if _, err := recordTestKitRunWithContext(r.Context(), bundle, runtime, itemPayload, result); err != nil {
+		runID, err := recordTestKitRunWithContext(r.Context(), bundle, runtime, itemPayload, result)
+		if err != nil {
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
+		attachCaseRunEvidenceHandles(result, runID)
 		if result["ok"] == true {
 			passed++
 		}
@@ -105,6 +108,18 @@ func handleTestKitRunBatch(w http.ResponseWriter, r *http.Request, bundle profil
 			"failed":    len(results) - passed,
 		},
 	})
+}
+
+func attachCaseRunEvidenceHandles(result map[string]any, runID string) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return
+	}
+	caseRunID := runID + ".case"
+	result["runId"] = runID
+	result["caseRunId"] = caseRunID
+	result["detailUrl"] = "/api/case-run/evidence?caseRunId=" + url.QueryEscape(caseRunID)
+	result["viewerUrl"] = "/evidence-viewer.html?caseRun=" + url.QueryEscape(runID)
 }
 
 func testKitCaseResult(ctx context.Context, bundle profile.Bundle, runtime store.Store, payload map[string]any) (map[string]any, int) {

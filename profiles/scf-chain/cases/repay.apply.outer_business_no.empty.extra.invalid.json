@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.outer_business_no.empty.extra.invalid",
-  "displayName": "还款申请-outer_business_no空字符串候选",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

@@ -1,6 +1,0 @@
-{
-  "id": "callback.financing.apply.llt.approval_status.text.invalid",
-  "displayName": "融资结果回调-approval_status非数字",
-  "nodeId": "scf.financing.apply.llt.callback",
-  "requiredForAdmission": false
-}

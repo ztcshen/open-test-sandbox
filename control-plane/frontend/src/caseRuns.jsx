@@ -313,9 +313,6 @@ function CaseRunsApp() {
           <a className="button-link" href="/">
             控制台
           </a>
-          <a className="button-link" href="/agent-test.html">
-            Agent Test Kit
-          </a>
           <button type="button" title="刷新" onClick={refresh}>
             <RefreshCw size={15} aria-hidden="true" />
             <span>刷新</span>

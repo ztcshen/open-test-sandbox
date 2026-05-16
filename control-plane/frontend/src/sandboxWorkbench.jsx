@@ -50,7 +50,9 @@ async function postJSON(path, payload) {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.ok === false) {
-    throw new Error(body.error || response.statusText);
+    const error = new Error(body.error || response.statusText);
+    error.payload = body;
+    throw error;
   }
   return body;
 }
@@ -65,28 +67,21 @@ function CapabilityCard({ card }) {
   );
 }
 
-function CapabilityGrid({ runs, agentTest, caseRuns, catalog }) {
+function CapabilityGrid({ runs, caseRuns, catalog }) {
   const workflowRuns = runs?.workflowRuns || [];
   const latestRun = workflowRuns[0];
   const latestCaseRun = caseRuns?.caseRuns?.[0];
-  const agentSummary = agentTest?.summary || {};
   const cards = [
-    {
-      title: "Agent Test Kit",
-      detail: `Docker-only profile runner, Evidence bundle, SQLite run record, capability gaps ${agentSummary.failureKinds?.sandbox_capability_gap || 0}.`,
-      href: "/agent-test.html",
-      meta: agentSummary.latestFailureKind || "no active failure",
-    },
     {
       title: "Workflow Evidence",
       detail: "Requests, responses, logs, journal entries, database hints, and trace topology.",
-      href: latestRun ? `/workflow-run.html?id=${encodeURIComponent(latestRun.id)}` : "/agent-test.html",
+      href: latestRun ? `/workflow-run.html?id=${encodeURIComponent(latestRun.id)}` : "/workflow-run.html",
       meta: latestRun ? `latest ${latestRun.status}` : "no run yet",
     },
     {
       title: "Run Topology",
       detail: "Confirmed edges, external exits, unresolved exits, request ids, and trace ids.",
-      href: latestRun ? `/trace-topology.html?workflowRunId=${encodeURIComponent(latestRun.id)}` : "/agent-test.html",
+      href: latestRun ? `/trace-topology.html?workflowRunId=${encodeURIComponent(latestRun.id)}` : "/trace-topology.html",
       meta: latestRun ? `run #${latestRun.id}` : "no run yet",
     },
     {
@@ -208,7 +203,6 @@ function EvidenceLinks({ runs }) {
     [failedRun ? `Latest Failed Topology #${failedRun.id}` : "Latest Failed Topology", failedRun ? `/trace-topology.html?workflowRunId=${encodeURIComponent(failedRun.id)}&exitKind=unresolved` : "/trace-topology.html"],
     ["Workflow 目录", "/workflows.html"],
     ["接口节点目录", "/interface-nodes.html"],
-    ["Agent run / Evidence bundle", "/agent-test.html"],
     ["API Case Evidence", "/case-runs.html"],
     ["Replay / Capability probe", "/workflow-detail.html?id=sandbox.replay_probe_observability"],
     ["Effective config", "/workflow-detail.html?id=sandbox.platform_config_check"],
@@ -261,17 +255,33 @@ function ServiceHealth({ snapshot }) {
 }
 
 function ProfileImportPanel({ onImported }) {
-  const [path, setPath] = useState("profiles/empty");
+  const [path, setPath] = useState("/path/to/profile-bundle");
   const [audit, setAudit] = useState(true);
+  const [requireAuditOk, setRequireAuditOk] = useState(false);
+  const [requireCaseRuns, setRequireCaseRuns] = useState(false);
+  const [requireWorkflowRuns, setRequireWorkflowRuns] = useState(false);
+  const [installForce, setInstallForce] = useState(false);
   const [message, setMessage] = useState("ready");
   const [report, setReport] = useState(null);
+  const [installedProfiles, setInstalledProfiles] = useState([]);
+  const [profileHome, setProfileHome] = useState("");
 
-  async function submit(event) {
-    event.preventDefault();
+  async function loadInstalledProfiles() {
+    try {
+      const payload = await fetchJSON("/api/profile/installed");
+      setInstalledProfiles(payload.profiles || []);
+      setProfileHome(payload.profileHome || "");
+    } catch (error) {
+      setInstalledProfiles([]);
+      setProfileHome(error.message);
+    }
+  }
+
+  async function runImport() {
     setMessage("importing...");
     setReport(null);
     try {
-      const nextReport = await postJSON("/api/profile/import", { path, audit });
+      const nextReport = await postJSON("/api/profile/import", { path, audit, requireAuditOk, force: installForce });
       setReport(nextReport);
       setMessage("imported");
       onImported?.();
@@ -279,6 +289,56 @@ function ProfileImportPanel({ onImported }) {
       setMessage(error.message);
     }
   }
+
+  async function runInstall() {
+    setMessage("installing...");
+    setReport(null);
+    try {
+      const installReport = await postJSON("/api/profile/install", { path, force: installForce });
+      setPath(installReport.id || path);
+      setReport({ profileId: installReport.id, bundleDigest: installReport.bundleDigest, counts: {} });
+      setMessage("installed");
+      await loadInstalledProfiles();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function runVerify() {
+    setMessage("verifying...");
+    setReport(null);
+    try {
+      const nextReport = await postJSON("/api/profile/verify", { path, requireCaseRuns, requireWorkflowRuns, force: installForce });
+      setReport(nextReport);
+      setMessage(nextReport.ok ? "verified" : "verification failed");
+      onImported?.();
+    } catch (error) {
+      if (error.payload?.checks || error.payload?.summary) {
+        setReport(error.payload);
+      }
+      setMessage(error.message);
+    }
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    await runImport();
+  }
+
+  useEffect(() => {
+    loadInstalledProfiles();
+  }, []);
+
+  const reportProfileId = report?.profileId || report?.publish?.profileId || "";
+  const reportCounts = report?.counts || report?.publish?.counts || {};
+  const reportAudit = report?.audit;
+  const reportVersion = report?.configVersion?.id || report?.publish?.configVersion?.id || "";
+  const reportChecks = report?.checks || [];
+  const reportSummary = report?.summary || null;
+  const passedChecks = reportSummary?.passedChecks ?? reportChecks.filter((item) => item.ok).length;
+  const totalChecks = reportSummary?.totalChecks ?? reportChecks.length;
+  const failedChecks = reportSummary?.failedChecks ?? Math.max(totalChecks - passedChecks, 0);
+  const selectedInstalledProfile = installedProfiles.find((item) => item.id === path)?.id || "";
 
   return (
     <section className="services">
@@ -288,18 +348,69 @@ function ProfileImportPanel({ onImported }) {
       </div>
       <form className="sandbox-link-list" onSubmit={submit}>
         <label className="workflow-filter">
-          <span>路径</span>
+          <span>路径 / ID</span>
           <input type="text" value={path} onChange={(event) => setPath(event.target.value)} spellCheck="false" />
+        </label>
+        <label className="workflow-filter">
+          <span>已安装</span>
+          <select value={selectedInstalledProfile} onChange={(event) => event.target.value && setPath(event.target.value)} title={profileHome || "Profile home"}>
+            <option value="">选择 Profile</option>
+            {installedProfiles.map((item) => (
+              <option value={item.id} key={item.id} disabled={item.valid === false}>
+                {item.valid === false ? `${item.id} · invalid` : `${item.id} · ${item.counts?.workflows || 0} workflows`}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="check-row compact-check">
           <input type="checkbox" checked={audit} onChange={(event) => setAudit(event.target.checked)} />
           <span>导入后审计</span>
         </label>
+        <label className="check-row compact-check">
+          <input type="checkbox" checked={requireAuditOk} onChange={(event) => setRequireAuditOk(event.target.checked)} />
+          <span>审计不通过则阻断</span>
+        </label>
+        <label className="check-row compact-check">
+          <input type="checkbox" checked={requireCaseRuns} onChange={(event) => setRequireCaseRuns(event.target.checked)} />
+          <span>要求用例已通过</span>
+        </label>
+        <label className="check-row compact-check">
+          <input type="checkbox" checked={requireWorkflowRuns} onChange={(event) => setRequireWorkflowRuns(event.target.checked)} />
+          <span>要求工作流已通过</span>
+        </label>
+        <label className="check-row compact-check">
+          <input type="checkbox" checked={installForce} onChange={(event) => setInstallForce(event.target.checked)} />
+          <span>覆盖安装</span>
+        </label>
+        <button className="button-link" type="button" onClick={runInstall}>安装到本地</button>
         <button className="button-link primary-link" type="submit">一键导入</button>
+        <button className="button-link" type="button" onClick={runVerify}>验收并发布</button>
       </form>
       {report ? (
-        <div className="run-history-empty">
-          {`${report.profileId} · ${report.counts?.apiCases || 0} cases · ${report.counts?.workflows || 0} workflows${report.audit ? ` · issues ${report.audit.issueCount || 0}` : ""}`}
+        <div className="profile-verify-report">
+          <div className="profile-verify-summary">
+            {`${reportProfileId} · ${reportCounts.apiCases || 0} cases · ${reportCounts.workflows || 0} workflows${reportAudit ? ` · issues ${reportAudit.issueCount || 0}` : ""}${totalChecks ? ` · checks ${passedChecks}/${totalChecks}` : ""}${reportVersion ? ` · ${reportVersion}` : ""}`}
+          </div>
+          {reportSummary ? (
+            <div className="profile-verify-metrics">
+              <span className={failedChecks ? "failed" : "passed"}>{failedChecks ? `${failedChecks} failed` : "all passed"}</span>
+              <span>{`case runs ${reportSummary.requiredCaseRuns ? "required" : "optional"}`}</span>
+              <span>{`workflow runs ${reportSummary.requiredWorkflowRuns ? "required" : "optional"}`}</span>
+              {reportSummary.firstFailed ? <span>{`first failed ${reportSummary.firstFailed}`}</span> : null}
+            </div>
+          ) : null}
+          {reportChecks.length ? (
+            <div className="profile-check-list" aria-label="Profile verification checks">
+              {reportChecks.slice(0, 12).map((item) => (
+                <div className={item.ok ? "profile-check-row passed" : "profile-check-row failed"} key={item.name}>
+                  <strong>{item.name}</strong>
+                  <span>{item.ok ? "passed" : "failed"}</span>
+                  <p>{item.detail}</p>
+                </div>
+              ))}
+              {reportChecks.length > 12 ? <p className="profile-check-overflow">{`还有 ${reportChecks.length - 12} 项检查未展开`}</p> : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -310,24 +421,21 @@ function SandboxWorkbenchApp() {
   const [snapshot, setSnapshot] = useState(null);
   const [catalog, setCatalog] = useState(null);
   const [runs, setRuns] = useState(null);
-  const [agentTest, setAgentTest] = useState(null);
   const [caseRuns, setCaseRuns] = useState(null);
   const [message, setMessage] = useState("loading");
 
   async function refresh() {
     setMessage("refreshing...");
     try {
-      const [nextSnapshot, nextCatalog, nextRuns, nextAgentTest, nextCaseRuns] = await Promise.all([
+      const [nextSnapshot, nextCatalog, nextRuns, nextCaseRuns] = await Promise.all([
         fetchJSON("/api/state"),
         fetchJSON("/api/catalog"),
         fetchJSON("/api/runs"),
-        fetchJSON("/api/agent-test").catch((error) => ({ ok: false, summary: { latestFailureKind: error.message }, warnings: [error.message] })),
         fetchJSON("/api/case/runs").catch((error) => ({ ok: false, caseRuns: [], warnings: [error.message] })),
       ]);
       setSnapshot(nextSnapshot);
       setCatalog(nextCatalog);
       setRuns(nextRuns);
-      setAgentTest(nextAgentTest);
       setCaseRuns(nextCaseRuns);
       setMessage("ready");
     } catch (error) {
@@ -370,13 +478,12 @@ function SandboxWorkbenchApp() {
           <span className="console-status-pill" role="status">{message}</span>
           <a className="button-link primary-link" href="/workflows.html">Workflow 目录</a>
           <a className="button-link primary-link" href="/interface-nodes.html">接口节点</a>
-          <a className="button-link primary-link" href="/agent-test.html">Agent Test Kit</a>
           <a className="button-link" href="/service-inventory.html">服务目录</a>
           <a className="button-link" href="/dashboard.html">环境大盘</a>
           <button type="button" title="刷新" onClick={refresh}><RefreshCw size={15} aria-hidden="true" /></button>
         </div>
       </section>
-      <CapabilityGrid runs={runs} agentTest={agentTest} caseRuns={caseRuns} catalog={catalog} />
+      <CapabilityGrid runs={runs} caseRuns={caseRuns} catalog={catalog} />
       <section className="sandbox-workbench-layout">
         <div className="main-column">
           <RunHistory runs={runs} caseRuns={caseRuns} onRefresh={refreshRuns} />

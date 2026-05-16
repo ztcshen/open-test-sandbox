@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.loan_confirm_infos.missing.invalid",
-  "displayName": "放款申请-loan_confirm_infos缺失",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

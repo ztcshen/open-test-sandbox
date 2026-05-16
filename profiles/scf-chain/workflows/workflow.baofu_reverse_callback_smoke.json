@@ -1,5 +1,0 @@
-{
-  "id": "workflow.baofu_reverse_callback_smoke",
-  "displayName": "宝付文档口径反向回调冒烟",
-  "description": "按宝付对外接口文档原始字段依次发送融资、放款、还款三段反向通知，适合做零散回调链路冒烟。"
-}

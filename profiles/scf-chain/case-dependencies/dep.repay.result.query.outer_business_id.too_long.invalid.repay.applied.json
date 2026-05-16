@@ -1,6 +1,0 @@
-{
-  "id": "dep.repay.result.query.outer_business_id.too_long.invalid.repay.applied",
-  "caseId": "repay.result.query.outer_business_id.too_long.invalid",
-  "fixtureId": "fixture.repay.applied",
-  "mappingsJson": "[{\"from\":\"$.exports.outer_business_no\",\"to\":\"$.request.outer_business_id\"},{\"from\":\"$.exports.credit_contract_type\",\"to\":\"$.request.credit_contract_type\"},{\"from\":\"$.exports.credit_contract_id\",\"to\":\"$.request.credit_contract_id\"}]"
-}

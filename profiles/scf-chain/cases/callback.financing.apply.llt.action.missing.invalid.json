@@ -1,6 +1,0 @@
-{
-  "id": "callback.financing.apply.llt.action.missing.invalid",
-  "displayName": "融资结果回调-action缺失",
-  "nodeId": "scf.financing.apply.llt.callback",
-  "requiredForAdmission": false
-}

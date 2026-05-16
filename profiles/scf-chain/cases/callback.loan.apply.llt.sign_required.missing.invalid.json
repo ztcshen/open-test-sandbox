@@ -1,6 +1,0 @@
-{
-  "id": "callback.loan.apply.llt.sign_required.missing.invalid",
-  "displayName": "放款结果回调-sign_required缺失",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "requiredForAdmission": false
-}

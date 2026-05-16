@@ -1,6 +1,0 @@
-{
-  "id": "callback.loan.apply.llt.financing_order_id.missing.invalid",
-  "displayName": "放款结果回调-financing_order_id缺失",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "requiredForAdmission": false
-}

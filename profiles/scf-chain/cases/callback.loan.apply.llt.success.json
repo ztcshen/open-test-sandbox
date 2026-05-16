@@ -1,5 +1,0 @@
-{
-  "id": "callback.loan.apply.llt.success",
-  "displayName": "放款结果回调-成功",
-  "nodeId": "scf.loan.apply.llt.callback"
-}

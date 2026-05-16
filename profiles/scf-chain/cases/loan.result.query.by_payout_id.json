@@ -1,5 +1,0 @@
-{
-  "id": "loan.result.query.by_payout_id",
-  "displayName": "放款结果查询-按放款主键",
-  "nodeId": "scf.loan.result.query"
-}

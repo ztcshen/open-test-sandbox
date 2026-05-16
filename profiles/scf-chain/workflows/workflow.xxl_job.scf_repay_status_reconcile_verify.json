@@ -1,5 +1,0 @@
-{
-  "id": "workflow.xxl_job.scf_repay_status_reconcile_verify",
-  "displayName": "XXL-Job 触发并验证 SCF 还款状态收敛任务",
-  "description": "先校验测试环境 scfRepayStatusReconcileJob 已配置，再通过 XXL-Admin 触发任务，最后结合 XXL 调度日志、业务侧 job_dispatch_log 与 account-channel 的还款计划查询成功日志确认任务真正执行。"
-}

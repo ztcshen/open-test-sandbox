@@ -1,8 +1,0 @@
-{
-  "id": "tpl.loan.result.query.standard",
-  "displayName": "放款结果查询标准请求",
-  "nodeId": "scf.loan.result.query",
-  "method": "GET",
-  "path": "/v1/supplychain/payout/query",
-  "templateJson": "{\"mch_id\":\"100000000000\",\"order_id\":\"{{serial:LRQ}}\",\"payout_id\":\"{{override:payout_id|9161839575190720}}\",\"financing_order_id\":\"{{override:financing_order_id|1163295452351680}}\"}"
-}

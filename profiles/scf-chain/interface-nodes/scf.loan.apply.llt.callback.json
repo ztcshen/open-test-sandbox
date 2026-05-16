@@ -1,6 +1,0 @@
-{
-  "id": "scf.loan.apply.llt.callback",
-  "displayName": "放款结果回调",
-  "serviceId": "wiremock",
-  "timeoutMs": 2000
-}

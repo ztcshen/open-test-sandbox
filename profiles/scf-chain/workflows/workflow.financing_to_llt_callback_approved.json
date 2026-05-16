@@ -1,5 +1,0 @@
-{
-  "id": "workflow.financing_to_llt_callback_approved",
-  "displayName": "融资申请到粒粒通审批通过回调",
-  "description": "先发融资申请，再查融资结果，最后按粒粒通口径加密回调 account-channel。"
-}

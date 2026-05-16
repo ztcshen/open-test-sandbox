@@ -1,6 +1,0 @@
-{
-  "id": "loan.result.query.order_id.blank.invalid",
-  "displayName": "放款结果查询-order_id为空",
-  "nodeId": "scf.loan.result.query",
-  "requiredForAdmission": false
-}

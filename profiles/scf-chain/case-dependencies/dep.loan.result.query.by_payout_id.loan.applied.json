@@ -1,6 +1,0 @@
-{
-  "id": "dep.loan.result.query.by_payout_id.loan.applied",
-  "caseId": "loan.result.query.by_payout_id",
-  "fixtureId": "fixture.financing.loan.applied",
-  "mappingsJson": "[{\"from\":\"$.exports.order_id\",\"to\":\"$.request.order_id\"},{\"from\":\"$.exports.payout_id\",\"to\":\"$.request.payout_id\"},{\"from\":\"$.exports.financing_order_id\",\"to\":\"$.request.financing_order_id\"}]"
-}

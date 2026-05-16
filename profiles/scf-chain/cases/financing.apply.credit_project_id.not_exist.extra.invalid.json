@@ -1,6 +1,0 @@
-{
-  "id": "financing.apply.credit_project_id.not_exist.extra.invalid",
-  "displayName": "融资申请-credit_project_id不存在候选",
-  "nodeId": "scf.financing.apply",
-  "requiredForAdmission": false
-}

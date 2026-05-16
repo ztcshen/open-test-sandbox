@@ -60,6 +60,17 @@ type APICaseRunState struct {
 	LatestStatus string `json:"latestStatus,omitempty"`
 }
 
+func FailureSummary(report Report) string {
+	if report.OK {
+		return "ok"
+	}
+	if len(report.Issues) == 0 {
+		return "profile audit failed"
+	}
+	first := report.Issues[0]
+	return first.Code + " " + first.SubjectType + " " + first.SubjectID + ": " + first.Message
+}
+
 func Audit(ctx context.Context, options Options) (Report, error) {
 	report := Report{
 		OK:          true,

@@ -1,6 +1,0 @@
-{
-  "id": "financing.apply.credit_contract_id.missing.extra.invalid",
-  "displayName": "融资申请-credit_contract_id缺失候选",
-  "nodeId": "scf.financing.apply",
-  "requiredForAdmission": false
-}

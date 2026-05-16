@@ -1,6 +1,0 @@
-{
-  "id": "dep.loan.apply.default.apply.approved",
-  "caseId": "loan.apply.default",
-  "fixtureId": "fixture.financing.apply.approved",
-  "mappingsJson": "[{\"from\":\"$.exports.financing_order_id\",\"to\":\"$.request.financing_order_id\"}]"
-}

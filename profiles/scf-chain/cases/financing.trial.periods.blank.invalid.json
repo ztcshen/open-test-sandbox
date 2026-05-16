@@ -1,6 +1,0 @@
-{
-  "id": "financing.trial.periods.blank.invalid",
-  "displayName": "融资试算-periods为空",
-  "nodeId": "scf.financing.trial",
-  "requiredForAdmission": false
-}

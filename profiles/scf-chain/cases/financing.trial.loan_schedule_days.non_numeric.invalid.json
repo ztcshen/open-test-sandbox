@@ -1,6 +1,0 @@
-{
-  "id": "financing.trial.loan_schedule_days.non_numeric.invalid",
-  "displayName": "融资试算-loan_schedule_days非数字",
-  "nodeId": "scf.financing.trial",
-  "requiredForAdmission": false
-}

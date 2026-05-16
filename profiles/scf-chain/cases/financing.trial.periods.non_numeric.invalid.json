@@ -1,6 +1,0 @@
-{
-  "id": "financing.trial.periods.non_numeric.invalid",
-  "displayName": "融资试算-periods非数字",
-  "nodeId": "scf.financing.trial",
-  "requiredForAdmission": false
-}

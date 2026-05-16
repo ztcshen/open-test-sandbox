@@ -1,5 +1,0 @@
-{
-  "id": "workflow.financing_apply_duplicate_mer_trans_no",
-  "displayName": "融资申请重复mer_trans_no验证",
-  "description": "先发一笔融资申请，再复用同一个 mer_trans_no 发起第二笔融资申请，验证重复申请场景。"
-}

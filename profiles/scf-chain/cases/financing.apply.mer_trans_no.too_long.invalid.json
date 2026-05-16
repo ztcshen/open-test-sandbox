@@ -1,6 +1,0 @@
-{
-  "id": "financing.apply.mer_trans_no.too_long.invalid",
-  "displayName": "融资申请-mer_trans_no超长",
-  "nodeId": "scf.financing.apply",
-  "requiredForAdmission": false
-}

@@ -384,7 +384,6 @@ function EmptyViewer({ subtitle }) {
           <span className="viewer-case">-</span>
           <nav className="viewer-actions" aria-label="Evidence navigation">
             <a className="button-link" href="/case-runs.html">API Case Evidence</a>
-            <a className="button-link" href="/agent-test.html">Agent Test Kit</a>
             <a className="button-link" href="/">控制台</a>
           </nav>
         </div>
@@ -428,7 +427,6 @@ function EvidenceViewerApp() {
           <span className="viewer-case">{step.caseId || "-"}</span>
           <nav className="viewer-actions" aria-label="Evidence navigation">
             <a className="button-link" href="/case-runs.html">API Case Evidence</a>
-            <a className="button-link" href="/agent-test.html">Agent Test Kit</a>
             <a className="button-link" href="/">控制台</a>
           </nav>
         </div>

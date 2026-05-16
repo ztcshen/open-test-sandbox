@@ -1,8 +1,0 @@
-{
-  "id": "tpl.repay.result.query.standard",
-  "displayName": "还款结果查询标准请求",
-  "nodeId": "scf.repay.result.query",
-  "method": "GET",
-  "path": "/v1/supplychain/repay/result/query",
-  "templateJson": "{\"mch_id\":\"100000000000\",\"order_id\":\"{{serial:RRQ}}\",\"outer_business_id\":\"{{override:outer_business_id|OBN-202604010001}}\",\"credit_contract_type\":\"1000001\"}"
-}

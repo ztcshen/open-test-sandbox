@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.order_id.too_long.extra.invalid",
-  "displayName": "还款申请-order_id超长候选",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

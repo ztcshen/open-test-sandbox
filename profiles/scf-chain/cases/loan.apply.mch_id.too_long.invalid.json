@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.mch_id.too_long.invalid",
-  "displayName": "放款申请-mch_id超长",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

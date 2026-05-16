@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.outer_business_no.blank.invalid",
-  "displayName": "放款申请-outer_business_no为空",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

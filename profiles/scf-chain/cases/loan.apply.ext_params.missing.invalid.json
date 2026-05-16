@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.ext_params.missing.invalid",
-  "displayName": "放款申请-ext_params缺失",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

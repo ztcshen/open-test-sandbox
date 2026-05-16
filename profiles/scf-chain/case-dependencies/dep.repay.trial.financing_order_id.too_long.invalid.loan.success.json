@@ -1,6 +1,0 @@
-{
-  "id": "dep.repay.trial.financing_order_id.too_long.invalid.loan.success",
-  "caseId": "repay.trial.financing_order_id.too_long.invalid",
-  "fixtureId": "fixture.financing.loan.success",
-  "mappingsJson": "[{\"from\":\"$.exports.financing_order_id\",\"to\":\"$.request.financing_order_id\"}]"
-}

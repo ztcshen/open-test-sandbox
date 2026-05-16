@@ -1,8 +1,0 @@
-{
-  "workflowId": "sandbox.financing_to_repay_result_query",
-  "stepId": "loan-callback",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "caseId": "callback.loan.apply.llt.success",
-  "required": true,
-  "sortOrder": 6
-}

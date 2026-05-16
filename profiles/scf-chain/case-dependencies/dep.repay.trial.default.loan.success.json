@@ -1,6 +1,0 @@
-{
-  "id": "dep.repay.trial.default.loan.success",
-  "caseId": "repay.trial.default",
-  "fixtureId": "fixture.financing.loan.success",
-  "mappingsJson": "[{\"from\":\"$.exports.financing_order_id\",\"to\":\"$.request.financing_order_id\"}]"
-}

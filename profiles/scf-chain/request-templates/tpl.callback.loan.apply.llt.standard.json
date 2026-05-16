@@ -1,8 +1,0 @@
-{
-  "id": "tpl.callback.loan.apply.llt.standard",
-  "displayName": "放款结果回调标准请求",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "method": "POST",
-  "path": "/__sandbox/llt/callback",
-  "templateJson": "{\"financing_order_id\":\"{{override:financing_order_id|1163295452351680}}\",\"payout_status\":2,\"action\":30001,\"outer_business_no\":\"{{override:outer_business_no|OBN-202604010001}}\",\"payout_id\":\"{{override:payout_id|9161839575190720}}\",\"payout_amount\":10000000,\"payout_time\":\"2026-04-01 17:46:45\",\"transaction_id\":\"{{serial:LACL}}\",\"receiver_public_key\":\"04ffc1d58f4669bedc0f5e3c45f74b52ee9a3cdc34fc1c541da6c124e44e72f7b9e5fbdf2167a2d3c9845401b2d91300b99ad05f252da0e1a78202a94381604b12\",\"sign_required\":false,\"expect_protocol_notice_center\":true}"
-}

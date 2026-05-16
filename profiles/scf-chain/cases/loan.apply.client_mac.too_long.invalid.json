@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.client_mac.too_long.invalid",
-  "displayName": "放款申请-client_mac超长",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

@@ -1,5 +1,0 @@
-{
-  "id": "workflow.financing_to_repay_readonly_verify",
-  "displayName": "融资到还款核对只读链路",
-  "description": "先发融资申请，轮询审批通过后发起放款，轮询放款成功后执行还款试算与还款计划查询，不发起还款申请。"
-}

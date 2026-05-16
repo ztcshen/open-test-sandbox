@@ -1,8 +1,0 @@
-{
-  "id": "tpl.scf.financing.result.query.standard.extra",
-  "displayName": "融资结果查询标准候选请求模板",
-  "nodeId": "scf.financing.result.query",
-  "method": "GET",
-  "path": "/v1/supplychain/financing/result/query",
-  "templateJson": "{\"client_ip\":\"192.168.1.100\",\"client_mac\":\"00:11:22:33:44:55\",\"credit_contract_type\":\"LLT\",\"mch_id\":\"1300033460\",\"mer_trans_no\":\"{{serial:GEN}}\",\"order_id\":\"{{serial:RT}}\",\"financing_order_id\":\"{{override:financing_order_id|}}\",\"credit_contract_id\":\"{{override:credit_contract_id|1000001}}\",\"credit_project_id\":\"{{override:credit_project_id|688968}}\"}"
-}

@@ -1,5 +1,0 @@
-{
-  "id": "workflow.fund_reverse_to_scf_loan_mock",
-  "displayName": "资金方反向接口：retail-gateway 到 scf-loan mock",
-  "description": "模拟资金方依次请求 5 个 reverse fund 接口，验证链路经 retail-gateway -\u003e scf-gateway -\u003e scf-loan mock 返回。"
-}

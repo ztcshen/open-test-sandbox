@@ -9,12 +9,8 @@ import (
 	"open-test-sandbox/internal/profile"
 )
 
-func TestLoadEmptyProfileBundle(t *testing.T) {
-	bundle, err := profile.Load(filepath.Join("..", "..", "profiles", "empty"))
-	if err != nil {
-		t.Fatalf("load empty profile: %v", err)
-	}
-
+func TestEmptyProfileBundle(t *testing.T) {
+	bundle := profile.EmptyBundle()
 	if bundle.ID != "empty" || bundle.DisplayName != "Empty Profile" {
 		t.Fatalf("bundle identity = %#v", bundle)
 	}

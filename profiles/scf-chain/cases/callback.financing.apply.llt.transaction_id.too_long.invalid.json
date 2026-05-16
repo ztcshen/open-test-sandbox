@@ -1,6 +1,0 @@
-{
-  "id": "callback.financing.apply.llt.transaction_id.too_long.invalid",
-  "displayName": "融资结果回调-transaction_id超长",
-  "nodeId": "scf.financing.apply.llt.callback",
-  "requiredForAdmission": false
-}

@@ -1,15 +1,15 @@
 # Open Test Sandbox Agent Guide
 
 Open Test Sandbox is a new open-source-oriented project. Keep the core generic,
-profile-driven, and local-first.
+external-profile-driven, and local-first.
 
 ## Core Rules
 
 - Do not hardcode a concrete business domain into core packages.
 - Source code and default core assets must not contain source-domain terms.
   Put domain-specific names and language only in profile/config bundles.
-- Keep template configuration as reviewable files first; databases are indexes
-  and runtime stores.
+- Keep template configuration as reviewable external files first; databases are
+  indexes and runtime stores.
 - SQLite is the default local Store.
 - PostgreSQL is optional for team or hosted mode.
 - Runtime Evidence, logs, and local databases must not be committed.
@@ -20,9 +20,11 @@ profile-driven, and local-first.
 
 - `cmd/otsandbox/`: CLI entrypoint.
 - `internal/`: future core packages.
-- `profiles/`: future profile bundles.
 - `docs/`: public docs.
 - `tools/guardrails/`: local quality gates and repository checks.
+
+Profile bundles live outside this core repository and are published through the
+CLI/API into the local Store.
 
 ## Naming
 

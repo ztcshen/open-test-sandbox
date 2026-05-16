@@ -93,7 +93,7 @@ function Diagnosis({ run, runs, missing }) {
       <section className="agent-run-detail-panel">
         <div className="agent-test-section-head"><div><h2>Diagnosis</h2><p>恢复入口</p></div></div>
         <div className="agent-run-detail-list">
-          <Fact label="next step" value="返回 Agent Test Kit 选择一个已持久化 run。" />
+          <Fact label="next step" value="返回控制台查看运行记录。" />
         </div>
       </section>
     );
@@ -187,7 +187,6 @@ function AgentRunApp() {
         </div>
         <div className="actions">
           <span className="agent-test-status-pill" role="status">{message}</span>
-          <a className="button-link" href="/agent-test.html">Agent Test Kit</a>
           <a className="button-link" href="/">控制台</a>
         </div>
       </section>

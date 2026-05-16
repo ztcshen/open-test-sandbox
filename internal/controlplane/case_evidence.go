@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,6 +15,10 @@ import (
 func handleCaseEvidence(w http.ResponseWriter, r *http.Request, runtime store.Store) {
 	if runtime == nil {
 		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "case evidence not found"})
+		return
+	}
+	if caseRunID := strings.TrimSpace(r.URL.Query().Get("caseRunId")); caseRunID != "" {
+		writeCaseEvidenceForCaseRunID(w, r, runtime, caseRunID)
 		return
 	}
 	runID := strings.TrimSpace(r.URL.Query().Get("runId"))
@@ -39,11 +44,41 @@ func handleCaseEvidence(w http.ResponseWriter, r *http.Request, runtime store.St
 		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "case evidence not found"})
 		return
 	}
-	selected, ok := selectCaseEvidenceRun(caseRuns, r.URL.Query().Get("caseId"), r.URL.Query().Get("stepId"), run.SummaryJSON)
+	selected, ok := selectCaseEvidenceRun(caseRuns, "", r.URL.Query().Get("caseId"), r.URL.Query().Get("stepId"), run.SummaryJSON)
 	if !ok {
 		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "case evidence not found"})
 		return
 	}
+	writeCaseEvidencePayload(w, r, runtime, run, selected, caseRuns)
+}
+
+func handleCaseRunEvidence(w http.ResponseWriter, r *http.Request, runtime store.Store) {
+	if runtime == nil {
+		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "case evidence not found"})
+		return
+	}
+	caseRunID := strings.TrimSpace(r.URL.Query().Get("caseRunId"))
+	if caseRunID == "" {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "caseRunId is required"})
+		return
+	}
+	writeCaseEvidenceForCaseRunID(w, r, runtime, caseRunID)
+}
+
+func writeCaseEvidenceForCaseRunID(w http.ResponseWriter, r *http.Request, runtime store.Store, caseRunID string) {
+	run, selected, caseRuns, ok, err := findCaseEvidenceRunByCaseRunID(r.Context(), runtime, caseRunID)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	if !ok {
+		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "case evidence not found"})
+		return
+	}
+	writeCaseEvidencePayload(w, r, runtime, run, selected, caseRuns)
+}
+
+func writeCaseEvidencePayload(w http.ResponseWriter, r *http.Request, runtime store.Store, run store.Run, selected store.APICaseRun, caseRuns []store.APICaseRun) {
 	records, err := runtime.ListEvidence(r.Context(), run.ID)
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
@@ -61,7 +96,35 @@ func handleCaseEvidence(w http.ResponseWriter, r *http.Request, runtime store.St
 	writeJSON(w, caseEvidencePayload(run, selected, caseRuns, records, catalog, topologies))
 }
 
-func selectCaseEvidenceRun(caseRuns []store.APICaseRun, caseID string, stepID string, summaryJSON string) (store.APICaseRun, bool) {
+func findCaseEvidenceRunByCaseRunID(ctx context.Context, runtime store.Store, caseRunID string) (store.Run, store.APICaseRun, []store.APICaseRun, bool, error) {
+	runs, err := runtime.ListRuns(ctx)
+	if err != nil {
+		return store.Run{}, store.APICaseRun{}, nil, false, err
+	}
+	for i := len(runs) - 1; i >= 0; i-- {
+		run := runs[i]
+		caseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
+		if err != nil {
+			return store.Run{}, store.APICaseRun{}, nil, false, err
+		}
+		selected, ok := selectCaseEvidenceRun(caseRuns, caseRunID, "", "", run.SummaryJSON)
+		if ok {
+			return run, selected, caseRuns, true, nil
+		}
+	}
+	return store.Run{}, store.APICaseRun{}, nil, false, nil
+}
+
+func selectCaseEvidenceRun(caseRuns []store.APICaseRun, caseRunID string, caseID string, stepID string, summaryJSON string) (store.APICaseRun, bool) {
+	caseRunID = strings.TrimSpace(caseRunID)
+	if caseRunID != "" {
+		for _, item := range caseRuns {
+			if item.ID == caseRunID {
+				return item, true
+			}
+		}
+		return store.APICaseRun{}, false
+	}
 	caseID = strings.TrimSpace(caseID)
 	stepID = strings.TrimSpace(stepID)
 	if caseID == "" && stepID != "" {
@@ -99,6 +162,7 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 	saved := jsonObject(run.SummaryJSON)
 	trace := mapFromAny(saved["trace"])
 	fixture := caseEvidenceSeedData(item.CaseID, catalog, run, caseRuns)
+	logs := caseEvidenceLogs(records, item)
 	topology := topologyEvidenceViewForCase(topologyEvidenceViewInput{
 		RunID:        run.ID,
 		CaseID:       item.CaseID,
@@ -108,10 +172,15 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 	operation := caseRunOperation(request, item.CaseID)
 	summary := map[string]any{
 		"case_id":       item.CaseID,
+		"case_run_id":   item.ID,
 		"run_id":        run.ID,
+		"workflow_id":   run.WorkflowID,
 		"operation":     operation,
 		"evidence_path": run.EvidenceRoot,
 		"status":        item.Status,
+	}
+	if stepID := firstNonEmpty(valueString(request["stepId"]), valueString(jsonObject(item.RequestSummaryJSON)["stepId"])); stepID != "" {
+		summary["step_id"] = stepID
 	}
 	if code, ok := response["http_code"]; ok {
 		summary["actual_http_code"] = code
@@ -129,7 +198,7 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 			"response":   response,
 			"assertions": assertions,
 			"services":   []map[string]any{},
-			"logs":       []map[string]any{},
+			"logs":       logs,
 			"mysql":      map[string]any{"ok": true, "queries": []map[string]any{}},
 			"fixture":    fixture,
 			"topology":   topology,
@@ -274,6 +343,58 @@ func caseDependencyPayloads(caseID string, catalog store.ProfileCatalog) []map[s
 		return valueString(out[i]["sortOrder"]) < valueString(out[j]["sortOrder"])
 	})
 	return out
+}
+
+func caseEvidenceLogs(records []store.EvidenceRecord, item store.APICaseRun) []map[string]any {
+	request := jsonObject(item.RequestSummaryJSON)
+	stepID := strings.TrimSpace(valueString(request["stepId"]))
+	out := []map[string]any{}
+	for _, record := range records {
+		if !caseEvidenceLogRecordMatches(record, item, stepID) {
+			continue
+		}
+		summary := jsonObject(record.Summary)
+		payload := map[string]any{
+			"id":        record.ID,
+			"kind":      record.Kind,
+			"uri":       record.URI,
+			"mediaType": record.MediaType,
+			"summary":   summary,
+		}
+		if !record.CreatedAt.IsZero() {
+			payload["createdAt"] = record.CreatedAt
+		}
+		if body, ok := evidenceRecordObject(record); ok {
+			if systems := listFromAny(body["systems"]); len(systems) > 0 {
+				payload["systems"] = systems
+			} else if lines := listFromAny(body["lines"]); len(lines) > 0 {
+				payload["lines"] = lines
+			} else {
+				payload["body"] = body
+			}
+		}
+		out = append(out, payload)
+	}
+	return out
+}
+
+func caseEvidenceLogRecordMatches(record store.EvidenceRecord, item store.APICaseRun, stepID string) bool {
+	switch strings.ToLower(strings.TrimSpace(record.Kind)) {
+	case workflowStepRuntimeLogsKind, "logs", "log", "runtime-log", "runtime-logs", "elk_logs":
+	default:
+		return false
+	}
+	if record.CaseRunID == item.ID || record.CaseRunID == item.CaseID {
+		return true
+	}
+	if stepID != "" && record.CaseRunID == stepID {
+		return true
+	}
+	summary := jsonObject(record.Summary)
+	if valueString(summary["caseId"]) == item.CaseID {
+		return true
+	}
+	return stepID != "" && valueString(summary["stepId"]) == stepID
 }
 
 func caseWorkflowPrefix(caseID string, catalog store.ProfileCatalog) []store.CatalogWorkflowBinding {

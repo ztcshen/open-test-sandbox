@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.credit_contract_type.blank.invalid",
-  "displayName": "放款申请-credit_contract_type为空",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

@@ -1,6 +1,0 @@
-{
-  "id": "financing.trial.daily_rate.non_numeric.invalid",
-  "displayName": "融资试算-daily_rate非数字",
-  "nodeId": "scf.financing.trial",
-  "requiredForAdmission": false
-}

@@ -1,5 +1,0 @@
-{
-  "id": "workflow.local_notify_receiver_callback_smoke",
-  "displayName": "本地回调接收器冒烟验证",
-  "description": "启动本地通知接收器后，发送一笔融资审批回调并验证 latest capture 命中。"
-}

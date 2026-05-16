@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.repay_principal.too_small.invalid",
-  "displayName": "还款申请-repay_principal过小",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.batch_no.empty.invalid",
-  "displayName": "还款申请-batch_no为空",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

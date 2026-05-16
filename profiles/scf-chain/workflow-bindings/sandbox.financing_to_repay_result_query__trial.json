@@ -1,8 +1,0 @@
-{
-  "workflowId": "sandbox.financing_to_repay_result_query",
-  "stepId": "trial",
-  "nodeId": "scf.financing.trial",
-  "caseId": "financing.trial.default",
-  "required": true,
-  "sortOrder": 1
-}

@@ -2,8 +2,8 @@
 
 API Cases are reviewable JSON files that describe one HTTP interaction, the
 assertions to check, and the Evidence files a run should produce. They are
-profile-neutral: domain language belongs in profile bundles and example data,
-not in the core runner.
+profile-neutral: domain language belongs in external profile bundles and
+example data, not in the core runner.
 
 ## Case File
 
@@ -84,6 +84,72 @@ When `otsandbox case run` receives `--store-url`, it records:
 The profile id comes from `--profile` and defaults to `default`. Store indexing
 does not replace the Evidence bundle; it makes local runs searchable and
 connects them to profile or workflow records.
+
+## Async Batch Runs
+
+The control plane can start a local asynchronous API case batch for agent or CI
+callers that already know which interface nodes are affected by a change:
+
+```http
+POST /api/cases/batch-runs
+Content-Type: application/json
+```
+
+```json
+{
+  "requestId": "change-001",
+  "nodeIds": ["node.alpha", "node.beta"],
+  "baseUrl": "http://127.0.0.1:8080",
+  "evidenceDir": ".runtime/case-batches",
+  "overrides": {
+    "id": "item-override"
+  }
+}
+```
+
+Use `nodeIds` to run all profile API cases attached to one or more interface
+nodes. To run a workflow-shaped regression, send `workflowId` instead:
+
+```json
+{
+  "requestId": "workflow-001",
+  "workflowId": "workflow.ten"
+}
+```
+
+The response is `202 Accepted` and contains a `batchRunId`, JSON `reportUrl`,
+and temporary HTML `htmlReportUrl`. The batch runner selects every matching
+profile API case, returns immediately, and executes the selected cases in the
+background. Workflow selection follows `workflowBindings` sorted by
+`sortOrder` and `stepId`. Each finished case is still recorded as a normal API
+case run with Evidence and Store rows.
+
+Poll the report URL until `status` becomes `passed` or `failed`:
+
+```http
+GET /api/cases/batch-runs/{batchRunId}
+```
+
+The JSON report includes aggregate counts, optional `workflowId`,
+`htmlReportPath`, `htmlReportUrl`, and per-case `stepId`, `runId`,
+`caseRunId`, `status`, `viewerUrl`, `detailUrl`, `evidencePath`, and
+`elapsedMs`. The HTML report is rendered from the built-in report template
+under the Evidence directory and is refreshed as each case completes, so a
+caller can return either a machine-readable result or a human-readable
+temporary report.
+
+When a case fails, use the per-case `detailUrl` or query the synchronous detail
+API directly:
+
+```http
+GET /api/case-run/evidence?caseRunId={caseRunId}
+```
+
+The detail payload reuses the same Evidence shape as the browser evidence
+viewer. It includes the selected case summary, request, response, assertions,
+precondition fixture context, stored trace topology, and persisted runtime log
+records when they exist. A single-case detail lookup is synchronous because it
+only reads Store rows and local Evidence files.
 
 ## Examples
 

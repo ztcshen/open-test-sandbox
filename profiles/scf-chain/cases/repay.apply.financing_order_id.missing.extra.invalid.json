@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.financing_order_id.missing.extra.invalid",
-  "displayName": "还款申请-financing_order_id缺失候选",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

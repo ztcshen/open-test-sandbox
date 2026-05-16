@@ -1,6 +1,0 @@
-{
-  "id": "financing.result.query.node.mch_id.unknown.invalid",
-  "displayName": "融资结果查询-mch_id不存在当前返回订单不存在",
-  "nodeId": "scf.financing.result.query",
-  "requiredForAdmission": false
-}

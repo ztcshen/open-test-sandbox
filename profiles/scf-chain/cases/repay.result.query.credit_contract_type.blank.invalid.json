@@ -1,6 +1,0 @@
-{
-  "id": "repay.result.query.credit_contract_type.blank.invalid",
-  "displayName": "还款结果查询-credit_contract_type为空",
-  "nodeId": "scf.repay.result.query",
-  "requiredForAdmission": false
-}

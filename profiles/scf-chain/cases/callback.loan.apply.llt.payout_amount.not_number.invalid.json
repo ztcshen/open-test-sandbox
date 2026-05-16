@@ -1,6 +1,0 @@
-{
-  "id": "callback.loan.apply.llt.payout_amount.not_number.invalid",
-  "displayName": "放款结果回调-payout_amount非数字",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "requiredForAdmission": false
-}

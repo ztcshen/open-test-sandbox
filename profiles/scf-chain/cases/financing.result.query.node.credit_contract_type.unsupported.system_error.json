@@ -1,6 +1,0 @@
-{
-  "id": "financing.result.query.node.credit_contract_type.unsupported.system_error",
-  "displayName": "融资结果查询-credit_contract_type非法当前返回系统异常",
-  "nodeId": "scf.financing.result.query",
-  "requiredForAdmission": false
-}

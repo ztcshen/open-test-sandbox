@@ -1,6 +1,0 @@
-{
-  "id": "callback.loan.apply.llt.callback_path.invalid",
-  "displayName": "放款结果回调-callback_path异常",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "requiredForAdmission": false
-}

@@ -1,6 +1,0 @@
-{
-  "id": "repay.result.query.outer_business_id.blank.invalid",
-  "displayName": "还款结果查询-outer_business_id为空",
-  "nodeId": "scf.repay.result.query",
-  "requiredForAdmission": false
-}

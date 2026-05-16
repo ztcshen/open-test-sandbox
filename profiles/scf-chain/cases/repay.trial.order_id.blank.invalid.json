@@ -1,6 +1,0 @@
-{
-  "id": "repay.trial.order_id.blank.invalid",
-  "displayName": "还款试算-order_id为空",
-  "nodeId": "scf.repay.trial",
-  "requiredForAdmission": false
-}

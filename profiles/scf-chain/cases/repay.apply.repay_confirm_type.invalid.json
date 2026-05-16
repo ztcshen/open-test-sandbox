@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.repay_confirm_type.invalid",
-  "displayName": "还款申请-repay_confirm_type不合法",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

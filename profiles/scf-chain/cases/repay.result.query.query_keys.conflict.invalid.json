@@ -1,6 +1,0 @@
-{
-  "id": "repay.result.query.query_keys.conflict.invalid",
-  "displayName": "还款结果查询-查询条件冲突",
-  "nodeId": "scf.repay.result.query",
-  "requiredForAdmission": false
-}

@@ -1,6 +1,0 @@
-{
-  "id": "financing.apply.order_id.too_long.invalid",
-  "displayName": "融资申请-order_id超长",
-  "nodeId": "scf.financing.apply",
-  "requiredForAdmission": false
-}

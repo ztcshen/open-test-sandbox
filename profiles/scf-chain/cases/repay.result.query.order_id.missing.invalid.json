@@ -1,6 +1,0 @@
-{
-  "id": "repay.result.query.order_id.missing.invalid",
-  "displayName": "还款结果查询-order_id缺失",
-  "nodeId": "scf.repay.result.query",
-  "requiredForAdmission": false
-}

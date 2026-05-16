@@ -1,9 +1,13 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -44,8 +48,283 @@ func TestStoreCommandsRejectUnsupportedBackendURLs(t *testing.T) {
 	}
 }
 
+func TestProfileInitCommandWritesExternalBundle(t *testing.T) {
+	profileDir := filepath.Join(t.TempDir(), "external-profile")
+
+	out := runCLI(t, "profile", "init", "--output", profileDir, "--id", "sample", "--display-name", "Sample Profile")
+	if !strings.Contains(out, "Initialized external profile bundle: sample") || !strings.Contains(out, profileDir) {
+		t.Fatalf("profile init output = %q", out)
+	}
+	for _, path := range []string{
+		"profile.json",
+		"README.md",
+		".gitignore",
+		"services",
+		"workflows",
+		"interface-nodes",
+		"cases",
+		"request-templates",
+		"case-dependencies",
+		"workflow-bindings",
+		"fixtures",
+	} {
+		if _, err := os.Stat(filepath.Join(profileDir, path)); err != nil {
+			t.Fatalf("expected generated path %s: %v", path, err)
+		}
+	}
+	ignore, err := os.ReadFile(filepath.Join(profileDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read generated ignore file: %v", err)
+	}
+	for _, want := range []string{".runtime/", "*.sqlite", "*.log"} {
+		if !strings.Contains(string(ignore), want) {
+			t.Fatalf("generated ignore file missing %q:\n%s", want, ignore)
+		}
+	}
+
+	inspect := runCLI(t, "profile", "inspect", "--profile", profileDir)
+	if !strings.Contains(inspect, "Profile: sample") || !strings.Contains(inspect, "Display Name: Sample Profile") {
+		t.Fatalf("inspect generated profile = %q", inspect)
+	}
+}
+
+func TestProfileInitCommandRejectsCoreProfilesPath(t *testing.T) {
+	out := runCLIFails(t, "profile", "init", "--output", "profiles/sample")
+	if !strings.Contains(out, "outside this core repository") {
+		t.Fatalf("profile init rejection output = %q", out)
+	}
+}
+
+func TestProfileInstallCommandCopiesBundleIntoProfileHome(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source-profile")
+	writeWorkflowProfile(t, sourceDir)
+	for _, path := range []string{
+		filepath.Join(".runtime", "store.sqlite"),
+		filepath.Join(".runtime", "evidence", "run.json"),
+		filepath.Join(".git", "config"),
+		"debug.log",
+		"local.sqlite",
+	} {
+		fullPath := filepath.Join(sourceDir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("create generated state parent %s: %v", path, err)
+		}
+		if err := os.WriteFile(fullPath, []byte("generated"), 0o644); err != nil {
+			t.Fatalf("write generated state %s: %v", path, err)
+		}
+	}
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+
+	out := runCLI(t, "profile", "install", "--from", sourceDir, "--profile-home", profileHome)
+	if !strings.Contains(out, "Installed profile: sample") || !strings.Contains(out, filepath.Join(profileHome, "sample")) {
+		t.Fatalf("profile install output = %q", out)
+	}
+	for _, path := range []string{"profile.json", filepath.Join("workflows", "workflow.json"), filepath.Join("cases", "case.json")} {
+		if _, err := os.Stat(filepath.Join(profileHome, "sample", path)); err != nil {
+			t.Fatalf("expected installed path %s: %v", path, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(".runtime", "store.sqlite"),
+		filepath.Join(".runtime", "evidence", "run.json"),
+		filepath.Join(".git", "config"),
+		"debug.log",
+		"local.sqlite",
+	} {
+		if _, err := os.Stat(filepath.Join(profileHome, "sample", path)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("generated state should not be installed at %s: %v", path, err)
+		}
+	}
+
+	inspect := runCLI(t, "profile", "inspect", "--profile", "sample", "--profile-home", profileHome)
+	if !strings.Contains(inspect, "Profile: sample") || !strings.Contains(inspect, "Workflows: 1") {
+		t.Fatalf("inspect installed profile = %q", inspect)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	verify := runCLI(t, "profile", "verify", "--profile", "sample", "--profile-home", profileHome, "--store-url", dbPath)
+	if !strings.Contains(verify, "Profile Verification: sample") || !strings.Contains(verify, "OK: true") {
+		t.Fatalf("verify installed profile = %q", verify)
+	}
+}
+
+func TestProfilePackCommandWritesCleanArchive(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source-profile")
+	writeWorkflowProfile(t, sourceDir)
+	for _, path := range []string{
+		filepath.Join(".runtime", "store.sqlite"),
+		"debug.log",
+		"local.sqlite",
+	} {
+		fullPath := filepath.Join(sourceDir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("create generated state parent %s: %v", path, err)
+		}
+		if err := os.WriteFile(fullPath, []byte("generated"), 0o644); err != nil {
+			t.Fatalf("write generated state %s: %v", path, err)
+		}
+	}
+	outputPath := filepath.Join(t.TempDir(), "sample-profile.tar.gz")
+
+	out := runCLI(t, "profile", "pack", "--profile", sourceDir, "--output", outputPath, "--json")
+
+	var report struct {
+		ID           string `json:"id"`
+		SourcePath   string `json:"sourcePath"`
+		OutputPath   string `json:"outputPath"`
+		BundleDigest string `json:"bundleDigest"`
+		FileCount    int    `json:"fileCount"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile pack report: %v\n%s", err, out)
+	}
+	if report.ID != "sample" || report.SourcePath != sourceDir || report.OutputPath != outputPath || report.FileCount == 0 || !strings.HasPrefix(report.BundleDigest, "sha256:") {
+		t.Fatalf("profile pack report = %#v", report)
+	}
+	entries := readTarGZEntries(t, outputPath)
+	for _, want := range []string{"sample/profile.json", "sample/workflows/workflow.json", "sample/cases/case.json"} {
+		if !containsString(entries, want) {
+			t.Fatalf("profile archive missing %s: %#v", want, entries)
+		}
+	}
+	for _, unwanted := range []string{"sample/.runtime/store.sqlite", "sample/debug.log", "sample/local.sqlite"} {
+		if containsString(entries, unwanted) {
+			t.Fatalf("profile archive included generated state %s: %#v", unwanted, entries)
+		}
+	}
+}
+
+func TestProfilePackCommandResolvesInstalledProfileID(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source-profile")
+	writeWorkflowProfile(t, sourceDir)
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+	runCLI(t, "profile", "install", "--from", sourceDir, "--profile-home", profileHome)
+	outputPath := filepath.Join(t.TempDir(), "installed-profile.tar.gz")
+
+	out := runCLI(t, "profile", "pack", "--profile", "sample", "--profile-home", profileHome, "--output", outputPath)
+
+	if !strings.Contains(out, "Packed profile: sample") || !strings.Contains(out, outputPath) {
+		t.Fatalf("profile pack installed output = %q", out)
+	}
+	if !containsString(readTarGZEntries(t, outputPath), "sample/profile.json") {
+		t.Fatalf("installed profile archive missing manifest")
+	}
+}
+
+func TestProfileInstallCommandAcceptsPackedArchive(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source-profile")
+	writeWorkflowProfile(t, sourceDir)
+	archivePath := filepath.Join(t.TempDir(), "sample-profile.tar.gz")
+	runCLI(t, "profile", "pack", "--profile", sourceDir, "--output", archivePath)
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+
+	out := runCLI(t, "profile", "install", "--from", archivePath, "--profile-home", profileHome, "--json")
+
+	var report struct {
+		ID         string `json:"id"`
+		SourcePath string `json:"sourcePath"`
+		TargetPath string `json:"targetPath"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode archive install report: %v\n%s", err, out)
+	}
+
+	if report.ID != "sample" || report.SourcePath != archivePath || report.TargetPath != filepath.Join(profileHome, "sample") {
+		t.Fatalf("profile install archive report = %#v", report)
+	}
+	if _, err := os.Stat(filepath.Join(profileHome, "sample", "profile.json")); err != nil {
+		t.Fatalf("installed archive manifest missing: %v", err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	verify := runCLI(t, "profile", "verify", "--profile", "sample", "--profile-home", profileHome, "--store-url", dbPath)
+	if !strings.Contains(verify, "Profile Verification: sample") || !strings.Contains(verify, "OK: true") {
+		t.Fatalf("verify installed archive profile = %q", verify)
+	}
+}
+
+func TestProfileInstallCommandRejectsUnsafeArchivePath(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "unsafe.tar.gz")
+	writeTarGZEntries(t, archivePath, map[string]string{
+		"sample/profile.json": `{"id":"sample","displayName":"Sample Profile"}`,
+		"../escaped.txt":      "nope",
+	})
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+
+	out := runCLIFails(t, "profile", "install", "--from", archivePath, "--profile-home", profileHome)
+
+	if !strings.Contains(out, "escapes profile root") {
+		t.Fatalf("unsafe archive output = %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(profileHome), "escaped.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unsafe archive wrote escaped path: %v", err)
+	}
+}
+
+func TestProfileListCommandReportsInstalledBundles(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source-profile")
+	writeWorkflowProfile(t, sourceDir)
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+	runCLI(t, "profile", "install", "--from", sourceDir, "--profile-home", profileHome)
+
+	out := runCLI(t, "profile", "list", "--profile-home", profileHome, "--json")
+	var report struct {
+		ProfileHome string `json:"profileHome"`
+		Profiles    []struct {
+			ID           string `json:"id"`
+			DisplayName  string `json:"displayName"`
+			Path         string `json:"path"`
+			BundleDigest string `json:"bundleDigest"`
+			Counts       struct {
+				Workflows int `json:"workflows"`
+				APICases  int `json:"apiCases"`
+			} `json:"counts"`
+		} `json:"profiles"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile list: %v\n%s", err, out)
+	}
+	if report.ProfileHome != profileHome || len(report.Profiles) != 1 {
+		t.Fatalf("profile list identity = %#v", report)
+	}
+	item := report.Profiles[0]
+	if item.ID != "sample" || item.DisplayName != "Sample Profile" || item.Path != filepath.Join(profileHome, "sample") || !strings.HasPrefix(item.BundleDigest, "sha256:") {
+		t.Fatalf("profile list item = %#v", item)
+	}
+	if item.Counts.Workflows != 1 || item.Counts.APICases != 1 {
+		t.Fatalf("profile list counts = %#v", item.Counts)
+	}
+}
+
+func TestProfileListCommandReportsInvalidInstalledBundle(t *testing.T) {
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+	brokenDir := filepath.Join(profileHome, "broken")
+	if err := os.MkdirAll(brokenDir, 0o755); err != nil {
+		t.Fatalf("create broken profile dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brokenDir, "profile.json"), []byte(`{"id":`), 0o644); err != nil {
+		t.Fatalf("write broken profile: %v", err)
+	}
+
+	out := runCLI(t, "profile", "list", "--profile-home", profileHome, "--json")
+	var report struct {
+		Profiles []struct {
+			ID    string `json:"id"`
+			Path  string `json:"path"`
+			Valid bool   `json:"valid"`
+			Error string `json:"error"`
+		} `json:"profiles"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode invalid profile list report: %v\n%s", err, out)
+	}
+	if len(report.Profiles) != 1 || report.Profiles[0].ID != "broken" || report.Profiles[0].Path != brokenDir || report.Profiles[0].Valid || report.Profiles[0].Error == "" {
+		t.Fatalf("invalid profile list report = %#v", report)
+	}
+}
+
 func TestProfileInspectCommand(t *testing.T) {
-	out := runCLI(t, "profile", "inspect", "--profile", "../../profiles/empty")
+	profileDir := writeEmptyProfileBundle(t)
+	out := runCLI(t, "profile", "inspect", "--profile", profileDir)
 	for _, want := range []string{"Profile: empty", "Display Name: Empty Profile", "Workflows: 0", "API Cases: 0", "Request Templates: 0", "Case Dependencies: 0", "Workflow Bindings: 0"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("profile inspect output missing %q: %q", want, out)
@@ -53,10 +332,301 @@ func TestProfileInspectCommand(t *testing.T) {
 	}
 }
 
+func TestProfileAuditCommandAcceptsPackedArchive(t *testing.T) {
+	profileDir := writeEmptyProfileBundle(t)
+	archivePath := filepath.Join(t.TempDir(), "empty-profile.tgz")
+	runCLI(t, "profile", "pack", "--profile", profileDir, "--output", archivePath)
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+
+	out := runCLI(t, "profile", "audit", "--profile", archivePath, "--profile-home", profileHome, "--json")
+
+	var report struct {
+		ProfileID string `json:"profileId"`
+		OK        bool   `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile audit archive report: %v\n%s", err, out)
+	}
+	targetPath := filepath.Join(profileHome, "empty")
+	if report.ProfileID != "empty" || !report.OK {
+		t.Fatalf("profile audit archive report = %#v", report)
+	}
+	if _, err := os.Stat(filepath.Join(targetPath, "profile.json")); err != nil {
+		t.Fatalf("installed audit archive manifest missing: %v", err)
+	}
+}
+
+func TestProfileVerifyCommandAuditsPublishesAndChecksReadModels(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeEmptyProfileBundle(t)
+
+	out := runCLI(t, "profile", "verify", "--profile", profileDir, "--store-url", dbPath, "--json")
+
+	var report struct {
+		OK    bool `json:"ok"`
+		Audit struct {
+			OK         bool `json:"ok"`
+			IssueCount int  `json:"issueCount"`
+		} `json:"audit"`
+		Publish struct {
+			ProfileID  string   `json:"profileId"`
+			ReadModels []string `json:"readModels"`
+		} `json:"publish"`
+		Checks []struct {
+			Name   string `json:"name"`
+			OK     bool   `json:"ok"`
+			Detail string `json:"detail"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile verify report: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Audit.OK || report.Audit.IssueCount != 0 || report.Publish.ProfileID != "empty" {
+		t.Fatalf("profile verify report = %#v", report)
+	}
+	if strings.Join(report.Publish.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
+		t.Fatalf("profile verify read models = %#v", report.Publish.ReadModels)
+	}
+	if len(report.Checks) < 5 {
+		t.Fatalf("profile verify checks = %#v", report.Checks)
+	}
+	for _, check := range report.Checks {
+		if !check.OK || check.Detail == "" {
+			t.Fatalf("profile verify check = %#v", check)
+		}
+	}
+	if got := sqliteScalar(t, dbPath, "select value from kv where key = 'active_profile_id';"); got != "empty" {
+		t.Fatalf("active profile id after verify = %q", got)
+	}
+}
+
+func TestProfileVerifyCommandAcceptsPackedArchive(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeEmptyProfileBundle(t)
+	archivePath := filepath.Join(t.TempDir(), "empty-profile.tgz")
+	runCLI(t, "profile", "pack", "--profile", profileDir, "--output", archivePath)
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+
+	out := runCLI(t, "profile", "verify", "--profile", archivePath, "--profile-home", profileHome, "--store-url", dbPath, "--json")
+
+	var report struct {
+		OK      bool `json:"ok"`
+		Publish struct {
+			ProfileID  string `json:"profileId"`
+			BundlePath string `json:"bundlePath"`
+		} `json:"publish"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile verify archive report: %v\n%s", err, out)
+	}
+	targetPath := filepath.Join(profileHome, "empty")
+	if !report.OK || report.Publish.ProfileID != "empty" || report.Publish.BundlePath != targetPath {
+		t.Fatalf("profile verify archive report = %#v", report)
+	}
+	if got := sqliteScalar(t, dbPath, "select bundle_path from profile_indexes where profile_id = 'empty';"); got != targetPath {
+		t.Fatalf("archive verify profile index path = %q, want %q", got, targetPath)
+	}
+}
+
+func TestProfileVerifyCommandStopsBeforePublishWhenAuditFails(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := filepath.Join(dir, "profile")
+	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.missing"}],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	storePath := filepath.Join(dir, "store.sqlite")
+
+	out := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store-url", storePath)
+	if !strings.Contains(out, "profile audit failed") || !strings.Contains(out, "api-case-node-missing") {
+		t.Fatalf("profile verify failure output = %q", out)
+	}
+
+	s, err := sqlite.Open(context.Background(), sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	if _, err := s.GetProfileIndex(context.Background(), "sample"); err == nil {
+		t.Fatalf("profile verify wrote profile index after audit failure")
+	} else if err != store.ErrNotFound {
+		t.Fatalf("get profile index after verify failure: %v", err)
+	}
+}
+
+func TestProfileVerifyCommandCanRequirePassedAPICaseRuns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeInterfaceNodeCaseProfile(t)
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run-alpha",
+		ProfileID:  "sample",
+		WorkflowID: "case.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  mustParseTime(t, "2026-05-14T01:00:00Z"),
+		FinishedAt: mustParseTime(t, "2026-05-14T01:00:01Z"),
+		CreatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
+		UpdatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
+	}); err != nil {
+		t.Fatalf("create alpha run: %v", err)
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:         "case-run-alpha",
+		RunID:      "run-alpha",
+		CaseID:     "case.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  mustParseTime(t, "2026-05-14T01:00:00Z"),
+		FinishedAt: mustParseTime(t, "2026-05-14T01:00:01Z"),
+		CreatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
+	}); err != nil {
+		t.Fatalf("record alpha case run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	missing := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store-url", dbPath, "--require-case-runs")
+	if !strings.Contains(missing, "api-case-run:case.beta") || !strings.Contains(missing, "no passed run") {
+		t.Fatalf("missing case run verify output = %q", missing)
+	}
+	missingJSON := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store-url", dbPath, "--require-case-runs", "--json")
+	for _, want := range []string{`"ok": false`, `"firstFailed": "api-case-run:case.beta"`, `"name": "api-case-run:case.beta"`} {
+		if !strings.Contains(missingJSON, want) {
+			t.Fatalf("missing case run json output does not contain %q:\n%s", want, missingJSON)
+		}
+	}
+
+	s, err = sqlite.Open(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("reopen sqlite store: %v", err)
+	}
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run-beta",
+		ProfileID:  "sample",
+		WorkflowID: "case.beta",
+		Status:     store.StatusPassed,
+		StartedAt:  mustParseTime(t, "2026-05-14T01:01:00Z"),
+		FinishedAt: mustParseTime(t, "2026-05-14T01:01:01Z"),
+		CreatedAt:  mustParseTime(t, "2026-05-14T01:01:01Z"),
+		UpdatedAt:  mustParseTime(t, "2026-05-14T01:01:01Z"),
+	}); err != nil {
+		t.Fatalf("create beta run: %v", err)
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:         "case-run-beta",
+		RunID:      "run-beta",
+		CaseID:     "case.beta",
+		Status:     store.StatusPassed,
+		StartedAt:  mustParseTime(t, "2026-05-14T01:01:00Z"),
+		FinishedAt: mustParseTime(t, "2026-05-14T01:01:01Z"),
+		CreatedAt:  mustParseTime(t, "2026-05-14T01:01:01Z"),
+	}); err != nil {
+		t.Fatalf("record beta case run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close reopened store: %v", err)
+	}
+
+	out := runCLI(t, "profile", "verify", "--profile", profileDir, "--store-url", dbPath, "--require-case-runs", "--json")
+	var report struct {
+		OK      bool `json:"ok"`
+		Summary struct {
+			TotalChecks          int  `json:"totalChecks"`
+			PassedChecks         int  `json:"passedChecks"`
+			FailedChecks         int  `json:"failedChecks"`
+			RequiredCaseRuns     bool `json:"requiredCaseRuns"`
+			RequiredWorkflowRuns bool `json:"requiredWorkflowRuns"`
+		} `json:"summary"`
+		Checks []struct {
+			Name string `json:"name"`
+			OK   bool   `json:"ok"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile verify runtime report: %v\n%s", err, out)
+	}
+	if !report.OK || !hasProfileVerifyCheck(report.Checks, "api-case-run:case.alpha") || !hasProfileVerifyCheck(report.Checks, "api-case-run:case.beta") {
+		t.Fatalf("profile verify runtime report = %#v", report)
+	}
+}
+
+func TestProfileVerifyCommandCanRequirePassedWorkflowRuns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := filepath.Join(t.TempDir(), "profile")
+	writeWorkflowProfile(t, profileDir)
+
+	missing := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store-url", dbPath, "--require-workflow-runs")
+	if !strings.Contains(missing, "workflow-run:workflow.alpha") || !strings.Contains(missing, "no passed run") {
+		t.Fatalf("missing workflow run verify output = %q", missing)
+	}
+
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run.workflow.alpha",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  mustParseTime(t, "2026-05-14T02:00:00Z"),
+		FinishedAt: mustParseTime(t, "2026-05-14T02:00:01Z"),
+		CreatedAt:  mustParseTime(t, "2026-05-14T02:00:01Z"),
+		UpdatedAt:  mustParseTime(t, "2026-05-14T02:00:01Z"),
+	}); err != nil {
+		t.Fatalf("create workflow run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t, "profile", "verify", "--profile", profileDir, "--store-url", dbPath, "--require-workflow-runs", "--json")
+	var report struct {
+		OK      bool `json:"ok"`
+		Summary struct {
+			TotalChecks          int  `json:"totalChecks"`
+			PassedChecks         int  `json:"passedChecks"`
+			FailedChecks         int  `json:"failedChecks"`
+			RequiredCaseRuns     bool `json:"requiredCaseRuns"`
+			RequiredWorkflowRuns bool `json:"requiredWorkflowRuns"`
+		} `json:"summary"`
+		Checks []struct {
+			Name string `json:"name"`
+			OK   bool   `json:"ok"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile verify workflow report: %v\n%s", err, out)
+	}
+	if !report.OK || !hasProfileVerifyCheck(report.Checks, "workflow-run:workflow.alpha") {
+		t.Fatalf("profile verify workflow report = %#v", report)
+	}
+	if report.Summary.TotalChecks != len(report.Checks) || report.Summary.PassedChecks != len(report.Checks) || report.Summary.FailedChecks != 0 {
+		t.Fatalf("profile verify summary counts = %#v checks=%d", report.Summary, len(report.Checks))
+	}
+	if !report.Summary.RequiredWorkflowRuns || report.Summary.RequiredCaseRuns {
+		t.Fatalf("profile verify summary gates = %#v", report.Summary)
+	}
+}
+
 func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeEmptyProfileBundle(t)
 
-	out := runCLI(t, "profile", "import", "--from", "../../profiles/empty", "--store-url", dbPath)
+	out := runCLI(t, "profile", "import", "--from", profileDir, "--store-url", dbPath)
 	if !strings.Contains(out, "Imported profile: empty") {
 		t.Fatalf("profile import output = %q", out)
 	}
@@ -78,10 +648,39 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
+func TestProfileImportCommandAcceptsPackedArchive(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeEmptyProfileBundle(t)
+	archivePath := filepath.Join(t.TempDir(), "empty-profile.tar.gz")
+	runCLI(t, "profile", "pack", "--profile", profileDir, "--output", archivePath)
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+
+	out := runCLI(t, "profile", "import", "--from", archivePath, "--profile-home", profileHome, "--store-url", dbPath, "--json")
+
+	var report struct {
+		ProfileID  string `json:"profileId"`
+		BundlePath string `json:"bundlePath"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile import archive report: %v\n%s", err, out)
+	}
+	targetPath := filepath.Join(profileHome, "empty")
+	if report.ProfileID != "empty" || report.BundlePath != targetPath {
+		t.Fatalf("profile import archive report = %#v", report)
+	}
+	if _, err := os.Stat(filepath.Join(targetPath, "profile.json")); err != nil {
+		t.Fatalf("installed archive manifest missing: %v", err)
+	}
+	if got := sqliteScalar(t, dbPath, "select source_path from config_versions where active = 1;"); got != targetPath {
+		t.Fatalf("archive import config source path = %q, want %q", got, targetPath)
+	}
+}
+
 func TestConfigPublishCommandIndexesBundleInStore(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeEmptyProfileBundle(t)
 
-	out := runCLI(t, "config", "publish", "--from", "../../profiles/empty", "--store-url", dbPath, "--json")
+	out := runCLI(t, "config", "publish", "--from", profileDir, "--store-url", dbPath, "--json")
 
 	var report struct {
 		ProfileID     string   `json:"profileId"`
@@ -169,8 +768,9 @@ func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *test
 
 func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeEmptyProfileBundle(t)
 
-	out := runCLI(t, "profile", "import", "--from", "../../profiles/empty", "--store-url", dbPath, "--json")
+	out := runCLI(t, "profile", "import", "--from", profileDir, "--store-url", dbPath, "--json")
 
 	var report struct {
 		ProfileID    string `json:"profileId"`
@@ -203,7 +803,7 @@ func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode profile import json: %v\n%s", err, out)
 	}
-	if report.ProfileID != "empty" || report.BundlePath != "../../profiles/empty" {
+	if report.ProfileID != "empty" || report.BundlePath != profileDir {
 		t.Fatalf("report profile/path = %#v", report)
 	}
 	if !strings.HasPrefix(report.BundleDigest, "sha256:") || report.StorePath != dbPath || report.ImportedAt == "" {
@@ -385,6 +985,40 @@ func TestProfileImportCommandCanAuditImportedProfile(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("audited text import output missing %q: %q", want, text)
 		}
+	}
+}
+
+func TestProfileImportCommandCanRequireCleanAuditBeforeWritingStore(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := filepath.Join(dir, "profile")
+	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.missing"}],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	storePath := filepath.Join(dir, "store.sqlite")
+
+	out := runCLIFails(t, "profile", "import", "--from", profileDir, "--store-url", storePath, "--require-audit-ok")
+	if !strings.Contains(out, "profile audit failed") || !strings.Contains(out, "api-case-node-missing") {
+		t.Fatalf("strict profile import output = %q", out)
+	}
+
+	s, err := sqlite.Open(context.Background(), sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	if _, err := s.GetProfileIndex(context.Background(), "sample"); err == nil {
+		t.Fatalf("strict profile import wrote profile index")
+	} else if err != store.ErrNotFound {
+		t.Fatalf("get profile index after strict failure: %v", err)
 	}
 }
 
@@ -934,6 +1568,169 @@ func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 	}
 }
 
+func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("mode") {
+		case "bad":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"status":"rejected"}`)
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"status":"accepted"}`)
+		}
+	}))
+	defer server.Close()
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	listOut := runCLI(t, "interface-node", "discover", "--store-url", storePath, "--filter", "Result Lookup", "--json")
+	var listReport struct {
+		Items []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"displayName"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
+		t.Fatalf("decode interface-node discover json: %v\n%s", err, listOut)
+	}
+	if len(listReport.Items) != 1 || listReport.Items[0].ID != "node.alpha" {
+		t.Fatalf("interface-node discover = %#v", listReport.Items)
+	}
+
+	outputDir := filepath.Join(t.TempDir(), "report")
+	out := runCLI(t,
+		"interface-node", "case", "report",
+		"--node", listReport.Items[0].ID,
+		"--store-url", storePath,
+		"--base-url", server.URL,
+		"--output-dir", outputDir,
+		"--timeout-seconds", "1",
+		"--json",
+	)
+
+	var report struct {
+		OK        bool   `json:"ok"`
+		NodeID    string `json:"nodeId"`
+		ReportURL string `json:"reportUrl"`
+		Counts    struct {
+			Total          int `json:"total"`
+			Passed         int `json:"passed"`
+			Failed         int `json:"failed"`
+			DerivedConfigs int `json:"derivedConfigs"`
+		} `json:"counts"`
+		Results []struct {
+			RunID     string `json:"runId"`
+			CaseRunID string `json:"caseRunId"`
+			DetailURL string `json:"detailUrl"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode report json: %v\n%s", err, out)
+	}
+	if !report.OK || report.NodeID != "node.alpha" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 || report.Counts.DerivedConfigs != 1 {
+		t.Fatalf("report = %#v", report)
+	}
+	if len(report.Results) != 2 || report.Results[0].RunID == "" || report.Results[0].CaseRunID != report.Results[0].RunID+".case" || report.Results[0].DetailURL == "" {
+		t.Fatalf("report evidence handles = %#v", report.Results)
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "report.json")); err != nil {
+		t.Fatalf("json report missing: %v", err)
+	}
+	htmlPath := filepath.Join(outputDir, "report.html")
+	html, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("html report missing: %v", err)
+	}
+	for _, want := range []string{"Result Lookup", "Case Alpha Default", "Case Alpha Variant", "passed", "caseRunId"} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("html report missing %q:\n%s", want, html)
+		}
+	}
+	if report.ReportURL != htmlPath {
+		t.Fatalf("report url = %q want %q", report.ReportURL, htmlPath)
+	}
+}
+
+func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/first":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"item_id":"item-001"}`)
+		case "/second":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = fmt.Fprint(w, `{"status":"failed"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	profileDir := writeWorkflowBatchReportProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	listOut := runCLI(t, "workflow", "discover", "--store-url", storePath, "--filter", "Workflow Alpha", "--json")
+	var listReport struct {
+		Items []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"displayName"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
+		t.Fatalf("decode workflow discover json: %v\n%s", err, listOut)
+	}
+	if len(listReport.Items) != 1 || listReport.Items[0].ID != "workflow.alpha" {
+		t.Fatalf("workflow discover = %#v", listReport.Items)
+	}
+
+	outputDir := filepath.Join(t.TempDir(), "workflow-report")
+	out := runCLI(t,
+		"workflow", "report",
+		"--workflow", listReport.Items[0].ID,
+		"--store-url", storePath,
+		"--base-url", server.URL,
+		"--output-dir", outputDir,
+		"--json",
+	)
+
+	var report struct {
+		OK        bool   `json:"ok"`
+		RunID     string `json:"runId"`
+		ReportURL string `json:"reportUrl"`
+		Counts    struct {
+			Total  int `json:"total"`
+			Passed int `json:"passed"`
+			Failed int `json:"failed"`
+		} `json:"counts"`
+		Steps []struct {
+			RunID     string `json:"runId"`
+			CaseRunID string `json:"caseRunId"`
+			DetailURL string `json:"detailUrl"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode workflow report json: %v\n%s", err, out)
+	}
+	if report.OK || report.RunID == "" || report.Counts.Total != 2 || report.Counts.Passed != 1 || report.Counts.Failed != 1 {
+		t.Fatalf("workflow report = %#v", report)
+	}
+	if len(report.Steps) != 2 || report.Steps[1].RunID == "" || report.Steps[1].CaseRunID != report.Steps[1].RunID+".case" || report.Steps[1].DetailURL == "" {
+		t.Fatalf("workflow report evidence handles = %#v", report.Steps)
+	}
+	htmlPath := filepath.Join(outputDir, "report.html")
+	html, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("html report missing: %v", err)
+	}
+	for _, want := range []string{"Workflow Alpha", "First Step", "Second Step", "failed", "caseRunId"} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("workflow html missing %q:\n%s", want, html)
+		}
+	}
+	if report.ReportURL != htmlPath {
+		t.Fatalf("report url = %q want %q", report.ReportURL, htmlPath)
+	}
+}
+
 func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1024,7 +1821,6 @@ func TestServeHandlerUsesConfiguredStore(t *testing.T) {
 	}
 
 	handler, cleanup, err := serveHandlerFromArgs([]string{
-		"--profile", "../../profiles/empty",
 		"--store-url", storePath,
 	})
 	if err != nil {
@@ -1105,6 +1901,114 @@ func TestServeHandlerCanBootFromPublishedStoreCatalogWithoutProfilePath(t *testi
 	}
 }
 
+func TestServeBundleLoadsPublishedProfilePathWhenAvailable(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store.sqlite")
+	profileDir := filepath.Join(dir, "external-profile")
+	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha"}],
+  "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha","casePath":"runnable/case-alpha.json"}],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	writeFile(t, filepath.Join(profileDir, "runnable", "case-alpha.json"), `{"id":"case.alpha","request":{"method":"GET","path":"/v1/items"},"assertions":{"expectedStatusCodes":[200]}}`)
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	if _, err := publishProfileBundleToStore(ctx, s, profileDir, storePath, false, false); err != nil {
+		t.Fatalf("publish profile: %v", err)
+	}
+
+	bundle, err := serveBundle(ctx, s)
+	if err != nil {
+		t.Fatalf("serve bundle: %v", err)
+	}
+	if bundle.BaseDir != profileDir {
+		t.Fatalf("serve bundle base dir = %q, want %q", bundle.BaseDir, profileDir)
+	}
+	if len(bundle.APICases) != 1 || bundle.APICases[0].CasePath != "runnable/case-alpha.json" {
+		t.Fatalf("serve bundle api cases = %#v", bundle.APICases)
+	}
+}
+
+func TestServeHandlerPublishesProfilePathIntoStoreBeforeServing(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := filepath.Join(t.TempDir(), "external-profile")
+	writeWorkflowProfile(t, profileDir)
+
+	handler, cleanup, err := serveHandlerFromArgs([]string{
+		"--profile", profileDir,
+		"--store-url", storePath,
+	})
+	if err != nil {
+		t.Fatalf("build serve handler with profile path: %v", err)
+	}
+	defer cleanup()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/interface-nodes", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("interface nodes status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Source struct {
+			ID string `json:"id"`
+		} `json:"source"`
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode interface nodes payload: %v\n%s", err, rec.Body.String())
+	}
+	if payload.Source.ID != "sample" || len(payload.Items) != 1 || payload.Items[0].ID != "node.alpha" {
+		t.Fatalf("interface nodes payload = %#v", payload)
+	}
+	if got := sqliteScalar(t, storePath, "select value from kv where key = 'active_profile_id';"); got != "sample" {
+		t.Fatalf("active profile id = %q", got)
+	}
+	if got := sqliteScalar(t, storePath, "select count(*) from config_read_model where profile_id = 'sample';"); got == "0" {
+		t.Fatalf("expected serve --profile to publish read models")
+	}
+}
+
+func TestServeHandlerPublishesInstalledProfileIDBeforeServing(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileHome := filepath.Join(t.TempDir(), "profile-home")
+	sourceDir := filepath.Join(t.TempDir(), "external-profile")
+	writeWorkflowProfile(t, sourceDir)
+	runCLI(t, "profile", "install", "--from", sourceDir, "--profile-home", profileHome)
+
+	handler, cleanup, err := serveHandlerFromArgs([]string{
+		"--profile", "sample",
+		"--profile-home", profileHome,
+		"--store-url", storePath,
+	})
+	if err != nil {
+		t.Fatalf("build serve handler with installed profile id: %v", err)
+	}
+	defer cleanup()
+
+	profiles := httptest.NewRecorder()
+	handler.ServeHTTP(profiles, httptest.NewRequest(http.MethodGet, "/api/profile/installed", nil))
+	if profiles.Code != http.StatusOK || !strings.Contains(profiles.Body.String(), profileHome) {
+		t.Fatalf("installed profiles response = %d %s", profiles.Code, profiles.Body.String())
+	}
+	if got := sqliteScalar(t, storePath, "select value from kv where key = 'active_profile_id';"); got != "sample" {
+		t.Fatalf("active profile id = %q", got)
+	}
+}
+
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
@@ -1124,6 +2028,18 @@ func sqliteScalar(t *testing.T, dbPath string, statement string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func hasProfileVerifyCheck(checks []struct {
+	Name string `json:"name"`
+	OK   bool   `json:"ok"`
+}, name string) bool {
+	for _, check := range checks {
+		if check.Name == name && check.OK {
+			return true
+		}
+	}
+	return false
+}
+
 func runCLIFails(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
@@ -1132,6 +2048,68 @@ func runCLIFails(t *testing.T, args ...string) string {
 		t.Fatalf("go run . %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
 	}
 	return string(out)
+}
+
+func readTarGZEntries(t *testing.T, path string) []string {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open archive %s: %v", path, err)
+	}
+	defer file.Close()
+	gz, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatalf("open gzip %s: %v", path, err)
+	}
+	defer gz.Close()
+	reader := tar.NewReader(gz)
+	var entries []string
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read archive %s: %v", path, err)
+		}
+		entries = append(entries, header.Name)
+	}
+	return entries
+}
+
+func writeTarGZEntries(t *testing.T, path string, entries map[string]string) {
+	t.Helper()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create archive %s: %v", path, err)
+	}
+	defer file.Close()
+	gz := gzip.NewWriter(file)
+	defer gz.Close()
+	writer := tar.NewWriter(gz)
+	defer writer.Close()
+	for name, body := range entries {
+		header := &tar.Header{
+			Name: name,
+			Mode: 0o644,
+			Size: int64(len(body)),
+		}
+		if err := writer.WriteHeader(header); err != nil {
+			t.Fatalf("write archive header %s: %v", name, err)
+		}
+		if _, err := writer.Write([]byte(body)); err != nil {
+			t.Fatalf("write archive entry %s: %v", name, err)
+		}
+	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func createStoredCaseRun(t *testing.T, runID string) string {
@@ -1171,6 +2149,24 @@ func writeAPICaseFile(t *testing.T, path string) {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatalf("write api case: %v", err)
 	}
+}
+
+func writeEmptyProfileBundle(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "empty",
+  "displayName": "Empty Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	return dir
 }
 
 func writeWorkflowProfile(t *testing.T, dir string) {
@@ -1271,6 +2267,99 @@ func writeInterfaceNodeCoverageProfile(t *testing.T) string {
   "caseDependencies": [],
   "workflowBindings": [{"workflowId":"workflow.alpha","stepId":"step.alpha","nodeId":"node.alpha","caseId":"case.alpha","required":true}],
   "fixtures": []
+}`)
+	return dir
+}
+
+func writeInterfaceNodeBatchReportProfile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "workflows": [],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Result Lookup","serviceId":"service.alpha","operation":"Result Lookup","method":"GET","path":"/lookup"}],
+  "apiCases": [
+    {"id":"case.alpha.default","displayName":"Case Alpha Default","nodeId":"node.alpha","payloadTemplateJson":"{\"mode\":\"ok\"}","expectedJson":"{\"expectedHttpCodes\":[200]}","sortOrder":1},
+    {"id":"case.alpha.variant","displayName":"Case Alpha Variant","nodeId":"node.alpha","payloadTemplateJson":"{\"mode\":\"bad\"}","expectedJson":"{\"expectedHttpCodes\":[400]}","sortOrder":2}
+  ],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	writeFile(t, filepath.Join(dir, "catalog.json"), `{
+  "schemaVersion": "1",
+  "templateConfigs": [
+    {
+      "id": "cfg.case.alpha.default",
+      "templateId": "case-execution",
+      "nodeId": "node.alpha",
+      "scopeType": "case",
+      "scopeId": "case.alpha.default",
+      "title": "Case Alpha Default execution",
+      "status": "active",
+      "sortOrder": 1,
+      "configJson": "{\"caseId\":\"case.alpha.default\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"service.alpha\",\"path\":\"/lookup\",\"query\":{\"mode\":\"ok\"},\"expectedHttpCodes\":[200]}}"
+    }
+  ]
+}`)
+	return dir
+}
+
+func writeWorkflowBatchReportProfile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha","baseStepTimeoutMs":1000}],
+  "interfaceNodes": [
+    {"id":"node.first","displayName":"First Node","serviceId":"service.alpha","method":"GET","path":"/first"},
+    {"id":"node.second","displayName":"Second Node","serviceId":"service.alpha","method":"GET","path":"/second"}
+  ],
+  "apiCases": [
+    {"id":"case.first","displayName":"First Step Case","nodeId":"node.first","sortOrder":1},
+    {"id":"case.second","displayName":"Second Step Case","nodeId":"node.second","sortOrder":2}
+  ],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [
+    {"workflowId":"workflow.alpha","stepId":"first","nodeId":"node.first","caseId":"case.first","required":true,"sortOrder":1},
+    {"workflowId":"workflow.alpha","stepId":"second","nodeId":"node.second","caseId":"case.second","required":true,"sortOrder":2}
+  ],
+  "fixtures": []
+}`)
+	writeFile(t, filepath.Join(dir, "catalog.json"), `{
+  "schemaVersion": "1",
+  "templateConfigs": [
+    {
+      "id": "cfg.step.first",
+      "templateId": "case-execution",
+      "workflowId": "workflow.alpha",
+      "nodeId": "service.alpha",
+      "scopeType": "step",
+      "scopeId": "first",
+      "title": "First Step",
+      "status": "active",
+      "sortOrder": 1,
+      "configJson": "{\"caseId\":\"case.first\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"service.alpha\",\"path\":\"/first\",\"expectedHttpCodes\":[200]},\"exports\":[{\"name\":\"item_id\",\"from\":\"responseBody\",\"path\":\"item_id\"}]}"
+    },
+    {
+      "id": "cfg.step.second",
+      "templateId": "case-execution",
+      "workflowId": "workflow.alpha",
+      "nodeId": "service.alpha",
+      "scopeType": "step",
+      "scopeId": "second",
+      "title": "Second Step",
+      "status": "active",
+      "sortOrder": 2,
+      "configJson": "{\"caseId\":\"case.second\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"service.alpha\",\"path\":\"/second\",\"expectedHttpCodes\":[200]},\"inputs\":[{\"name\":\"item_id\",\"source\":\"previous\"}]}"
+    }
+  ]
 }`)
 	return dir
 }

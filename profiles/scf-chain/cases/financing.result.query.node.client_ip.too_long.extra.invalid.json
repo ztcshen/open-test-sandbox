@@ -1,6 +1,0 @@
-{
-  "id": "financing.result.query.node.client_ip.too_long.extra.invalid",
-  "displayName": "融资结果查询-client_ip超长候选",
-  "nodeId": "scf.financing.result.query",
-  "requiredForAdmission": false
-}

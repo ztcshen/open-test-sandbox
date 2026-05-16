@@ -1,6 +1,0 @@
-{
-  "id": "repay.trial.repay_type.invalid",
-  "displayName": "还款试算-repay_type非法",
-  "nodeId": "scf.repay.trial",
-  "requiredForAdmission": false
-}

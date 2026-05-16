@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.financing_repay_infos.type.extra.invalid",
-  "displayName": "还款申请-financing_repay_infos类型错误候选",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

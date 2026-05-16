@@ -6,32 +6,30 @@ cd "$ROOT_DIR"
 
 DENYLIST="tools/guardrails/source-domain-terms.txt"
 
+if [[ -e profiles ]]; then
+  echo "core repo must not contain a bundled profile directory; keep profile bundles outside this repository" >&2
+  exit 1
+fi
+
 if [[ ! -f "$DENYLIST" ]]; then
   echo "missing source-domain denylist: $DENYLIST" >&2
   exit 1
 fi
 
-paths=(
-  "README.md"
-  "AGENTS.md"
-  "CONTEXT.md"
-  "package.json"
-  "go.mod"
-  "bin"
-  "cmd"
-  "internal"
-  "control-plane"
-  "profiles/empty"
-  "examples"
-  "compose"
-)
-
 existing=()
-for path in "${paths[@]}"; do
-  if [[ -e "$path" ]]; then
+while IFS= read -r -d '' path; do
+  case "$path" in
+    .git/*|.idea/*|.runtime/*|node_modules/*)
+      continue
+      ;;
+    package-lock.json|tools/guardrails/source-domain-terms.txt)
+      continue
+      ;;
+  esac
+  if [[ -f "$path" ]]; then
     existing+=("$path")
   fi
-done
+done < <(git ls-files --cached --others --exclude-standard -z)
 
 if [[ ${#existing[@]} -eq 0 ]]; then
   echo "no core paths to scan"

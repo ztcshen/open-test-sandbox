@@ -1,8 +1,0 @@
-{
-  "id": "tpl.repay.trial.standard",
-  "displayName": "还款试算标准请求",
-  "nodeId": "scf.repay.trial",
-  "method": "GET",
-  "path": "/v1/supplychain/repay/trial",
-  "templateJson": "{\"mch_id\":\"100000000000\",\"order_id\":\"{{serial:RTR}}\",\"financing_order_id\":\"{{override:financing_order_id|1163295452351680}}\",\"member_id\":\"1000001\",\"repay_type\":3}"
-}

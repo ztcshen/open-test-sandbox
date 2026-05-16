@@ -1,6 +1,0 @@
-{
-  "id": "repay.apply.duplicate_order_id.invalid",
-  "displayName": "还款申请-order_id重复参数校验",
-  "nodeId": "scf.repay.apply",
-  "requiredForAdmission": false
-}

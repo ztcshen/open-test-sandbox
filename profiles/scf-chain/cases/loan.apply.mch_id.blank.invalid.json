@@ -1,6 +1,0 @@
-{
-  "id": "loan.apply.mch_id.blank.invalid",
-  "displayName": "放款申请-mch_id为空",
-  "nodeId": "scf.loan.apply",
-  "requiredForAdmission": false
-}

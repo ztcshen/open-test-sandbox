@@ -1,6 +1,0 @@
-{
-  "id": "financing.result.query.node.order_id.blank.invalid",
-  "displayName": "融资结果查询-order_id为空",
-  "nodeId": "scf.financing.result.query",
-  "requiredForAdmission": false
-}

@@ -1,6 +1,0 @@
-{
-  "id": "callback.loan.apply.llt.outer_business_no.too_long.invalid",
-  "displayName": "放款结果回调-outer_business_no超长",
-  "nodeId": "scf.loan.apply.llt.callback",
-  "requiredForAdmission": false
-}
