@@ -21,3 +21,5 @@ should be called out in this file and in the relevant docs.
 - Added public exposure materials with use cases, a share kit, and a roadmap.
 - Added API case maintenance metadata and `case discover` for searchable case
   catalogs.
+- Added `case suite report` for running maintained case sets selected by tag,
+  owner, priority, status, node, or text filter.

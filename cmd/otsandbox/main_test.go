@@ -1708,6 +1708,121 @@ func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("mode") {
+		case "bad":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"status":"rejected"}`)
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"status":"accepted"}`)
+		}
+	}))
+	defer server.Close()
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	outputDir := filepath.Join(t.TempDir(), "suite-report")
+	out := runCLI(t,
+		"case", "suite", "report",
+		"--store-url", storePath,
+		"--tag", "smoke",
+		"--owner", "team-a",
+		"--base-url", server.URL,
+		"--output-dir", outputDir,
+		"--json",
+	)
+
+	var report struct {
+		OK      bool `json:"ok"`
+		Filters struct {
+			Tags  []string `json:"tags"`
+			Owner string   `json:"owner"`
+		} `json:"filters"`
+		Counts struct {
+			Total  int `json:"total"`
+			Passed int `json:"passed"`
+			Failed int `json:"failed"`
+		} `json:"counts"`
+		Results []struct {
+			CaseID    string   `json:"caseId"`
+			Title     string   `json:"title"`
+			NodeID    string   `json:"nodeId"`
+			Tags      []string `json:"tags"`
+			Priority  string   `json:"priority"`
+			Owner     string   `json:"owner"`
+			Status    string   `json:"status"`
+			CaseRunID string   `json:"caseRunId"`
+			DetailURL string   `json:"detailUrl"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite report json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Counts.Total != 1 || report.Counts.Passed != 1 || report.Counts.Failed != 0 {
+		t.Fatalf("suite report = %#v", report)
+	}
+	if strings.Join(report.Filters.Tags, ",") != "smoke" || report.Filters.Owner != "team-a" {
+		t.Fatalf("suite filters = %#v", report.Filters)
+	}
+	if len(report.Results) != 1 {
+		t.Fatalf("suite results = %#v", report.Results)
+	}
+	item := report.Results[0]
+	if item.CaseID != "case.alpha.default" || item.NodeID != "node.alpha" || item.Priority != "p0" || item.Owner != "team-a" || item.CaseRunID == "" || item.DetailURL == "" {
+		t.Fatalf("suite result item = %#v", item)
+	}
+	if strings.Join(item.Tags, ",") != "smoke,regression" {
+		t.Fatalf("suite result tags = %#v", item.Tags)
+	}
+	html, err := os.ReadFile(filepath.Join(outputDir, "report.html"))
+	if err != nil {
+		t.Fatalf("suite html report missing: %v", err)
+	}
+	for _, want := range []string{"Case Suite Report", "Case Alpha Default", "team-a", "smoke", "p0", "caseRunId"} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("suite html missing %q:\n%s", want, html)
+		}
+	}
+	if strings.Contains(string(html), "Case Alpha Variant") {
+		t.Fatalf("suite html should not include unselected case:\n%s", html)
+	}
+
+	variantOut := runCLI(t,
+		"case", "suite", "report",
+		"--store-url", storePath,
+		"--tag", "negative",
+		"--base-url", server.URL,
+		"--output-dir", filepath.Join(t.TempDir(), "variant-suite-report"),
+		"--json",
+	)
+	var variantReport struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Total          int `json:"total"`
+			Passed         int `json:"passed"`
+			DerivedConfigs int `json:"derivedConfigs"`
+		} `json:"counts"`
+		Results []struct {
+			CaseID   string `json:"caseId"`
+			Priority string `json:"priority"`
+			Owner    string `json:"owner"`
+			HTTPCode int    `json:"httpCode"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(variantOut), &variantReport); err != nil {
+		t.Fatalf("decode variant suite report json: %v\n%s", err, variantOut)
+	}
+	if !variantReport.OK || variantReport.Counts.Total != 1 || variantReport.Counts.Passed != 1 || variantReport.Counts.DerivedConfigs != 1 {
+		t.Fatalf("variant suite report = %#v", variantReport)
+	}
+	if len(variantReport.Results) != 1 || variantReport.Results[0].CaseID != "case.alpha.variant" || variantReport.Results[0].HTTPCode != http.StatusBadRequest {
+		t.Fatalf("variant suite result = %#v", variantReport.Results)
+	}
+}
+
 func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

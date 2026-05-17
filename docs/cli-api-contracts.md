@@ -37,6 +37,26 @@ The returned ids are the only ids an agent should pass to report commands.
 and interface node id. Its JSON output includes maintenance metadata plus
 whether the case has a runnable file and execution configuration.
 
+## Maintained Case Suite Report
+
+```sh
+otsandbox case suite report \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --tag smoke \
+  --owner team-a \
+  --status active \
+  --base-url http://127.0.0.1:8080 \
+  --output-dir .runtime/reports/smoke-suite \
+  --json
+```
+
+The command turns case maintenance metadata into an executable suite. It
+selects active API cases by filter, node id, tag, owner, or priority; executes
+the selected cases; and writes `report.json` plus a compact `report.html`.
+The report keeps case title, node id, tags, priority, owner, elapsed time,
+status, and failed-case Evidence links.
+
 ## Single Interface Report
 
 ```sh
