@@ -3683,6 +3683,94 @@ func TestServerExposesCaseSuiteCoverageByMaintenanceFilters(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseSuiteInspectionByMaintenanceFilters(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	for _, item := range []struct {
+		runID  string
+		caseID string
+		status string
+		at     time.Time
+	}{
+		{runID: "run.default.latest", caseID: "case.default", status: store.StatusPassed, at: base},
+		{runID: "run.variant.latest", caseID: "case.variant", status: store.StatusFailed, at: base.Add(time.Minute)},
+	} {
+		_, err := s.CreateRun(ctx, store.Run{
+			ID:         item.runID,
+			ProfileID:  "sample",
+			WorkflowID: item.caseID,
+			Status:     item.status,
+			StartedAt:  item.at,
+			FinishedAt: item.at.Add(time.Second),
+			CreatedAt:  item.at,
+			UpdatedAt:  item.at.Add(time.Second),
+		})
+		if err != nil {
+			t.Fatalf("create run %s: %v", item.runID, err)
+		}
+		_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+			ID:         item.runID + ".case",
+			RunID:      item.runID,
+			CaseID:     item.caseID,
+			Status:     item.status,
+			StartedAt:  item.at,
+			FinishedAt: item.at.Add(time.Second),
+			CreatedAt:  item.at,
+		})
+		if err != nil {
+			t.Fatalf("record case run %s: %v", item.runID, err)
+		}
+	}
+
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.default", DisplayName: "Default Case", NodeID: "node.alpha", CasePath: "cases/default.json", Tags: []string{"regression", "smoke"}, Priority: "p0", Owner: "team-a", SortOrder: 1},
+			{ID: "case.variant", DisplayName: "Variant Case", NodeID: "node.alpha", Tags: []string{"regression"}, Priority: "p1", Owner: "team-a", SortOrder: 2},
+			{ID: "case.unrun", DisplayName: "Unrun Case", NodeID: "node.alpha", Tags: []string{"regression"}, Priority: "p2", Owner: "team-b", SortOrder: 3},
+			{ID: "case.other", DisplayName: "Other Case", NodeID: "node.alpha", Tags: []string{"smoke"}, Priority: "p2", Owner: "team-c", SortOrder: 4},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "config.case.variant", ScopeType: "case", ScopeID: "case.variant", Status: "active", ConfigJSON: `{"caseId":"case.variant","caseExecution":{"method":"GET","nodeId":"node.alpha","path":"/alpha"}}`},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/suite-inspection?tag=regression&status=active", http.StatusOK)
+	if payload["ok"] != false {
+		t.Fatalf("suite inspection ok = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["total"] != float64(3) || counts["ready"] != float64(2) || counts["blocked"] != float64(1) || counts["failed"] != float64(1) || counts["notRun"] != float64(1) {
+		t.Fatalf("suite inspection counts = %#v", counts)
+	}
+	items := payload["items"].([]any)
+	byCase := map[string]map[string]any{}
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		byCase[item["caseId"].(string)] = item
+	}
+	if byCase["case.default"]["ready"] != true || byCase["case.default"]["hasRunnableFile"] != true || byCase["case.default"]["latestStatus"] != store.StatusPassed {
+		t.Fatalf("default inspection = %#v", byCase["case.default"])
+	}
+	if byCase["case.variant"]["ready"] != true || byCase["case.variant"]["hasExecutionConfig"] != true || byCase["case.variant"]["suggestedAction"] != "rerun" {
+		t.Fatalf("variant inspection = %#v", byCase["case.variant"])
+	}
+	if byCase["case.unrun"]["ready"] != false || byCase["case.unrun"]["suggestedAction"] != "add-runnable-source" {
+		t.Fatalf("unrun inspection = %#v", byCase["case.unrun"])
+	}
+}
+
 func TestServerExposesCaseRunsFromStore(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

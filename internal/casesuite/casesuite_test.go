@@ -83,13 +83,68 @@ func TestNormalizeRunStateAliases(t *testing.T) {
 	}
 }
 
+func TestInspectReportsReadinessAndLatestState(t *testing.T) {
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.file", DisplayName: "File Case", NodeID: "node.alpha", CasePath: "cases/file.json", Tags: []string{"regression"}, SortOrder: 1},
+			{ID: "case.config", DisplayName: "Config Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 2},
+			{ID: "case.missing", DisplayName: "Missing Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 3},
+			{ID: "case.paused", DisplayName: "Paused Case", NodeID: "node.alpha", Tags: []string{"regression"}, Status: "paused", SortOrder: 4},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "config.case.config", ScopeType: "case", ScopeID: "case.config", Status: "active", ConfigJSON: `{"caseId":"case.config","caseExecution":{"method":"POST","path":"/items"}}`},
+		},
+	}
+	records := []store.APICaseRunRecord{
+		record("run.file", "case.file", store.StatusPassed, base),
+		record("run.config", "case.config", store.StatusFailed, base.Add(time.Minute)),
+	}
+	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}})
+
+	report, err := Inspect(context.Background(), bundle, recordStore{records: records}, Filter{Tags: []string{"regression"}}, cases)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if report.OK || report.Counts.Total != 4 || report.Counts.Ready != 2 || report.Counts.Blocked != 2 || report.Counts.Failed != 1 || report.Counts.NotRun != 2 {
+		t.Fatalf("inspection counts = %#v", report.Counts)
+	}
+	byCase := map[string]InspectionItem{}
+	for _, item := range report.Items {
+		byCase[item.CaseID] = item
+	}
+	if !byCase["case.file"].Ready || !byCase["case.file"].HasRunnableFile || byCase["case.file"].LatestStatus != store.StatusPassed {
+		t.Fatalf("file case = %#v", byCase["case.file"])
+	}
+	if !byCase["case.config"].Ready || !byCase["case.config"].HasExecutionConfig || byCase["case.config"].LatestStatus != store.StatusFailed || byCase["case.config"].SuggestedAction != "rerun" {
+		t.Fatalf("config case = %#v", byCase["case.config"])
+	}
+	if byCase["case.missing"].Ready || len(byCase["case.missing"].Issues) != 1 || byCase["case.missing"].SuggestedAction != "add-runnable-source" {
+		t.Fatalf("missing case = %#v", byCase["case.missing"])
+	}
+	if byCase["case.paused"].Ready || byCase["case.paused"].SuggestedAction != "review-status" {
+		t.Fatalf("paused case = %#v", byCase["case.paused"])
+	}
+}
+
 type recordStore struct {
-	store.Store
 	records []store.APICaseRunRecord
 }
 
 func (s recordStore) ListAPICaseRunRecordsForCaseIDs(context.Context, []string) ([]store.APICaseRunRecord, error) {
 	return s.records, nil
+}
+
+func (s recordStore) ListRuns(context.Context) ([]store.Run, error) {
+	return nil, nil
+}
+
+func (s recordStore) ListAPICaseRuns(context.Context, string) ([]store.APICaseRun, error) {
+	return nil, nil
 }
 
 func record(runID string, caseID string, status string, at time.Time) store.APICaseRunRecord {

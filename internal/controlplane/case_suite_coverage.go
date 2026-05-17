@@ -19,6 +19,17 @@ func handleCaseSuiteCoverage(w http.ResponseWriter, r *http.Request, bundle prof
 	writeJSON(w, report)
 }
 
+func handleCaseSuiteInspection(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
+	filter := caseSuiteCoverageFilterFromRequest(r)
+	items := casesuite.SelectCases(bundle, filter)
+	report, err := casesuite.Inspect(r.Context(), bundle, runtime, filter, items)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, report)
+}
+
 func caseSuiteCoverageFilterFromRequest(r *http.Request) casesuite.Filter {
 	query := r.URL.Query()
 	return casesuite.NormalizeFilter(casesuite.Filter{

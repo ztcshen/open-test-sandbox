@@ -57,6 +57,51 @@ type Report struct {
 	Warnings    []string `json:"warnings,omitempty"`
 }
 
+type InspectionCounts struct {
+	Total            int `json:"total"`
+	Ready            int `json:"ready"`
+	Blocked          int `json:"blocked"`
+	Passed           int `json:"passed"`
+	Failed           int `json:"failed"`
+	NotRun           int `json:"notRun"`
+	MissingRunnable  int `json:"missingRunnable"`
+	MissingExecution int `json:"missingExecution"`
+	Inactive         int `json:"inactive"`
+}
+
+type InspectionItem struct {
+	CaseID             string   `json:"caseId"`
+	Title              string   `json:"title"`
+	Description        string   `json:"description,omitempty"`
+	NodeID             string   `json:"nodeId,omitempty"`
+	NodeName           string   `json:"nodeName,omitempty"`
+	Tags               []string `json:"tags,omitempty"`
+	Priority           string   `json:"priority,omitempty"`
+	Owner              string   `json:"owner,omitempty"`
+	Status             string   `json:"status"`
+	Ready              bool     `json:"ready"`
+	HasRunnableFile    bool     `json:"hasRunnableFile"`
+	HasExecutionConfig bool     `json:"hasExecutionConfig"`
+	LatestStatus       string   `json:"latestStatus"`
+	LatestRunID        string   `json:"latestRunId,omitempty"`
+	CaseRunID          string   `json:"caseRunId,omitempty"`
+	DetailURL          string   `json:"detailUrl,omitempty"`
+	ElapsedMs          int64    `json:"elapsedMs,omitempty"`
+	HasPassed          bool     `json:"hasPassed"`
+	Issues             []string `json:"issues,omitempty"`
+	SuggestedAction    string   `json:"suggestedAction,omitempty"`
+}
+
+type InspectionReport struct {
+	OK          bool             `json:"ok"`
+	ProfileID   string           `json:"profileId"`
+	GeneratedAt string           `json:"generatedAt"`
+	Filters     Filter           `json:"filters"`
+	Counts      InspectionCounts `json:"counts"`
+	Items       []InspectionItem `json:"items"`
+	Warnings    []string         `json:"warnings,omitempty"`
+}
+
 type RecordStore interface {
 	ListRuns(context.Context) ([]store.Run, error)
 	ListAPICaseRuns(context.Context, string) ([]store.APICaseRun, error)
@@ -143,6 +188,88 @@ func Coverage(ctx context.Context, bundle profile.Bundle, runtime RecordStore, f
 	return report, nil
 }
 
+func Inspect(ctx context.Context, bundle profile.Bundle, runtime RecordStore, filter Filter, cases []profile.APICase) (InspectionReport, error) {
+	coverage, err := Coverage(ctx, bundle, runtime, filter, cases)
+	if err != nil {
+		return InspectionReport{}, err
+	}
+	configs := ExecutionConfigSet(ctx, bundle, runtime)
+	coverageByCase := map[string]Item{}
+	for _, item := range coverage.Items {
+		coverageByCase[item.CaseID] = item
+	}
+	report := InspectionReport{
+		OK:          true,
+		ProfileID:   bundle.ID,
+		GeneratedAt: coverage.GeneratedAt,
+		Filters:     coverage.Filters,
+		Counts:      InspectionCounts{Total: len(cases)},
+		Items:       []InspectionItem{},
+		Warnings:    append([]string(nil), coverage.Warnings...),
+	}
+	if len(cases) == 0 {
+		report.OK = false
+		report.Warnings = append(report.Warnings, "no cases matched selector")
+	}
+	for _, item := range cases {
+		coverageItem := coverageByCase[item.ID]
+		status := CaseStatus(item)
+		row := InspectionItem{
+			CaseID:             item.ID,
+			Title:              firstNonEmpty(item.DisplayName, item.ID),
+			Description:        item.Description,
+			NodeID:             item.NodeID,
+			NodeName:           coverageItem.NodeName,
+			Tags:               append([]string(nil), item.Tags...),
+			Priority:           item.Priority,
+			Owner:              item.Owner,
+			Status:             status,
+			HasRunnableFile:    strings.TrimSpace(item.CasePath) != "",
+			HasExecutionConfig: configs[item.ID],
+			LatestStatus:       coverageItem.LatestStatus,
+			LatestRunID:        coverageItem.LatestRunID,
+			CaseRunID:          coverageItem.CaseRunID,
+			DetailURL:          coverageItem.DetailURL,
+			ElapsedMs:          coverageItem.ElapsedMs,
+			HasPassed:          coverageItem.HasPassed,
+		}
+		if row.LatestStatus == "" {
+			row.LatestStatus = "not-run"
+		}
+		if !strings.EqualFold(status, "active") {
+			row.Issues = append(row.Issues, "case status is "+status)
+			report.Counts.Inactive++
+		}
+		if !row.HasRunnableFile {
+			report.Counts.MissingRunnable++
+		}
+		if !row.HasExecutionConfig {
+			report.Counts.MissingExecution++
+		}
+		if !row.HasRunnableFile && !row.HasExecutionConfig {
+			row.Issues = append(row.Issues, "missing runnable case file or execution config")
+		}
+		row.Ready = len(row.Issues) == 0
+		if row.Ready {
+			report.Counts.Ready++
+		} else {
+			report.OK = false
+			report.Counts.Blocked++
+		}
+		switch NormalizeRunState(row.LatestStatus) {
+		case store.StatusPassed:
+			report.Counts.Passed++
+		case store.StatusFailed:
+			report.Counts.Failed++
+		default:
+			report.Counts.NotRun++
+		}
+		row.SuggestedAction = SuggestedAction(row)
+		report.Items = append(report.Items, row)
+	}
+	return report, nil
+}
+
 type State struct {
 	Latest    store.APICaseRunRecord
 	HasPassed bool
@@ -201,6 +328,83 @@ func RecordsForCaseIDs(ctx context.Context, runtime RecordStore, caseIDs []strin
 		}
 	}
 	return out, nil
+}
+
+func ExecutionConfigSet(ctx context.Context, bundle profile.Bundle, runtime RecordStore) map[string]bool {
+	out := map[string]bool{}
+	addProfileTemplateConfigs(out, bundle.TemplateConfigs)
+	if catalogRuntime, ok := runtime.(interface {
+		GetProfileCatalog(context.Context) (store.ProfileCatalog, error)
+	}); ok {
+		if catalog, err := catalogRuntime.GetProfileCatalog(ctx); err == nil {
+			addCatalogTemplateConfigs(out, catalog.TemplateConfigs)
+		}
+	}
+	return out
+}
+
+func addProfileTemplateConfigs(out map[string]bool, configs []profile.TemplateConfig) {
+	for _, config := range configs {
+		if !activeStatus(config.Status) {
+			continue
+		}
+		if config.ScopeType == "case" && strings.TrimSpace(config.ScopeID) != "" {
+			out[strings.TrimSpace(config.ScopeID)] = true
+			continue
+		}
+		if caseID := executionConfigCaseID(config.ConfigJSON); caseID != "" {
+			out[caseID] = true
+		}
+	}
+}
+
+func addCatalogTemplateConfigs(out map[string]bool, configs []store.CatalogTemplateConfig) {
+	for _, config := range configs {
+		if !activeStatus(config.Status) {
+			continue
+		}
+		if config.ScopeType == "case" && strings.TrimSpace(config.ScopeID) != "" {
+			out[strings.TrimSpace(config.ScopeID)] = true
+			continue
+		}
+		if caseID := executionConfigCaseID(config.ConfigJSON); caseID != "" {
+			out[caseID] = true
+		}
+	}
+}
+
+func executionConfigCaseID(configJSON string) string {
+	var payload struct {
+		CaseID        string         `json:"caseId"`
+		CaseExecution map[string]any `json:"caseExecution"`
+	}
+	if json.Unmarshal([]byte(configJSON), &payload) != nil {
+		return ""
+	}
+	if strings.TrimSpace(payload.CaseID) == "" || len(payload.CaseExecution) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(payload.CaseID)
+}
+
+func activeStatus(status string) bool {
+	return strings.TrimSpace(status) == "" || strings.EqualFold(strings.TrimSpace(status), "active")
+}
+
+func SuggestedAction(item InspectionItem) string {
+	if !strings.EqualFold(item.Status, "active") {
+		return "review-status"
+	}
+	if !item.HasRunnableFile && !item.HasExecutionConfig {
+		return "add-runnable-source"
+	}
+	if NormalizeRunState(item.LatestStatus) == store.StatusFailed {
+		return "rerun"
+	}
+	if NormalizeRunState(item.LatestStatus) == "not-run" {
+		return "run"
+	}
+	return "keep"
 }
 
 func CaseMatches(item profile.APICase, filter Filter) bool {

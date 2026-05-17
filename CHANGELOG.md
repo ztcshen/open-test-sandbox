@@ -31,3 +31,5 @@ should be called out in this file and in the relevant docs.
   `runStates` for rerunning only failed or not-run cases.
 - Added a shared backend case-suite module so CLI reports, Control plane
   coverage, and batch rerun selectors use the same maintenance rules.
+- Added `case suite inspect` and `/api/case/suite-inspection` for pre-run
+  readiness checks across maintained case sets.

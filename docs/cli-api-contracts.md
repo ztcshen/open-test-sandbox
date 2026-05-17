@@ -81,6 +81,29 @@ The Control plane exposes the same read-only coverage contract:
 GET /api/case/suite-coverage?tag=smoke&owner=team-a&status=active
 ```
 
+## Maintained Case Suite Inspection
+
+```sh
+otsandbox case suite inspect \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --tag smoke \
+  --owner team-a \
+  --status active \
+  --json
+```
+
+The command uses the same maintenance selector as suite reports and coverage,
+but returns a pre-run readiness view. Each row includes runnable file presence,
+execution configuration presence, latest Store state, blocking issues, and a
+suggested action such as `run`, `rerun`, `add-runnable-source`, or `keep`.
+
+The Control plane exposes the same inspection contract:
+
+```http
+GET /api/case/suite-inspection?tag=smoke&owner=team-a&status=active
+```
+
 ## Single Interface Report
 
 ```sh

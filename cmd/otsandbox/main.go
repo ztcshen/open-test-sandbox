@@ -215,6 +215,7 @@ Usage:
   otsandbox case discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
   otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store-url PATH]
@@ -3125,6 +3126,8 @@ func runCaseSuite(ctx context.Context, args []string) error {
 		return runCaseSuiteReport(ctx, args[1:])
 	case "coverage":
 		return runCaseSuiteCoverage(ctx, args[1:])
+	case "inspect":
+		return runCaseSuiteInspect(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case suite command: %s", args[0])
 	}
@@ -3298,6 +3301,63 @@ func printCaseSuiteCoverage(report caseSuiteCoverageReport) {
 			fmt.Printf(" %s", item.Reason)
 		}
 		fmt.Println()
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+func runCaseSuiteInspect(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case suite inspect", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "active", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	filterValue := caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	}
+	cases := selectedCaseSuiteCases(bundle, filterValue)
+	report, err := casesuite.Inspect(ctx, bundle, sourceStore, caseSuiteFilter(filterValue), cases)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseSuiteInspection(report)
+	return nil
+}
+
+func printCaseSuiteInspection(report casesuite.InspectionReport) {
+	fmt.Println("Case Suite Inspection")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Total: %d Ready: %d Blocked: %d Passed: %d Failed: %d Not Run: %d\n", report.Counts.Total, report.Counts.Ready, report.Counts.Blocked, report.Counts.Passed, report.Counts.Failed, report.Counts.NotRun)
+	for _, item := range report.Items {
+		fmt.Printf("- %s ready=%t latest=%s action=%s\n", item.CaseID, item.Ready, item.LatestStatus, item.SuggestedAction)
+		for _, issue := range item.Issues {
+			fmt.Printf("  issue: %s\n", issue)
+		}
 	}
 	for _, warning := range report.Warnings {
 		fmt.Printf("Warning: %s\n", warning)

@@ -1912,6 +1912,93 @@ func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.
 	}
 }
 
+func TestCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T) {
+	ctx := context.Background()
+	profileDir := writeCaseSuiteCoverageProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	recordCaseRunForCoverage(t, ctx, s, "run.default.latest", "case.default", store.StatusPassed, base)
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.latest", "case.variant", store.StatusFailed, base.Add(time.Minute))
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t,
+		"case", "suite", "inspect",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--tag", "regression",
+		"--status", "active",
+		"--json",
+	)
+
+	var report struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Total   int `json:"total"`
+			Ready   int `json:"ready"`
+			Blocked int `json:"blocked"`
+			Failed  int `json:"failed"`
+			NotRun  int `json:"notRun"`
+		} `json:"counts"`
+		Items []struct {
+			CaseID             string   `json:"caseId"`
+			Ready              bool     `json:"ready"`
+			HasRunnableFile    bool     `json:"hasRunnableFile"`
+			HasExecutionConfig bool     `json:"hasExecutionConfig"`
+			LatestStatus       string   `json:"latestStatus"`
+			Issues             []string `json:"issues"`
+			SuggestedAction    string   `json:"suggestedAction"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite inspection json: %v\n%s", err, out)
+	}
+	if report.OK || report.Counts.Total != 3 || report.Counts.Ready != 2 || report.Counts.Blocked != 1 || report.Counts.Failed != 1 || report.Counts.NotRun != 1 {
+		t.Fatalf("suite inspection report = %#v", report)
+	}
+	byCase := map[string]struct {
+		Ready              bool
+		HasRunnableFile    bool
+		HasExecutionConfig bool
+		LatestStatus       string
+		Issues             []string
+		SuggestedAction    string
+	}{}
+	for _, item := range report.Items {
+		byCase[item.CaseID] = struct {
+			Ready              bool
+			HasRunnableFile    bool
+			HasExecutionConfig bool
+			LatestStatus       string
+			Issues             []string
+			SuggestedAction    string
+		}{item.Ready, item.HasRunnableFile, item.HasExecutionConfig, item.LatestStatus, item.Issues, item.SuggestedAction}
+	}
+	if !byCase["case.default"].Ready || !byCase["case.default"].HasRunnableFile || byCase["case.default"].LatestStatus != store.StatusPassed {
+		t.Fatalf("default inspection = %#v", byCase["case.default"])
+	}
+	if !byCase["case.variant"].Ready || !byCase["case.variant"].HasExecutionConfig || byCase["case.variant"].SuggestedAction != "rerun" {
+		t.Fatalf("variant inspection = %#v", byCase["case.variant"])
+	}
+	if byCase["case.unrun"].Ready || byCase["case.unrun"].SuggestedAction != "add-runnable-source" || len(byCase["case.unrun"].Issues) == 0 {
+		t.Fatalf("unrun inspection = %#v", byCase["case.unrun"])
+	}
+
+	textOut := runCLI(t, "case", "suite", "inspect", "--profile", profileDir, "--store-url", storePath, "--tag", "regression")
+	for _, want := range []string{"Case Suite Inspection", "Total: 3 Ready: 2 Blocked: 1", "case.unrun", "add-runnable-source"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("inspection text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -2579,11 +2666,20 @@ func writeCaseSuiteCoverageProfile(t *testing.T) string {
   "workflows": [],
   "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha","operation":"Alpha","method":"GET","path":"/alpha"}],
   "apiCases": [
-    {"id":"case.default","displayName":"Default Case","nodeId":"node.alpha","sortOrder":1,"tags":["regression","smoke"],"priority":"p0","owner":"team-a","description":"Default maintained case."},
+    {"id":"case.default","displayName":"Default Case","nodeId":"node.alpha","sortOrder":1,"tags":["regression","smoke"],"priority":"p0","owner":"team-a","description":"Default maintained case.","casePath":"cases/default.json"},
     {"id":"case.variant","displayName":"Variant Case","nodeId":"node.alpha","sortOrder":2,"tags":["regression"],"priority":"p1","owner":"team-a","description":"Variant maintained case."},
     {"id":"case.unrun","displayName":"Unrun Case","nodeId":"node.alpha","sortOrder":3,"tags":["regression"],"priority":"p2","owner":"team-b","description":"Unrun maintained case."}
   ],
   "requestTemplates": [],
+  "templateConfigs": [
+    {
+      "id": "config.case.variant",
+      "scopeType": "case",
+      "scopeId": "case.variant",
+      "status": "active",
+      "configJson": "{\"caseId\":\"case.variant\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"node.alpha\",\"path\":\"/alpha\",\"expectedHttpCodes\":[200]}}"
+    }
+  ],
   "caseDependencies": [],
   "workflowBindings": [],
   "fixtures": []

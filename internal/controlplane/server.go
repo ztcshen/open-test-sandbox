@@ -230,6 +230,13 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 		}
 		handleCaseSuiteCoverage(w, r, profiles.Current(), runtime)
 	})
+	mux.HandleFunc("/api/case/suite-inspection", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleCaseSuiteInspection(w, r, profiles.Current(), runtime)
+	})
 	mux.HandleFunc("/api/replay/evidence", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
