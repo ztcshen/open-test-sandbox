@@ -33,3 +33,6 @@ should be called out in this file and in the relevant docs.
   coverage, and batch rerun selectors use the same maintenance rules.
 - Added `case suite inspect` and `/api/case/suite-inspection` for pre-run
   readiness checks across maintained case sets.
+- Added `case suite plan`, `/api/case/suite-plan`, and exact `caseIds` support
+  in asynchronous batch runs so agents can turn inspection results into a
+  deterministic executable payload.

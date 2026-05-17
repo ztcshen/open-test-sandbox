@@ -2,6 +2,7 @@ package casesuite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +129,50 @@ func TestInspectReportsReadinessAndLatestState(t *testing.T) {
 	}
 	if byCase["case.paused"].Ready || byCase["case.paused"].SuggestedAction != "review-status" {
 		t.Fatalf("paused case = %#v", byCase["case.paused"])
+	}
+}
+
+func TestPlanSelectsReadyCasesAndBuildsBatchRequest(t *testing.T) {
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.passed", DisplayName: "Passed Case", NodeID: "node.alpha", CasePath: "cases/passed.json", Tags: []string{"regression"}, SortOrder: 1},
+			{ID: "case.failed", DisplayName: "Failed Case", NodeID: "node.alpha", CasePath: "cases/failed.json", Tags: []string{"regression"}, SortOrder: 2},
+			{ID: "case.unrun", DisplayName: "Unrun Case", NodeID: "node.alpha", CasePath: "cases/unrun.json", Tags: []string{"regression"}, SortOrder: 3},
+			{ID: "case.blocked", DisplayName: "Blocked Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 4},
+		},
+	}
+	records := []store.APICaseRunRecord{
+		record("run.passed", "case.passed", store.StatusPassed, base),
+		record("run.failed", "case.failed", store.StatusFailed, base.Add(time.Minute)),
+	}
+	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
+
+	report, err := Plan(context.Background(), bundle, recordStore{records: records}, Filter{Tags: []string{"regression"}, Status: "active"}, cases, PlanOptions{
+		RequestID:      "change-001",
+		BaseURL:        "http://127.0.0.1:8080",
+		EvidenceDir:    ".runtime/evidence",
+		TimeoutSeconds: 5,
+		Actions:        []string{"run", "rerun"},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if !report.OK || report.Counts.Total != 4 || report.Counts.Ready != 3 || report.Counts.Blocked != 1 || report.Counts.Selected != 2 {
+		t.Fatalf("plan counts = %#v", report.Counts)
+	}
+	if got := strings.Join(report.CaseIDs, ","); got != "case.failed,case.unrun" {
+		t.Fatalf("case ids = %q", got)
+	}
+	if report.BatchRequest.RequestID != "change-001" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.failed,case.unrun" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" || report.BatchRequest.TimeoutSeconds != 5 {
+		t.Fatalf("batch request = %#v", report.BatchRequest)
+	}
+	if len(report.Blocked) != 1 || report.Blocked[0].CaseID != "case.blocked" {
+		t.Fatalf("blocked = %#v", report.Blocked)
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 
 type apiCaseBatchRunRequest struct {
 	RequestID      string                    `json:"requestId"`
+	CaseIDs        []string                  `json:"caseIds"`
 	NodeIDs        []string                  `json:"nodeIds"`
 	WorkflowID     string                    `json:"workflowId"`
 	Suite          apiCaseBatchSuiteSelector `json:"suite,omitempty"`
@@ -93,6 +94,7 @@ type apiCaseBatchRunReport struct {
 	BatchRunID     string                     `json:"batchRunId"`
 	RequestID      string                     `json:"requestId"`
 	ProfileID      string                     `json:"profileId"`
+	CaseIDs        []string                   `json:"caseIds,omitempty"`
 	NodeIDs        []string                   `json:"nodeIds"`
 	WorkflowID     string                     `json:"workflowId,omitempty"`
 	Suite          *apiCaseBatchSuiteSelector `json:"suite,omitempty"`
@@ -134,6 +136,7 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 	}
 	request := apiCaseBatchRunRequest{
 		RequestID:      strings.TrimSpace(valueString(payload["requestId"])),
+		CaseIDs:        stringListValue(payload["caseIds"]),
 		NodeIDs:        stringListValue(payload["nodeIds"]),
 		WorkflowID:     strings.TrimSpace(valueString(payload["workflowId"])),
 		Suite:          apiCaseBatchSuiteSelectorValue(payload["suite"]),
@@ -146,10 +149,11 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "requestId is required"})
 		return
 	}
+	request.CaseIDs = compactUniqueStringListPreserveOrder(request.CaseIDs)
 	request.NodeIDs = compactUniqueStringList(request.NodeIDs)
 	request.Suite = normalizeAPICaseBatchSuiteSelector(request.Suite)
-	if len(request.NodeIDs) == 0 && request.WorkflowID == "" && !request.Suite.configured() {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "nodeIds, workflowId, or suite is required"})
+	if len(request.CaseIDs) == 0 && len(request.NodeIDs) == 0 && request.WorkflowID == "" && !request.Suite.configured() {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "caseIds, nodeIds, workflowId, or suite is required"})
 		return
 	}
 	plans, err := apiCaseBatchPlans(r.Context(), bundle, runtime, request)
@@ -169,6 +173,7 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		BatchRunID:     batchRunID,
 		RequestID:      request.RequestID,
 		ProfileID:      bundle.ID,
+		CaseIDs:        request.CaseIDs,
 		NodeIDs:        request.NodeIDs,
 		WorkflowID:     request.WorkflowID,
 		Status:         store.StatusRunning,
@@ -341,6 +346,9 @@ func writeAPICaseBatchHTMLReport(report apiCaseBatchRunReport) error {
 }
 
 func apiCaseBatchPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {
+	if len(request.CaseIDs) > 0 {
+		return apiCaseBatchExactCasePlans(bundle, request), nil
+	}
 	if strings.TrimSpace(request.WorkflowID) != "" {
 		return apiCaseBatchWorkflowPlans(bundle, request), nil
 	}
@@ -348,6 +356,20 @@ func apiCaseBatchPlans(ctx context.Context, bundle profile.Bundle, runtime store
 		return apiCaseBatchSuitePlans(ctx, bundle, runtime, request)
 	}
 	return apiCaseBatchNodePlans(bundle, request), nil
+}
+
+func apiCaseBatchExactCasePlans(bundle profile.Bundle, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
+	casesByID := make(map[string]profile.APICase, len(bundle.APICases))
+	for _, item := range bundle.APICases {
+		casesByID[item.ID] = item
+	}
+	cases := make([]profile.APICase, 0, len(request.CaseIDs))
+	for _, id := range request.CaseIDs {
+		if item, ok := casesByID[id]; ok {
+			cases = append(cases, item)
+		}
+	}
+	return apiCaseBatchPlansFromCases(bundle, request, cases)
 }
 
 func apiCaseBatchNodePlans(bundle profile.Bundle, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
@@ -644,6 +666,20 @@ func compactUniqueStringList(values []string) []string {
 		out = append(out, value)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func compactUniqueStringListPreserveOrder(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
 	return out
 }
 

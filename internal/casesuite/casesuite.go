@@ -102,6 +102,46 @@ type InspectionReport struct {
 	Warnings    []string         `json:"warnings,omitempty"`
 }
 
+type PlanOptions struct {
+	RequestID      string   `json:"requestId,omitempty"`
+	Actions        []string `json:"actions,omitempty"`
+	BaseURL        string   `json:"baseUrl,omitempty"`
+	EvidenceDir    string   `json:"evidenceDir,omitempty"`
+	TimeoutSeconds int      `json:"timeoutSeconds,omitempty"`
+}
+
+type PlanCounts struct {
+	Total    int `json:"total"`
+	Ready    int `json:"ready"`
+	Blocked  int `json:"blocked"`
+	Selected int `json:"selected"`
+	Skipped  int `json:"skipped"`
+}
+
+type BatchRequest struct {
+	RequestID      string         `json:"requestId,omitempty"`
+	CaseIDs        []string       `json:"caseIds"`
+	BaseURL        string         `json:"baseUrl,omitempty"`
+	EvidenceDir    string         `json:"evidenceDir,omitempty"`
+	TimeoutSeconds int            `json:"timeoutSeconds,omitempty"`
+	Overrides      map[string]any `json:"overrides,omitempty"`
+}
+
+type PlanReport struct {
+	OK           bool             `json:"ok"`
+	ProfileID    string           `json:"profileId"`
+	GeneratedAt  string           `json:"generatedAt"`
+	Filters      Filter           `json:"filters"`
+	Options      PlanOptions      `json:"options"`
+	Counts       PlanCounts       `json:"counts"`
+	CaseIDs      []string         `json:"caseIds"`
+	Selected     []InspectionItem `json:"selected"`
+	Blocked      []InspectionItem `json:"blocked"`
+	Skipped      []InspectionItem `json:"skipped"`
+	BatchRequest BatchRequest     `json:"batchRequest"`
+	Warnings     []string         `json:"warnings,omitempty"`
+}
+
 type RecordStore interface {
 	ListRuns(context.Context) ([]store.Run, error)
 	ListAPICaseRuns(context.Context, string) ([]store.APICaseRun, error)
@@ -270,6 +310,57 @@ func Inspect(ctx context.Context, bundle profile.Bundle, runtime RecordStore, fi
 	return report, nil
 }
 
+func Plan(ctx context.Context, bundle profile.Bundle, runtime RecordStore, filter Filter, cases []profile.APICase, options PlanOptions) (PlanReport, error) {
+	inspection, err := Inspect(ctx, bundle, runtime, filter, cases)
+	if err != nil {
+		return PlanReport{}, err
+	}
+	options.Actions = NormalizeStringList(options.Actions)
+	actionSet := actionSet(options.Actions)
+	report := PlanReport{
+		OK:          true,
+		ProfileID:   bundle.ID,
+		GeneratedAt: inspection.GeneratedAt,
+		Filters:     inspection.Filters,
+		Options:     options,
+		Counts: PlanCounts{
+			Total:   inspection.Counts.Total,
+			Ready:   inspection.Counts.Ready,
+			Blocked: inspection.Counts.Blocked,
+		},
+		Selected: []InspectionItem{},
+		Blocked:  []InspectionItem{},
+		Skipped:  []InspectionItem{},
+		Warnings: append([]string(nil), inspection.Warnings...),
+	}
+	for _, item := range inspection.Items {
+		if !item.Ready {
+			report.Blocked = append(report.Blocked, item)
+			continue
+		}
+		if len(actionSet) > 0 && !actionSet[item.SuggestedAction] {
+			report.Skipped = append(report.Skipped, item)
+			continue
+		}
+		report.Selected = append(report.Selected, item)
+		report.CaseIDs = append(report.CaseIDs, item.CaseID)
+	}
+	report.Counts.Selected = len(report.Selected)
+	report.Counts.Skipped = len(report.Skipped)
+	report.BatchRequest = BatchRequest{
+		RequestID:      strings.TrimSpace(options.RequestID),
+		CaseIDs:        append([]string(nil), report.CaseIDs...),
+		BaseURL:        strings.TrimSpace(options.BaseURL),
+		EvidenceDir:    strings.TrimSpace(options.EvidenceDir),
+		TimeoutSeconds: options.TimeoutSeconds,
+	}
+	if len(report.CaseIDs) == 0 {
+		report.OK = false
+		report.Warnings = append(report.Warnings, "no ready cases selected for execution")
+	}
+	return report, nil
+}
+
 type State struct {
 	Latest    store.APICaseRunRecord
 	HasPassed bool
@@ -405,6 +496,17 @@ func SuggestedAction(item InspectionItem) string {
 		return "run"
 	}
 	return "keep"
+}
+
+func actionSet(values []string) map[string]bool {
+	out := map[string]bool{}
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			out[value] = true
+		}
+	}
+	return out
 }
 
 func CaseMatches(item profile.APICase, filter Filter) bool {

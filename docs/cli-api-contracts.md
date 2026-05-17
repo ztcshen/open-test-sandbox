@@ -104,6 +104,31 @@ The Control plane exposes the same inspection contract:
 GET /api/case/suite-inspection?tag=smoke&owner=team-a&status=active
 ```
 
+## Maintained Case Suite Plan
+
+```sh
+otsandbox case suite plan \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --tag smoke \
+  --status active \
+  --action run \
+  --action rerun \
+  --request-id change-001 \
+  --base-url http://127.0.0.1:8080 \
+  --json
+```
+
+The plan command turns inspection into a deterministic execution payload. It
+returns selected ready `caseIds`, blocked cases, skipped ready cases, and a
+`batchRequest` object that can be posted to `/api/cases/batch-runs`.
+
+The Control plane exposes the same planning contract:
+
+```http
+GET /api/case/suite-plan?tag=smoke&status=active&action=run&action=rerun&requestId=change-001
+```
+
 ## Single Interface Report
 
 ```sh
@@ -149,6 +174,17 @@ Run all cases for selected interface nodes:
 {
   "requestId": "change-001",
   "nodeIds": ["node.alpha"],
+  "baseUrl": "http://127.0.0.1:8080",
+  "evidenceDir": ".runtime/case-batches"
+}
+```
+
+Run an exact case list, usually produced by `case suite plan`:
+
+```json
+{
+  "requestId": "planned-001",
+  "caseIds": ["case.alpha", "case.beta"],
   "baseUrl": "http://127.0.0.1:8080",
   "evidenceDir": ".runtime/case-batches"
 }

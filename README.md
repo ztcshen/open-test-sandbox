@@ -36,7 +36,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Local-first Store | SQLite by default, with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | External profiles | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings live outside the core repository. |
 | Agent-friendly discovery | Agents call `interface-node discover`, `workflow discover`, or `case discover` first, then run reports with exact returned ids. |
-| Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, and latest run state for review, assignment, and suite execution. |
+| Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, and executable plans for review, assignment, and suite execution. |
 | API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite through CLI or Control plane API without re-running requests. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports. |
@@ -149,6 +149,16 @@ about target ids:
   --store-url "$store" \
   --tag smoke \
   --status active \
+  --json
+
+./bin/otsandbox.sh case suite plan \
+  --profile sample \
+  --store-url "$store" \
+  --tag smoke \
+  --status active \
+  --action run \
+  --action rerun \
+  --request-id change-001 \
   --json
 
 ./bin/otsandbox.sh interface-node case report \

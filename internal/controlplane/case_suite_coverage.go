@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"net/http"
+	"strconv"
 
 	"open-test-sandbox/internal/casesuite"
 	"open-test-sandbox/internal/profile"
@@ -30,6 +31,17 @@ func handleCaseSuiteInspection(w http.ResponseWriter, r *http.Request, bundle pr
 	writeJSON(w, report)
 }
 
+func handleCaseSuitePlan(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
+	filter := caseSuiteCoverageFilterFromRequest(r)
+	items := casesuite.SelectCases(bundle, filter)
+	report, err := casesuite.Plan(r.Context(), bundle, runtime, filter, items, caseSuitePlanOptionsFromRequest(r))
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, report)
+}
+
 func caseSuiteCoverageFilterFromRequest(r *http.Request) casesuite.Filter {
 	query := r.URL.Query()
 	return casesuite.NormalizeFilter(casesuite.Filter{
@@ -40,6 +52,22 @@ func caseSuiteCoverageFilterFromRequest(r *http.Request) casesuite.Filter {
 		Owner:    query.Get("owner"),
 		Priority: query.Get("priority"),
 	})
+}
+
+func caseSuitePlanOptionsFromRequest(r *http.Request) casesuite.PlanOptions {
+	query := r.URL.Query()
+	return casesuite.PlanOptions{
+		RequestID:      query.Get("requestId"),
+		Actions:        queryStringList(query["action"], query["actions"]),
+		BaseURL:        query.Get("baseUrl"),
+		EvidenceDir:    query.Get("evidenceDir"),
+		TimeoutSeconds: queryIntValue(query.Get("timeoutSeconds")),
+	}
+}
+
+func queryIntValue(value string) int {
+	out, _ := strconv.Atoi(value)
+	return out
 }
 
 func queryStringList(groups ...[]string) []string {
