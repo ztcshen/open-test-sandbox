@@ -220,10 +220,11 @@ The `suite` selector accepts `filter`, `nodeId`, `tags`, `status`, `owner`,
 maintenance selector.
 
 The API returns `202 Accepted` with a batch run id, JSON report URL, HTML
-report URL, JUnit report URL, and artifact manifest URL. Poll the JSON report
-URL until the status is terminal, then collect `/report.junit.xml` when CI
-needs a test result artifact or `/artifacts.json` when an agent needs the full
-archive list.
+report URL, JUnit report URL, artifact manifest URL, and failure summary URL.
+Poll the JSON report URL until the status is terminal, then collect
+`/report.junit.xml` when CI needs a test result artifact, `/artifacts.json`
+when an agent needs the full archive list, or `/failures.json` when it only
+needs failed cases for triage.
 
 ```http
 GET /api/cases/batch-runs/{batchRunId}/artifacts.json
@@ -231,6 +232,15 @@ GET /api/cases/batch-runs/{batchRunId}/artifacts.json
 
 The artifact manifest lists the batch JSON, HTML, JUnit XML, per-case Evidence
 paths, and per-case detail API links.
+
+```http
+GET /api/cases/batch-runs/{batchRunId}/failures.json
+```
+
+The failure summary is a compact JSON document with batch status, failed count,
+and one row per failed case. Each row includes case id, display name, status,
+elapsed time, case run id, detail URL, Evidence path, and assertion error text
+when available.
 
 ## Failed Case Evidence
 

@@ -118,6 +118,8 @@ type apiCaseBatchRunReport struct {
 	JUnitReportURL       string                     `json:"junitReportUrl,omitempty"`
 	ArtifactManifestPath string                     `json:"artifactManifestPath,omitempty"`
 	ArtifactManifestURL  string                     `json:"artifactManifestUrl,omitempty"`
+	FailureSummaryPath   string                     `json:"failureSummaryPath,omitempty"`
+	FailureSummaryURL    string                     `json:"failureSummaryUrl,omitempty"`
 }
 
 type apiCaseBatchArtifactManifest struct {
@@ -137,6 +139,17 @@ type apiCaseBatchArtifact struct {
 	URL       string `json:"url,omitempty"`
 	Path      string `json:"path,omitempty"`
 	MediaType string `json:"mediaType,omitempty"`
+}
+
+type apiCaseBatchFailureSummary struct {
+	OK          bool                     `json:"ok"`
+	BatchRunID  string                   `json:"batchRunId"`
+	RequestID   string                   `json:"requestId"`
+	ProfileID   string                   `json:"profileId"`
+	Status      string                   `json:"status"`
+	Failed      int                      `json:"failed"`
+	GeneratedAt string                   `json:"generatedAt"`
+	Failures    []apiCaseBatchCaseReport `json:"failures"`
 }
 
 //go:embed templates/api_case_batch_report.html
@@ -213,6 +226,8 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		JUnitReportURL:       "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/report.junit.xml",
 		ArtifactManifestPath: filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "artifacts.json"),
 		ArtifactManifestURL:  "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/artifacts.json",
+		FailureSummaryPath:   filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "failures.json"),
+		FailureSummaryURL:    "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/failures.json",
 	}
 	if request.Suite.configured() {
 		suite := request.Suite
@@ -244,6 +259,10 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	if err := writeAPICaseBatchFailureSummary(report); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 	runner.save(report)
 
 	go runner.run(context.Background(), batchRunID, bundle.ID, plans, runtime)
@@ -255,6 +274,7 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	wantsHTML := strings.HasSuffix(idValue, "/report.html")
 	wantsJUnit := strings.HasSuffix(idValue, "/report.junit.xml")
 	wantsArtifacts := strings.HasSuffix(idValue, "/artifacts.json")
+	wantsFailures := strings.HasSuffix(idValue, "/failures.json")
 	if wantsHTML {
 		idValue = strings.TrimSuffix(idValue, "/report.html")
 	}
@@ -263,6 +283,9 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	}
 	if wantsArtifacts {
 		idValue = strings.TrimSuffix(idValue, "/artifacts.json")
+	}
+	if wantsFailures {
+		idValue = strings.TrimSuffix(idValue, "/failures.json")
 	}
 	id, err := url.PathUnescape(idValue)
 	if err != nil || strings.TrimSpace(id) == "" {
@@ -284,6 +307,10 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	}
 	if wantsArtifacts {
 		http.ServeFile(w, r, report.ArtifactManifestPath)
+		return
+	}
+	if wantsFailures {
+		http.ServeFile(w, r, report.FailureSummaryPath)
 		return
 	}
 	writeJSON(w, report)
@@ -330,6 +357,7 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profile
 			item.ElapsedMs = result.ElapsedMs
 			item.StartedAt = result.StartedAt
 			item.FinishedAt = result.FinishedAt
+			item.Error = apiCaseBatchFailureMessage(result)
 			if runtime != nil {
 				if err := recordAPICaseRun(ctx, runtime, profileID, result); err != nil {
 					item.Status = store.StatusFailed
@@ -366,6 +394,7 @@ func (r *apiCaseBatchRunner) updateCase(batchRunID string, index int, item apiCa
 	_ = writeAPICaseBatchHTMLReport(report)
 	_ = writeAPICaseBatchJUnitReport(report)
 	_ = writeAPICaseBatchArtifactManifest(report)
+	_ = writeAPICaseBatchFailureSummary(report)
 	r.runs[batchRunID] = report
 }
 
@@ -385,6 +414,7 @@ func (r *apiCaseBatchRunner) finish(batchRunID string) {
 	_ = writeAPICaseBatchHTMLReport(report)
 	_ = writeAPICaseBatchJUnitReport(report)
 	_ = writeAPICaseBatchArtifactManifest(report)
+	_ = writeAPICaseBatchFailureSummary(report)
 	r.runs[batchRunID] = report
 }
 
@@ -460,6 +490,7 @@ func apiCaseBatchArtifacts(report apiCaseBatchRunReport) apiCaseBatchArtifactMan
 		apiCaseBatchArtifact{Kind: "html", URL: report.HTMLReportURL, Path: report.HTMLReportPath, MediaType: "text/html"},
 		apiCaseBatchArtifact{Kind: "junit", URL: report.JUnitReportURL, Path: report.JUnitReportPath, MediaType: "application/xml"},
 		apiCaseBatchArtifact{Kind: "artifact-manifest", URL: report.ArtifactManifestURL, Path: report.ArtifactManifestPath, MediaType: "application/json"},
+		apiCaseBatchArtifact{Kind: "failure-summary", URL: report.FailureSummaryURL, Path: report.FailureSummaryPath, MediaType: "application/json"},
 	)
 	for _, item := range report.Cases {
 		if strings.TrimSpace(item.DetailURL) != "" {
@@ -481,6 +512,61 @@ func apiCaseBatchArtifacts(report apiCaseBatchRunReport) apiCaseBatchArtifactMan
 		}
 	}
 	return manifest
+}
+
+func writeAPICaseBatchFailureSummary(report apiCaseBatchRunReport) error {
+	if strings.TrimSpace(report.FailureSummaryPath) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(report.FailureSummaryPath), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(apiCaseBatchFailures(report), "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(report.FailureSummaryPath, append(raw, '\n'), 0o644)
+}
+
+func apiCaseBatchFailures(report apiCaseBatchRunReport) apiCaseBatchFailureSummary {
+	summary := apiCaseBatchFailureSummary{
+		OK:          report.Failed == 0,
+		BatchRunID:  report.BatchRunID,
+		RequestID:   report.RequestID,
+		ProfileID:   report.ProfileID,
+		Status:      report.Status,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Failures:    []apiCaseBatchCaseReport{},
+	}
+	for _, item := range report.Cases {
+		if item.Status == store.StatusFailed {
+			summary.Failures = append(summary.Failures, item)
+		}
+	}
+	summary.Failed = len(summary.Failures)
+	summary.OK = summary.Failed == 0
+	return summary
+}
+
+func apiCaseBatchFailureMessage(result apicase.RunResult) string {
+	if result.Status != store.StatusFailed {
+		return ""
+	}
+	if strings.TrimSpace(result.EvidencePath) == "" {
+		return "case run failed"
+	}
+	raw, err := os.ReadFile(filepath.Join(result.EvidencePath, "assertions.json"))
+	if err != nil {
+		return "case run failed"
+	}
+	var assertions apicase.AssertionEvidence
+	if err := json.Unmarshal(raw, &assertions); err != nil {
+		return "case run failed"
+	}
+	if len(assertions.Errors) == 0 {
+		return "case run failed"
+	}
+	return strings.Join(assertions.Errors, "; ")
 }
 
 func apiCaseBatchPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {

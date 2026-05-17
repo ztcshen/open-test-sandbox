@@ -40,3 +40,5 @@ should be called out in this file and in the relevant docs.
   runs for CI systems that consume test result artifacts.
 - Added asynchronous batch artifact manifests that list JSON, HTML, JUnit, case
   detail, and case Evidence artifacts for archival automation.
+- Added asynchronous batch failure summaries so agents can fetch only failed
+  cases with detail links, Evidence paths, elapsed time, and assertion errors.

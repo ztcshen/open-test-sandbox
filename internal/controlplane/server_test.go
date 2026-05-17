@@ -5271,6 +5271,109 @@ func TestServerStartsAsyncAPICaseBatchRunForExactCaseIDs(t *testing.T) {
 	}
 }
 
+func TestServerExposesAPICaseBatchFailureSummary(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/failures/pass":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/v1/failures/fail":
+			http.Error(w, "not ok", http.StatusInternalServerError)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer target.Close()
+
+	dir := t.TempDir()
+	casePath := func(id string, path string) string {
+		t.Helper()
+		out := filepath.Join(dir, id+".json")
+		if err := os.WriteFile(out, []byte(fmt.Sprintf(`{
+  "id": %q,
+  "title": %q,
+  "request": {"method": "GET", "path": %q},
+  "assertions": {"expectedStatusCodes": [200], "responseContains": ["ok"]}
+}`, id, id, path)), 0o644); err != nil {
+			t.Fatalf("write api case %s: %v", id, err)
+		}
+		return out
+	}
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Failure Summary"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.pass", DisplayName: "Passing Case", NodeID: "node.alpha", CasePath: casePath("case.pass", "/v1/failures/pass"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence")},
+			{ID: "case.fail", DisplayName: "Failing Case", NodeID: "node.alpha", CasePath: casePath("case.fail", "/v1/failures/fail"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence")},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(`{"requestId":"failure-001","caseIds":["case.pass","case.fail"]}`))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		ReportURL         string `json:"reportUrl"`
+		FailureSummaryURL string `json:"failureSummaryUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if created.FailureSummaryURL == "" {
+		t.Fatalf("failure summary url missing: %#v", created)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if report.OK || report.Status != store.StatusFailed || report.Failed != 1 {
+		t.Fatalf("failed batch report = %#v", report)
+	}
+
+	summaryResp, err := http.Get(server.URL + created.FailureSummaryURL)
+	if err != nil {
+		t.Fatalf("get failure summary: %v", err)
+	}
+	defer summaryResp.Body.Close()
+	var summary struct {
+		OK         bool   `json:"ok"`
+		BatchRunID string `json:"batchRunId"`
+		RequestID  string `json:"requestId"`
+		Failed     int    `json:"failed"`
+		Failures   []struct {
+			CaseID       string `json:"caseId"`
+			CaseRunID    string `json:"caseRunId"`
+			Status       string `json:"status"`
+			DetailURL    string `json:"detailUrl"`
+			EvidencePath string `json:"evidencePath"`
+			Error        string `json:"error"`
+		} `json:"failures"`
+	}
+	if err := json.NewDecoder(summaryResp.Body).Decode(&summary); err != nil {
+		t.Fatalf("decode failure summary: %v", err)
+	}
+	if summary.OK || summary.RequestID != "failure-001" || summary.Failed != 1 || len(summary.Failures) != 1 {
+		t.Fatalf("failure summary = %#v", summary)
+	}
+	failure := summary.Failures[0]
+	if failure.CaseID != "case.fail" || failure.Status != store.StatusFailed || failure.CaseRunID == "" || failure.DetailURL == "" || failure.EvidencePath == "" || failure.Error == "" {
+		t.Fatalf("failure item = %#v", failure)
+	}
+}
+
 func TestServerStartsAsyncAPICaseBatchRunForMaintainedSuiteRunStates(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
