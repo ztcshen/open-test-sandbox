@@ -1523,6 +1523,53 @@ func TestEvidenceListCommandRejectsMissingRun(t *testing.T) {
 	}
 }
 
+func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
+	storePath := createPostProcessTaskStore(t)
+
+	out := runCLI(t,
+		"evidence", "tasks",
+		"--store-url", storePath,
+		"--run", "run.tasks",
+		"--step", "step-a",
+		"--kind", "trace_topology_collect",
+		"--json",
+	)
+	var report struct {
+		RunID  string `json:"runId"`
+		Counts struct {
+			Total      int   `json:"total"`
+			Passed     int   `json:"passed"`
+			Failed     int   `json:"failed"`
+			Running    int   `json:"running"`
+			DurationMs int64 `json:"durationMs"`
+		} `json:"counts"`
+		Tasks []struct {
+			ID         string `json:"id"`
+			RunID      string `json:"runId"`
+			StepID     string `json:"stepId"`
+			Kind       string `json:"kind"`
+			Status     string `json:"status"`
+			DurationMs int64  `json:"durationMs"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode evidence tasks json: %v\n%s", err, out)
+	}
+	if report.RunID != "run.tasks" || report.Counts.Total != 1 || report.Counts.Passed != 1 || report.Counts.DurationMs != 125 {
+		t.Fatalf("evidence tasks report = %#v", report)
+	}
+	if len(report.Tasks) != 1 || report.Tasks[0].ID != "task.trace" || report.Tasks[0].StepID != "step-a" || report.Tasks[0].Kind != "trace_topology_collect" {
+		t.Fatalf("evidence tasks = %#v", report.Tasks)
+	}
+
+	textOut := runCLI(t, "evidence", "tasks", "--store-url", storePath, "--run", "run.tasks", "--status", "failed")
+	for _, want := range []string{"Post Process Tasks: run.tasks", "task.logs", "runtime_log_collect", "300 ms", "log source missing"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("evidence tasks text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestCaseRunCommandWritesEvidence(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -3190,6 +3237,68 @@ func createStoredCaseRun(t *testing.T, runID string) string {
 	evidenceDir := filepath.Join(dir, "evidence")
 
 	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", runID, "--evidence-dir", evidenceDir, "--store-url", storePath, "--profile", "sample")
+	return storePath
+}
+
+func createPostProcessTaskStore(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open post process task store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Fatalf("close post process task store: %v", err)
+		}
+	})
+	base := time.Date(2026, 5, 17, 1, 2, 3, 0, time.UTC)
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run.tasks",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  base,
+		FinishedAt: base.Add(time.Second),
+		CreatedAt:  base,
+		UpdatedAt:  base.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("create task run: %v", err)
+	}
+	records := []store.PostProcessTask{
+		{
+			ID:         "task.trace",
+			RunID:      "run.tasks",
+			WorkflowID: "workflow.alpha",
+			StepID:     "step-a",
+			CaseID:     "case.alpha",
+			Kind:       "trace_topology_collect",
+			Status:     store.StatusPassed,
+			StartedAt:  base.Add(10 * time.Millisecond),
+			FinishedAt: base.Add(135 * time.Millisecond),
+			CreatedAt:  base.Add(10 * time.Millisecond),
+		},
+		{
+			ID:          "task.logs",
+			RunID:       "run.tasks",
+			WorkflowID:  "workflow.alpha",
+			StepID:      "step-b",
+			CaseID:      "case.beta",
+			Kind:        "runtime_log_collect",
+			Status:      store.StatusFailed,
+			StartedAt:   base.Add(200 * time.Millisecond),
+			FinishedAt:  base.Add(500 * time.Millisecond),
+			Error:       "log source missing",
+			SummaryJSON: `{"source":"runtime-log"}`,
+			CreatedAt:   base.Add(200 * time.Millisecond),
+		},
+	}
+	for _, record := range records {
+		if _, err := s.RecordPostProcessTask(ctx, record); err != nil {
+			t.Fatalf("record post process task %s: %v", record.ID, err)
+		}
+	}
 	return storePath
 }
 

@@ -3408,6 +3408,67 @@ func TestServerCollectsTraceTopologyForSingleTestKitRun(t *testing.T) {
 	t.Fatalf("stored trace topology was not collected asynchronously")
 }
 
+func TestServerExposesPostProcessTasks(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "store.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	base := time.Date(2026, 5, 17, 2, 3, 4, 0, time.UTC)
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run.tasks",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.alpha",
+		Status:     store.StatusPassed,
+		StartedAt:  base,
+		FinishedAt: base.Add(time.Second),
+		CreatedAt:  base,
+		UpdatedAt:  base.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("create task run: %v", err)
+	}
+	if _, err := s.RecordPostProcessTask(ctx, store.PostProcessTask{
+		ID:         "task.trace",
+		RunID:      "run.tasks",
+		WorkflowID: "workflow.alpha",
+		StepID:     "step-a",
+		CaseID:     "case.alpha",
+		Kind:       "trace_topology_collect",
+		Status:     store.StatusPassed,
+		StartedAt:  base.Add(10 * time.Millisecond),
+		FinishedAt: base.Add(135 * time.Millisecond),
+		CreatedAt:  base.Add(10 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("record task: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{Runtime: s}))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/post-process-tasks?runId=run.tasks&stepId=step-a&kind=trace_topology_collect", http.StatusOK)
+	if payload["ok"] != true || payload["runId"] != "run.tasks" {
+		t.Fatalf("post process task payload = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["total"].(float64) != 1 || counts["passed"].(float64) != 1 || counts["durationMs"].(float64) != 125 {
+		t.Fatalf("post process task counts = %#v", counts)
+	}
+	tasks := payload["tasks"].([]any)
+	if len(tasks) != 1 {
+		t.Fatalf("post process tasks = %#v", tasks)
+	}
+	task := tasks[0].(map[string]any)
+	if task["id"] != "task.trace" || task["kind"] != "trace_topology_collect" || task["stepId"] != "step-a" {
+		t.Fatalf("post process task = %#v", task)
+	}
+
+	missing := decodeJSONResponse(t, server.URL+"/api/post-process-tasks", http.StatusBadRequest)
+	if missing["ok"] != false || !strings.Contains(missing["error"].(string), "runId") {
+		t.Fatalf("missing runId response = %#v", missing)
+	}
+}
+
 func TestServerExposesTestKitBatchContract(t *testing.T) {
 	bundle := profile.Bundle{
 		ID:          "sample",

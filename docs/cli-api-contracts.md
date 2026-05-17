@@ -492,6 +492,27 @@ The payload contains the case summary, request, response, assertions,
 precondition fixture context, stored topology, and persisted runtime log
 records when those records exist.
 
+## Post-Process Task Lookup
+
+```sh
+otsandbox evidence tasks \
+  --store-url .runtime/store.sqlite \
+  --run RUN_ID \
+  --step STEP_ID \
+  --kind trace_topology_collect \
+  --json
+```
+
+```http
+GET /api/post-process-tasks?runId=RUN_ID&stepId=STEP_ID&kind=trace_topology_collect
+```
+
+This lookup reads stored post-process task records for one run and can narrow
+them by step id, case id, task kind, or status. The response includes compact
+counts for passed, failed, running, skipped, and total duration so a UI or agent
+can tell whether slow topology, log, or report enrichment happened after the
+main request finished.
+
 ## Stability Notes
 
 - Runtime ids are unique per run. Target ids come from profile discovery.

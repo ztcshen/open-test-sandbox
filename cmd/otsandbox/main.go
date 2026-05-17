@@ -202,6 +202,7 @@ Usage:
   otsandbox config publish --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
+  otsandbox evidence tasks --store-url PATH --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
   otsandbox workflow discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--json]
   otsandbox workflow plan --profile PATH --workflow ID
   otsandbox workflow audit --profile PATH --workflow ID [--store-url PATH] [--json]
@@ -3327,6 +3328,8 @@ func runEvidence(ctx context.Context, args []string) error {
 		return runEvidenceImport(ctx, args[1:])
 	case "list":
 		return runEvidenceList(ctx, args[1:])
+	case "tasks":
+		return runEvidenceTasks(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown evidence command: %s", args[0])
 	}
@@ -3436,6 +3439,184 @@ func printEvidenceList(report evidenceListReport) {
 		}
 		for _, record := range run.EvidenceRecords {
 			fmt.Printf("Evidence: %s %s\n", record.Kind, record.URI)
+		}
+	}
+}
+
+type evidenceTaskReport struct {
+	OK     bool               `json:"ok"`
+	RunID  string             `json:"runId"`
+	StepID string             `json:"stepId,omitempty"`
+	CaseID string             `json:"caseId,omitempty"`
+	Kind   string             `json:"kind,omitempty"`
+	Status string             `json:"status,omitempty"`
+	Counts evidenceTaskCounts `json:"counts"`
+	Tasks  []evidenceTaskItem `json:"tasks"`
+}
+
+type evidenceTaskCounts struct {
+	Total      int   `json:"total"`
+	Passed     int   `json:"passed"`
+	Failed     int   `json:"failed"`
+	Running    int   `json:"running"`
+	Skipped    int   `json:"skipped"`
+	DurationMs int64 `json:"durationMs"`
+}
+
+type evidenceTaskItem struct {
+	ID          string    `json:"id"`
+	RunID       string    `json:"runId"`
+	WorkflowID  string    `json:"workflowId,omitempty"`
+	StepID      string    `json:"stepId,omitempty"`
+	CaseID      string    `json:"caseId,omitempty"`
+	Kind        string    `json:"kind"`
+	Status      string    `json:"status"`
+	StartedAt   time.Time `json:"startedAt"`
+	FinishedAt  time.Time `json:"finishedAt"`
+	DurationMs  int64     `json:"durationMs"`
+	Error       string    `json:"error,omitempty"`
+	SummaryJSON string    `json:"summaryJson,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+type evidenceTaskFilter struct {
+	RunID  string
+	StepID string
+	CaseID string
+	Kind   string
+	Status string
+}
+
+func runEvidenceTasks(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("evidence tasks", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	runID := flags.String("run", "", "Run id")
+	stepID := flags.String("step", "", "Workflow step id")
+	caseID := flags.String("case", "", "API case id")
+	kind := flags.String("kind", "", "Post-process task kind")
+	status := flags.String("status", "", "Post-process task status")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*runID) == "" {
+		return errors.New("--run is required")
+	}
+	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	if err != nil {
+		return err
+	}
+	s, err := sqlite.Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	report, err := evidenceTasks(ctx, s, evidenceTaskFilter{
+		RunID:  *runID,
+		StepID: *stepID,
+		CaseID: *caseID,
+		Kind:   *kind,
+		Status: *status,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printEvidenceTasks(report)
+	return nil
+}
+
+func evidenceTasks(ctx context.Context, s store.Store, filter evidenceTaskFilter) (evidenceTaskReport, error) {
+	filter.RunID = strings.TrimSpace(filter.RunID)
+	if filter.RunID == "" {
+		return evidenceTaskReport{}, errors.New("run id is required")
+	}
+	if _, err := s.GetRun(ctx, filter.RunID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return evidenceTaskReport{}, fmt.Errorf("run not found: %s", filter.RunID)
+		}
+		return evidenceTaskReport{}, err
+	}
+	rows, err := s.ListPostProcessTasks(ctx, filter.RunID)
+	if err != nil {
+		return evidenceTaskReport{}, err
+	}
+	report := evidenceTaskReport{
+		OK:     true,
+		RunID:  filter.RunID,
+		StepID: strings.TrimSpace(filter.StepID),
+		CaseID: strings.TrimSpace(filter.CaseID),
+		Kind:   strings.TrimSpace(filter.Kind),
+		Status: strings.TrimSpace(filter.Status),
+		Tasks:  []evidenceTaskItem{},
+	}
+	for _, row := range rows {
+		if !postProcessTaskMatches(row, filter) {
+			continue
+		}
+		report.Tasks = append(report.Tasks, evidenceTaskItem{
+			ID:          row.ID,
+			RunID:       row.RunID,
+			WorkflowID:  row.WorkflowID,
+			StepID:      row.StepID,
+			CaseID:      row.CaseID,
+			Kind:        row.Kind,
+			Status:      row.Status,
+			StartedAt:   row.StartedAt,
+			FinishedAt:  row.FinishedAt,
+			DurationMs:  row.DurationMs,
+			Error:       row.Error,
+			SummaryJSON: row.SummaryJSON,
+			CreatedAt:   row.CreatedAt,
+		})
+		report.Counts.Total++
+		report.Counts.DurationMs += row.DurationMs
+		switch row.Status {
+		case store.StatusPassed:
+			report.Counts.Passed++
+		case store.StatusFailed:
+			report.Counts.Failed++
+		case store.StatusRunning:
+			report.Counts.Running++
+		case store.StatusSkipped:
+			report.Counts.Skipped++
+		}
+	}
+	return report, nil
+}
+
+func postProcessTaskMatches(row store.PostProcessTask, filter evidenceTaskFilter) bool {
+	if filter.StepID != "" && row.StepID != filter.StepID {
+		return false
+	}
+	if filter.CaseID != "" && row.CaseID != filter.CaseID {
+		return false
+	}
+	if filter.Kind != "" && row.Kind != filter.Kind {
+		return false
+	}
+	if filter.Status != "" && row.Status != filter.Status {
+		return false
+	}
+	return true
+}
+
+func printEvidenceTasks(report evidenceTaskReport) {
+	fmt.Printf("Post Process Tasks: %s\n", report.RunID)
+	fmt.Printf("Total: %d Passed: %d Failed: %d Running: %d Skipped: %d Duration: %d ms\n", report.Counts.Total, report.Counts.Passed, report.Counts.Failed, report.Counts.Running, report.Counts.Skipped, report.Counts.DurationMs)
+	for _, task := range report.Tasks {
+		fmt.Printf("- %s %s [%s] %d ms\n", task.ID, task.Kind, task.Status, task.DurationMs)
+		if task.StepID != "" {
+			fmt.Printf("  Step: %s\n", task.StepID)
+		}
+		if task.CaseID != "" {
+			fmt.Printf("  Case: %s\n", task.CaseID)
+		}
+		if task.Error != "" {
+			fmt.Printf("  Error: %s\n", task.Error)
 		}
 	}
 }

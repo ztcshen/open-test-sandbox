@@ -38,6 +38,8 @@ should be called out in this file and in the relevant docs.
   deterministic executable payload.
 - Added `case suite quality-report` to export maintained-case quality actions
   as compact JSON and HTML artifacts for agent handoff and team review.
+- Added `evidence tasks` and `/api/post-process-tasks` for inspecting stored
+  topology, log, and report post-process task status and duration by run.
 - Added JUnit XML output for maintained suite reports and asynchronous batch
   runs for CI systems that consume test result artifacts.
 - Added asynchronous batch artifact manifests that list JSON, HTML, JUnit, case

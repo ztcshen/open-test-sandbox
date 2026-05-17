@@ -265,6 +265,12 @@ about target ids:
   --base-url http://127.0.0.1:8080 \
   --output-dir "$tmpdir/reports" \
   --json
+
+./bin/otsandbox.sh evidence tasks \
+  --store-url "$store" \
+  --run RUN_ID \
+  --kind trace_topology_collect \
+  --json
 ```
 
 The same pattern works for workflows:
