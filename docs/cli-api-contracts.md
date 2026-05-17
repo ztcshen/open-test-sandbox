@@ -69,6 +69,28 @@ case metadata and execution config, while runnable case JSON files are written
 under the profile bundle. It does not write Store records; publish or verify
 the profile afterward when the caller wants indexed read-models.
 
+## Maintained Case Suite Quality
+
+```sh
+otsandbox case suite quality \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --status active \
+  --json
+```
+
+The quality command audits authoring readiness before runtime execution. It
+flags interface nodes with no maintained cases and cases missing description,
+tags, priority, owner, runnable source, or execution config. The command is
+read-only; it helps agents decide whether to draft/apply more cases or ask a
+team owner to fill in metadata before relying on the suite.
+
+The Control plane exposes the same quality contract:
+
+```http
+GET /api/case/suite-quality?status=active
+```
+
 ## Maintained Case Suite Report
 
 ```sh

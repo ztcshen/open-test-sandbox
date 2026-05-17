@@ -75,6 +75,17 @@ func handleCaseSuiteBrief(w http.ResponseWriter, r *http.Request, bundle profile
 	writeJSON(w, report)
 }
 
+func handleCaseSuiteQuality(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
+	filter := caseSuiteCoverageFilterFromRequest(r)
+	items := casesuite.SelectCases(bundle, filter)
+	report, err := casesuite.Quality(r.Context(), bundle, runtime, filter, items)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, report)
+}
+
 func handleCaseSuiteImpact(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
 	filter := caseSuiteCoverageFilterFromRequest(r)
 	report, err := casesuite.Impact(r.Context(), bundle, runtime, filter, caseSuiteImpactOptionsFromRequest(r))

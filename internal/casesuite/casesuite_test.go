@@ -381,6 +381,49 @@ func TestBriefCombinesCoverageReadinessStabilityAndPriority(t *testing.T) {
 	}
 }
 
+func TestQualityAuditsMaintainedCaseAuthoringGaps(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+			{ID: "node.beta", DisplayName: "Node Beta"},
+			{ID: "node.empty", DisplayName: "Node Without Cases"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.complete", DisplayName: "Complete Case", Description: "Covers the main path.", NodeID: "node.alpha", CasePath: "cases/complete.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active", SortOrder: 1},
+			{ID: "case.gaps", DisplayName: "Gap Case", NodeID: "node.beta", Status: "active", SortOrder: 2},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.complete", ScopeType: "case", ScopeID: "case.complete", Status: "active", ConfigJSON: `{"caseId":"case.complete","caseExecution":{"method":"GET","path":"/items"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := Quality(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("quality: %v", err)
+	}
+	if report.OK || report.Counts.Nodes != 3 || report.Counts.NodesWithoutCases != 1 || report.Counts.Cases != 2 || report.Counts.CompleteCases != 1 || report.Counts.IncompleteCases != 1 {
+		t.Fatalf("quality counts = %#v", report.Counts)
+	}
+	if report.Counts.MissingDescription != 1 || report.Counts.MissingTags != 1 || report.Counts.MissingPriority != 1 || report.Counts.MissingOwner != 1 || report.Counts.MissingRunnable != 1 || report.Counts.MissingExecution != 1 {
+		t.Fatalf("quality gap counts = %#v", report.Counts)
+	}
+	byCase := map[string]QualityCase{}
+	for _, item := range report.Cases {
+		byCase[item.CaseID] = item
+	}
+	if !byCase["case.complete"].Complete || len(byCase["case.complete"].Issues) != 0 {
+		t.Fatalf("complete case = %#v", byCase["case.complete"])
+	}
+	if byCase["case.gaps"].Complete || !containsString(byCase["case.gaps"].Issues, "missing-owner") || !containsString(byCase["case.gaps"].Issues, "missing-execution-config") {
+		t.Fatalf("gap case = %#v", byCase["case.gaps"])
+	}
+	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != "node.empty" || !containsString(report.Nodes[0].Issues, "no-maintained-cases") {
+		t.Fatalf("quality nodes = %#v", report.Nodes)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if strings.Contains(value, want) {

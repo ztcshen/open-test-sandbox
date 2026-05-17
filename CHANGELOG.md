@@ -58,3 +58,6 @@ should be called out in this file and in the relevant docs.
   so agents can generate reviewable maintained-case bundles, then apply API
   case metadata, execution config, and runnable case files to external profile
   bundles without touching the Store directly.
+- Added `case suite quality` and `/api/case/suite-quality` to audit maintained
+  case authoring quality, including uncovered interface nodes, missing metadata,
+  missing runnable sources, and missing execution config.

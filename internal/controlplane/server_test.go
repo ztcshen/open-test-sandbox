@@ -4063,6 +4063,42 @@ func TestServerExposesCaseSuiteBriefForAgentTriage(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseSuiteQuality(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+			{ID: "node.empty", DisplayName: "Node Empty"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.complete", DisplayName: "Complete Case", Description: "Ready.", NodeID: "node.alpha", CasePath: "cases/complete.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active"},
+			{ID: "case.gaps", DisplayName: "Gap Case", NodeID: "node.alpha", Status: "active"},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.complete", ScopeType: "case", ScopeID: "case.complete", Status: "active", ConfigJSON: `{"caseId":"case.complete","caseExecution":{"method":"GET","path":"/items"}}`},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, nil))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/suite-quality?status=active", http.StatusOK)
+	if payload["ok"] != false {
+		t.Fatalf("suite quality ok = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["nodes"] != float64(2) || counts["nodesWithoutCases"] != float64(1) || counts["cases"] != float64(2) || counts["incompleteCases"] != float64(1) {
+		t.Fatalf("suite quality counts = %#v", counts)
+	}
+	nodes := payload["nodes"].([]any)
+	if len(nodes) != 1 || nodes[0].(map[string]any)["nodeId"] != "node.empty" {
+		t.Fatalf("suite quality nodes = %#v", nodes)
+	}
+	cases := payload["cases"].([]any)
+	if len(cases) != 2 || cases[1].(map[string]any)["caseId"] != "case.gaps" {
+		t.Fatalf("suite quality cases = %#v", cases)
+	}
+}
+
 func TestServerExposesCaseSuiteImpactPlan(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

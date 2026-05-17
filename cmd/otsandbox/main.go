@@ -220,6 +220,7 @@ Usage:
   otsandbox case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
   otsandbox case suite priority [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite brief [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--stability-limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite quality [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
@@ -3521,6 +3522,8 @@ func runCaseSuite(ctx context.Context, args []string) error {
 		return runCaseSuitePriority(ctx, args[1:])
 	case "brief":
 		return runCaseSuiteBrief(ctx, args[1:])
+	case "quality":
+		return runCaseSuiteQuality(ctx, args[1:])
 	case "inspect":
 		return runCaseSuiteInspect(ctx, args[1:])
 	case "plan":
@@ -3934,6 +3937,72 @@ func printCaseSuiteBrief(report casesuite.BriefReport) {
 	}
 	for _, item := range report.Blocked {
 		fmt.Printf("- blocked %s\n", item.CaseID)
+		for _, issue := range item.Issues {
+			fmt.Printf("  issue: %s\n", issue)
+		}
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+func runCaseSuiteQuality(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case suite quality", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "active", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	filterValue := caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	}
+	cases := selectedCaseSuiteCases(bundle, filterValue)
+	report, err := casesuite.Quality(ctx, bundle, sourceStore, caseSuiteFilter(filterValue), cases)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseSuiteQuality(report)
+	return nil
+}
+
+func printCaseSuiteQuality(report casesuite.QualityReport) {
+	fmt.Println("Case Suite Quality")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Nodes: %d Without Cases: %d Cases: %d Complete: %d Incomplete: %d\n", report.Counts.Nodes, report.Counts.NodesWithoutCases, report.Counts.Cases, report.Counts.CompleteCases, report.Counts.IncompleteCases)
+	for _, item := range report.Nodes {
+		fmt.Printf("- node %s\n", item.NodeID)
+		for _, issue := range item.Issues {
+			fmt.Printf("  issue: %s\n", issue)
+		}
+	}
+	for _, item := range report.Cases {
+		if item.Complete {
+			continue
+		}
+		fmt.Printf("- case %s\n", item.CaseID)
 		for _, issue := range item.Issues {
 			fmt.Printf("  issue: %s\n", issue)
 		}

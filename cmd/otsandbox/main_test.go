@@ -2404,6 +2404,60 @@ func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
+	profileDir := writeCaseSuiteQualityProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	out := runCLI(t,
+		"case", "suite", "quality",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--status", "active",
+		"--json",
+	)
+	var report struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Nodes             int `json:"nodes"`
+			NodesWithoutCases int `json:"nodesWithoutCases"`
+			Cases             int `json:"cases"`
+			CompleteCases     int `json:"completeCases"`
+			IncompleteCases   int `json:"incompleteCases"`
+			MissingOwner      int `json:"missingOwner"`
+			MissingRunnable   int `json:"missingRunnable"`
+			MissingExecution  int `json:"missingExecution"`
+		} `json:"counts"`
+		Cases []struct {
+			CaseID   string   `json:"caseId"`
+			Complete bool     `json:"complete"`
+			Issues   []string `json:"issues"`
+		} `json:"cases"`
+		Nodes []struct {
+			NodeID string   `json:"nodeId"`
+			Issues []string `json:"issues"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite quality json: %v\n%s", err, out)
+	}
+	if report.OK || report.Counts.Nodes != 2 || report.Counts.NodesWithoutCases != 1 || report.Counts.Cases != 2 || report.Counts.CompleteCases != 1 || report.Counts.IncompleteCases != 1 {
+		t.Fatalf("suite quality report = %#v", report)
+	}
+	if report.Counts.MissingOwner != 1 || report.Counts.MissingRunnable != 1 || report.Counts.MissingExecution != 1 {
+		t.Fatalf("suite quality gaps = %#v", report.Counts)
+	}
+	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != "node.empty" {
+		t.Fatalf("suite quality nodes = %#v", report.Nodes)
+	}
+	textOut := runCLI(t, "case", "suite", "quality", "--profile", profileDir, "--store-url", storePath, "--status", "active")
+	for _, want := range []string{"Case Suite Quality", "Incomplete: 1", "node.empty", "case.gaps"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("quality text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)
@@ -3222,6 +3276,39 @@ func writeCaseSuiteCoverageProfile(t *testing.T) string {
       "scopeId": "case.variant",
       "status": "active",
       "configJson": "{\"caseId\":\"case.variant\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"node.alpha\",\"path\":\"/alpha\",\"expectedHttpCodes\":[200]}}"
+    }
+  ],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	return dir
+}
+
+func writeCaseSuiteQualityProfile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "workflows": [],
+  "interfaceNodes": [
+    {"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha","operation":"Alpha","method":"GET","path":"/alpha"},
+    {"id":"node.empty","displayName":"Node Empty","serviceId":"service.alpha","operation":"Empty","method":"GET","path":"/empty"}
+  ],
+  "apiCases": [
+    {"id":"case.complete","displayName":"Complete Case","description":"Ready maintained case.","nodeId":"node.alpha","sortOrder":1,"tags":["regression"],"priority":"p0","owner":"team-a","casePath":"cases/complete.json"},
+    {"id":"case.gaps","displayName":"Gap Case","nodeId":"node.alpha","sortOrder":2}
+  ],
+  "requestTemplates": [],
+  "templateConfigs": [
+    {
+      "id": "config.case.complete",
+      "scopeType": "case",
+      "scopeId": "case.complete",
+      "status": "active",
+      "configJson": "{\"caseId\":\"case.complete\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"node.alpha\",\"path\":\"/alpha\",\"expectedHttpCodes\":[200]}}"
     }
   ],
   "caseDependencies": [],
