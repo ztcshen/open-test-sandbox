@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"open-test-sandbox/internal/apicase"
+	"open-test-sandbox/internal/casesuite"
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store"
 )
@@ -385,7 +386,7 @@ func apiCaseBatchNodePlans(bundle profile.Bundle, request apiCaseBatchRunRequest
 }
 
 func apiCaseBatchSuitePlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {
-	filter := caseSuiteCoverageFilter{
+	filter := casesuite.Filter{
 		Filter:   request.Suite.Filter,
 		NodeID:   request.Suite.NodeID,
 		Tags:     request.Suite.Tags,
@@ -393,16 +394,16 @@ func apiCaseBatchSuitePlans(ctx context.Context, bundle profile.Bundle, runtime 
 		Owner:    request.Suite.Owner,
 		Priority: request.Suite.Priority,
 	}
-	cases := selectedSuiteCoverageCases(bundle, filter)
+	cases := casesuite.SelectCases(bundle, filter)
 	if len(request.Suite.RunStates) > 0 {
-		report, err := suiteCoverageReport(ctx, bundle, runtime, filter, cases)
+		report, err := casesuite.Coverage(ctx, bundle, runtime, filter, cases)
 		if err != nil {
 			return nil, err
 		}
-		stateSet := apiCaseBatchRunStateSet(request.Suite.RunStates)
+		stateSet := casesuite.RunStateSet(request.Suite.RunStates)
 		filtered := make([]profile.APICase, 0, len(cases))
 		for _, item := range report.Items {
-			if !stateSet[apiCaseBatchNormalizedRunState(item.LatestStatus)] {
+			if !stateSet[casesuite.NormalizeRunState(item.LatestStatus)] {
 				continue
 			}
 			if apiCase, ok := findAPICase(bundle.APICases, item.CaseID); ok {
@@ -568,7 +569,7 @@ func stringListValue(value any) []string {
 	items, ok := value.([]any)
 	if !ok {
 		if raw := strings.TrimSpace(valueString(value)); raw != "" {
-			return normalizeQueryStringList([]string{raw})
+			return casesuite.NormalizeStringList([]string{raw})
 		}
 		return nil
 	}
@@ -578,7 +579,7 @@ func stringListValue(value any) []string {
 			out = append(out, value)
 		}
 	}
-	return normalizeQueryStringList(out)
+	return casesuite.NormalizeStringList(out)
 }
 
 func apiCaseBatchSuiteSelectorValue(value any) apiCaseBatchSuiteSelector {
@@ -600,16 +601,16 @@ func apiCaseBatchSuiteSelectorValue(value any) apiCaseBatchSuiteSelector {
 func normalizeAPICaseBatchSuiteSelector(selector apiCaseBatchSuiteSelector) apiCaseBatchSuiteSelector {
 	selector.Filter = strings.TrimSpace(selector.Filter)
 	selector.NodeID = strings.TrimSpace(selector.NodeID)
-	selector.Tags = normalizeQueryStringList(selector.Tags)
+	selector.Tags = casesuite.NormalizeStringList(selector.Tags)
 	selector.Status = strings.TrimSpace(selector.Status)
 	if selector.Status == "" && selector.configuredWithoutStatus() {
 		selector.Status = "active"
 	}
 	selector.Owner = strings.TrimSpace(selector.Owner)
 	selector.Priority = strings.TrimSpace(selector.Priority)
-	selector.RunStates = normalizeQueryStringList(selector.RunStates)
+	selector.RunStates = casesuite.NormalizeStringList(selector.RunStates)
 	for index, value := range selector.RunStates {
-		selector.RunStates[index] = apiCaseBatchNormalizedRunState(value)
+		selector.RunStates[index] = casesuite.NormalizeRunState(value)
 	}
 	return selector
 }
@@ -629,30 +630,6 @@ func firstNonNilStringList(values ...any) []string {
 		}
 	}
 	return nil
-}
-
-func apiCaseBatchRunStateSet(values []string) map[string]bool {
-	out := map[string]bool{}
-	for _, value := range values {
-		if normalized := apiCaseBatchNormalizedRunState(value); normalized != "" {
-			out[normalized] = true
-		}
-	}
-	return out
-}
-
-func apiCaseBatchNormalizedRunState(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	switch value {
-	case "notrun", "not-run", "missing", "never-run":
-		return "not-run"
-	case "pass", "passed", "success", "ok":
-		return store.StatusPassed
-	case "fail", "failed", "error":
-		return store.StatusFailed
-	default:
-		return value
-	}
 }
 
 func compactUniqueStringList(values []string) []string {
