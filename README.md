@@ -36,7 +36,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Local-first Store | SQLite by default, with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | External profiles | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings live outside the core repository. |
 | Agent-friendly discovery | Agents call `interface-node discover`, `workflow discover`, or `case discover` first, then run reports with exact returned ids. |
-| Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, stability, explainable priority ranking, one-call suite briefs, and executable plans for review, assignment, and suite execution. |
+| Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, stability, explainable priority ranking, one-call suite briefs, and executable plans for review, assignment, and suite execution. Agents can draft and apply maintained cases into external profile bundles. |
 | API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite through CLI or Control plane API without re-running requests. |
 | Stability analysis | Review recent case-run history to find maintained cases that alternate between pass and fail. |
@@ -61,6 +61,8 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 
 - Generate a regression report for every case attached to one interface node.
 - Run a maintained suite selected by tag, owner, priority, status, or node.
+- Generate a reviewable maintained-case draft for an interface node, then apply
+  it to an external profile bundle.
 - Audit the latest Store coverage for a maintained suite before deciding what
   to rerun.
 - Identify unstable maintained cases before promoting a suite as reliable.
@@ -133,6 +135,20 @@ about target ids:
   --store-url "$store" \
   --tag smoke \
   --status active \
+  --json
+
+./bin/otsandbox.sh interface-node case draft \
+  --profile "$profile_dir" \
+  --node NODE_ID \
+  --case-id case.generated \
+  --title "Generated Case" \
+  --tag regression \
+  --output "$tmpdir/case-draft.json" \
+  --json
+
+./bin/otsandbox.sh interface-node case apply \
+  --profile "$profile_dir" \
+  --file "$tmpdir/case-draft.json" \
   --json
 
 ./bin/otsandbox.sh case suite report \

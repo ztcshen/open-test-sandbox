@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"open-test-sandbox/internal/apicase"
+	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/schema"
 	"open-test-sandbox/internal/store/sqlite"
@@ -927,6 +929,104 @@ func TestInterfaceNodeCaseApplyMergesExecutionConfigsIntoProfileCatalog(t *testi
 	}
 	if !hasBeta || strings.Contains(string(raw), "store.sqlite") {
 		t.Fatalf("catalog after apply = %s", raw)
+	}
+}
+
+func TestInterfaceNodeCaseDraftAndApplyCreatesRunnableMaintainedCase(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha","method":"POST","path":"/v1/items","sortOrder":7}],
+  "apiCases": [],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	bundlePath := filepath.Join(t.TempDir(), "case-draft.json")
+
+	out := runCLI(t,
+		"interface-node", "case", "draft",
+		"--profile", dir,
+		"--node", "node.alpha",
+		"--case-id", "case.generated",
+		"--title", "Generated Case",
+		"--tag", "regression",
+		"--tag", "smoke",
+		"--priority", "p1",
+		"--owner", "team-a",
+		"--output", bundlePath,
+		"--json",
+	)
+	var draft struct {
+		OK             bool   `json:"ok"`
+		CaseID         string `json:"caseId"`
+		NodeID         string `json:"nodeId"`
+		BundlePath     string `json:"bundlePath"`
+		CasePath       string `json:"casePath"`
+		TemplateConfig struct {
+			ConfigJSON string `json:"configJson"`
+		} `json:"templateConfig"`
+		CaseFile struct {
+			Path string       `json:"path"`
+			Case apicase.Case `json:"case"`
+		} `json:"caseFile"`
+	}
+	if err := json.Unmarshal([]byte(out), &draft); err != nil {
+		t.Fatalf("decode case draft json: %v\n%s", err, out)
+	}
+	if !draft.OK || draft.CaseID != "case.generated" || draft.NodeID != "node.alpha" || draft.BundlePath != bundlePath || draft.CasePath != "api-cases/case.generated.json" {
+		t.Fatalf("case draft = %#v", draft)
+	}
+	if draft.CaseFile.Path != draft.CasePath || draft.CaseFile.Case.Request.Method != "POST" || draft.CaseFile.Case.Request.Path != "/v1/items" {
+		t.Fatalf("case draft file = %#v", draft.CaseFile)
+	}
+	if !strings.Contains(draft.TemplateConfig.ConfigJSON, `"caseId":"case.generated"`) || !strings.Contains(draft.TemplateConfig.ConfigJSON, `"expectedHttpCodes":[200]`) {
+		t.Fatalf("case draft config json = %s", draft.TemplateConfig.ConfigJSON)
+	}
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("draft bundle missing: %v", err)
+	}
+
+	applyOut := runCLI(t, "interface-node", "case", "apply", "--profile", dir, "--file", bundlePath, "--json")
+	var applied struct {
+		Applied int `json:"applied"`
+		Cases   int `json:"cases"`
+		Files   int `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(applyOut), &applied); err != nil {
+		t.Fatalf("decode apply draft json: %v\n%s", err, applyOut)
+	}
+	if applied.Applied != 1 || applied.Cases != 1 || applied.Files != 1 {
+		t.Fatalf("apply draft result = %#v", applied)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "api-cases", "case.generated.json")); err != nil {
+		t.Fatalf("applied runnable case file missing: %v", err)
+	}
+	loaded, err := profile.Load(dir)
+	if err != nil {
+		t.Fatalf("load applied profile: %v", err)
+	}
+	if len(loaded.APICases) != 1 || loaded.APICases[0].ID != "case.generated" || loaded.APICases[0].CasePath != "api-cases/case.generated.json" || loaded.APICases[0].Owner != "team-a" {
+		t.Fatalf("loaded applied cases = %#v", loaded.APICases)
+	}
+	audit := runCLI(t, "interface-node", "case", "audit", "--profile", dir, "--node", "node.alpha", "--json")
+	var auditReport struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Cases      int `json:"cases"`
+			Configured int `json:"configured"`
+			Missing    int `json:"missing"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(audit), &auditReport); err != nil {
+		t.Fatalf("decode audit after draft apply: %v\n%s", err, audit)
+	}
+	if !auditReport.OK || auditReport.Counts.Cases != 1 || auditReport.Counts.Configured != 1 || auditReport.Counts.Missing != 0 {
+		t.Fatalf("audit after draft apply = %#v", auditReport)
 	}
 }
 

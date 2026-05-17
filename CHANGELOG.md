@@ -54,3 +54,7 @@ should be called out in this file and in the relevant docs.
 - Added `case suite brief` and `/api/case/suite-brief` so agents can fetch
   coverage, readiness, stability, ranked recommendations, and a batch request
   in one call before deciding what to execute.
+- Added `interface-node case draft` and expanded `interface-node case apply`
+  so agents can generate reviewable maintained-case bundles, then apply API
+  case metadata, execution config, and runnable case files to external profile
+  bundles without touching the Store directly.

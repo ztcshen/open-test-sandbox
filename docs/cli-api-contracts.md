@@ -37,6 +37,38 @@ The returned ids are the only ids an agent should pass to report commands.
 and interface node id. Its JSON output includes maintenance metadata plus
 whether the case has a runnable file and execution configuration.
 
+## Maintained Case Authoring
+
+Generate a reviewable draft from a discovered interface node:
+
+```sh
+otsandbox interface-node case draft \
+  --profile /path/to/profile-bundle \
+  --node node.alpha \
+  --case-id case.generated \
+  --title "Generated Case" \
+  --tag regression \
+  --priority p1 \
+  --owner team-a \
+  --output .runtime/case-draft.json \
+  --json
+```
+
+The draft output contains API case metadata, execution config, and a runnable
+case file payload. Apply the reviewed bundle to an external profile directory:
+
+```sh
+otsandbox interface-node case apply \
+  --profile /path/to/profile-bundle \
+  --file .runtime/case-draft.json \
+  --json
+```
+
+`apply` writes profile-owned files only: `catalog.json` receives maintained
+case metadata and execution config, while runnable case JSON files are written
+under the profile bundle. It does not write Store records; publish or verify
+the profile afterward when the caller wants indexed read-models.
+
 ## Maintained Case Suite Report
 
 ```sh
