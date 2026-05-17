@@ -4894,33 +4894,36 @@ func TestServerStartsAsyncAPICaseBatchRunForNodes(t *testing.T) {
 		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
 	}
 	var created struct {
-		OK             bool   `json:"ok"`
-		BatchRunID     string `json:"batchRunId"`
-		RequestID      string `json:"requestId"`
-		Status         string `json:"status"`
-		ReportURL      string `json:"reportUrl"`
-		HTMLReportURL  string `json:"htmlReportUrl"`
-		JUnitReportURL string `json:"junitReportUrl"`
-		Total          int    `json:"total"`
+		OK                  bool   `json:"ok"`
+		BatchRunID          string `json:"batchRunId"`
+		RequestID           string `json:"requestId"`
+		Status              string `json:"status"`
+		ReportURL           string `json:"reportUrl"`
+		HTMLReportURL       string `json:"htmlReportUrl"`
+		JUnitReportURL      string `json:"junitReportUrl"`
+		ArtifactManifestURL string `json:"artifactManifestUrl"`
+		Total               int    `json:"total"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 		t.Fatalf("decode api case batch run response: %v", err)
 	}
-	if !created.OK || created.BatchRunID == "" || created.RequestID != "change-001" || created.ReportURL == "" || created.HTMLReportURL == "" || created.JUnitReportURL == "" || created.Total != 2 {
+	if !created.OK || created.BatchRunID == "" || created.RequestID != "change-001" || created.ReportURL == "" || created.HTMLReportURL == "" || created.JUnitReportURL == "" || created.ArtifactManifestURL == "" || created.Total != 2 {
 		t.Fatalf("api case batch run response = %#v", created)
 	}
 
 	var report struct {
-		OK              bool   `json:"ok"`
-		Status          string `json:"status"`
-		HTMLReportPath  string `json:"htmlReportPath"`
-		HTMLReportURL   string `json:"htmlReportUrl"`
-		JUnitReportPath string `json:"junitReportPath"`
-		JUnitReportURL  string `json:"junitReportUrl"`
-		Completed       int    `json:"completed"`
-		Passed          int    `json:"passed"`
-		Failed          int    `json:"failed"`
-		Cases           []struct {
+		OK                   bool   `json:"ok"`
+		Status               string `json:"status"`
+		HTMLReportPath       string `json:"htmlReportPath"`
+		HTMLReportURL        string `json:"htmlReportUrl"`
+		JUnitReportPath      string `json:"junitReportPath"`
+		JUnitReportURL       string `json:"junitReportUrl"`
+		ArtifactManifestPath string `json:"artifactManifestPath"`
+		ArtifactManifestURL  string `json:"artifactManifestUrl"`
+		Completed            int    `json:"completed"`
+		Passed               int    `json:"passed"`
+		Failed               int    `json:"failed"`
+		Cases                []struct {
 			CaseID    string `json:"caseId"`
 			CaseRunID string `json:"caseRunId"`
 			NodeID    string `json:"nodeId"`
@@ -4943,16 +4946,18 @@ func TestServerStartsAsyncAPICaseBatchRunForNodes(t *testing.T) {
 			t.Fatalf("api case batch report status = %d body=%s", statusResp.StatusCode, raw)
 		}
 		report = struct {
-			OK              bool   `json:"ok"`
-			Status          string `json:"status"`
-			HTMLReportPath  string `json:"htmlReportPath"`
-			HTMLReportURL   string `json:"htmlReportUrl"`
-			JUnitReportPath string `json:"junitReportPath"`
-			JUnitReportURL  string `json:"junitReportUrl"`
-			Completed       int    `json:"completed"`
-			Passed          int    `json:"passed"`
-			Failed          int    `json:"failed"`
-			Cases           []struct {
+			OK                   bool   `json:"ok"`
+			Status               string `json:"status"`
+			HTMLReportPath       string `json:"htmlReportPath"`
+			HTMLReportURL        string `json:"htmlReportUrl"`
+			JUnitReportPath      string `json:"junitReportPath"`
+			JUnitReportURL       string `json:"junitReportUrl"`
+			ArtifactManifestPath string `json:"artifactManifestPath"`
+			ArtifactManifestURL  string `json:"artifactManifestUrl"`
+			Completed            int    `json:"completed"`
+			Passed               int    `json:"passed"`
+			Failed               int    `json:"failed"`
+			Cases                []struct {
 				CaseID    string `json:"caseId"`
 				CaseRunID string `json:"caseRunId"`
 				NodeID    string `json:"nodeId"`
@@ -4981,6 +4986,9 @@ func TestServerStartsAsyncAPICaseBatchRunForNodes(t *testing.T) {
 	}
 	if report.JUnitReportPath == "" || !strings.HasPrefix(report.JUnitReportPath, filepath.Join(dir, "evidence")) || report.JUnitReportURL != created.JUnitReportURL {
 		t.Fatalf("api case batch junit report fields = %#v", report)
+	}
+	if report.ArtifactManifestPath == "" || !strings.HasPrefix(report.ArtifactManifestPath, filepath.Join(dir, "evidence")) || report.ArtifactManifestURL != created.ArtifactManifestURL {
+		t.Fatalf("api case batch artifact manifest fields = %#v", report)
 	}
 	htmlResp, err := http.Get(server.URL + report.HTMLReportURL)
 	if err != nil {
@@ -5018,6 +5026,43 @@ func TestServerStartsAsyncAPICaseBatchRunForNodes(t *testing.T) {
 	}
 	if _, err := os.Stat(report.JUnitReportPath); err != nil {
 		t.Fatalf("stat api case batch junit report: %v", err)
+	}
+	manifestResp, err := http.Get(server.URL + report.ArtifactManifestURL)
+	if err != nil {
+		t.Fatalf("get api case batch artifact manifest: %v", err)
+	}
+	defer manifestResp.Body.Close()
+	var manifest struct {
+		BatchRunID string `json:"batchRunId"`
+		Status     string `json:"status"`
+		Artifacts  []struct {
+			Kind      string `json:"kind"`
+			CaseID    string `json:"caseId,omitempty"`
+			URL       string `json:"url,omitempty"`
+			Path      string `json:"path,omitempty"`
+			MediaType string `json:"mediaType,omitempty"`
+		} `json:"artifacts"`
+	}
+	if err := json.NewDecoder(manifestResp.Body).Decode(&manifest); err != nil {
+		t.Fatalf("decode api case batch artifact manifest: %v", err)
+	}
+	if manifest.BatchRunID != created.BatchRunID || manifest.Status != store.StatusPassed {
+		t.Fatalf("artifact manifest header = %#v", manifest)
+	}
+	artifactKeys := map[string]bool{}
+	for _, artifact := range manifest.Artifacts {
+		artifactKeys[artifact.Kind+"|"+artifact.CaseID] = true
+		if artifact.Kind == "junit" && artifact.MediaType != "application/xml" {
+			t.Fatalf("junit artifact = %#v", artifact)
+		}
+	}
+	for _, want := range []string{"json|", "html|", "junit|", "case-detail|case.alpha", "case-evidence|case.alpha", "case-detail|case.beta", "case-evidence|case.beta"} {
+		if !artifactKeys[want] {
+			t.Fatalf("artifact manifest missing %q: %#v", want, manifest.Artifacts)
+		}
+	}
+	if _, err := os.Stat(report.ArtifactManifestPath); err != nil {
+		t.Fatalf("stat api case batch artifact manifest: %v", err)
 	}
 	for _, item := range report.Cases {
 		if item.RunID == "" || item.CaseRunID != item.RunID+".case" || item.ViewerURL == "" || item.DetailURL == "" || item.Status != store.StatusPassed || item.ElapsedMs < 0 {

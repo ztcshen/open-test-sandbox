@@ -40,7 +40,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite through CLI or Control plane API without re-running requests. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports; maintained suite and batch runs also expose JUnit XML for CI. |
-| Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, status, and elapsed time by run or case run id. |
+| Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, status, and elapsed time by run or case run id. |
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
 | Open-source guardrails | Release checks prevent generated state and source-domain terms from entering the generic core. |
 

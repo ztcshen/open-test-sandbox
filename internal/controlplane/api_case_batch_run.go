@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -91,30 +92,51 @@ type apiCaseBatchNodeReport struct {
 }
 
 type apiCaseBatchRunReport struct {
-	OK              bool                       `json:"ok"`
-	BatchRunID      string                     `json:"batchRunId"`
-	RequestID       string                     `json:"requestId"`
-	ProfileID       string                     `json:"profileId"`
-	CaseIDs         []string                   `json:"caseIds,omitempty"`
-	NodeIDs         []string                   `json:"nodeIds"`
-	WorkflowID      string                     `json:"workflowId,omitempty"`
-	Suite           *apiCaseBatchSuiteSelector `json:"suite,omitempty"`
-	Status          string                     `json:"status"`
-	Total           int                        `json:"total"`
-	Completed       int                        `json:"completed"`
-	Passed          int                        `json:"passed"`
-	Failed          int                        `json:"failed"`
-	Skipped         int                        `json:"skipped"`
-	ReportURL       string                     `json:"reportUrl,omitempty"`
-	StartedAt       string                     `json:"startedAt"`
-	FinishedAt      string                     `json:"finishedAt,omitempty"`
-	Nodes           []apiCaseBatchNodeReport   `json:"nodes,omitempty"`
-	Cases           []apiCaseBatchCaseReport   `json:"cases"`
-	Error           string                     `json:"error,omitempty"`
-	HTMLReportPath  string                     `json:"htmlReportPath,omitempty"`
-	HTMLReportURL   string                     `json:"htmlReportUrl,omitempty"`
-	JUnitReportPath string                     `json:"junitReportPath,omitempty"`
-	JUnitReportURL  string                     `json:"junitReportUrl,omitempty"`
+	OK                   bool                       `json:"ok"`
+	BatchRunID           string                     `json:"batchRunId"`
+	RequestID            string                     `json:"requestId"`
+	ProfileID            string                     `json:"profileId"`
+	CaseIDs              []string                   `json:"caseIds,omitempty"`
+	NodeIDs              []string                   `json:"nodeIds"`
+	WorkflowID           string                     `json:"workflowId,omitempty"`
+	Suite                *apiCaseBatchSuiteSelector `json:"suite,omitempty"`
+	Status               string                     `json:"status"`
+	Total                int                        `json:"total"`
+	Completed            int                        `json:"completed"`
+	Passed               int                        `json:"passed"`
+	Failed               int                        `json:"failed"`
+	Skipped              int                        `json:"skipped"`
+	ReportURL            string                     `json:"reportUrl,omitempty"`
+	StartedAt            string                     `json:"startedAt"`
+	FinishedAt           string                     `json:"finishedAt,omitempty"`
+	Nodes                []apiCaseBatchNodeReport   `json:"nodes,omitempty"`
+	Cases                []apiCaseBatchCaseReport   `json:"cases"`
+	Error                string                     `json:"error,omitempty"`
+	HTMLReportPath       string                     `json:"htmlReportPath,omitempty"`
+	HTMLReportURL        string                     `json:"htmlReportUrl,omitempty"`
+	JUnitReportPath      string                     `json:"junitReportPath,omitempty"`
+	JUnitReportURL       string                     `json:"junitReportUrl,omitempty"`
+	ArtifactManifestPath string                     `json:"artifactManifestPath,omitempty"`
+	ArtifactManifestURL  string                     `json:"artifactManifestUrl,omitempty"`
+}
+
+type apiCaseBatchArtifactManifest struct {
+	OK          bool                   `json:"ok"`
+	BatchRunID  string                 `json:"batchRunId"`
+	RequestID   string                 `json:"requestId"`
+	ProfileID   string                 `json:"profileId"`
+	Status      string                 `json:"status"`
+	GeneratedAt string                 `json:"generatedAt"`
+	Artifacts   []apiCaseBatchArtifact `json:"artifacts"`
+}
+
+type apiCaseBatchArtifact struct {
+	Kind      string `json:"kind"`
+	CaseID    string `json:"caseId,omitempty"`
+	CaseRunID string `json:"caseRunId,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Path      string `json:"path,omitempty"`
+	MediaType string `json:"mediaType,omitempty"`
 }
 
 //go:embed templates/api_case_batch_report.html
@@ -172,23 +194,25 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 	batchRunID := newAPICaseBatchRunID(request.RequestID)
 	now := time.Now().UTC()
 	report := apiCaseBatchRunReport{
-		OK:              true,
-		BatchRunID:      batchRunID,
-		RequestID:       request.RequestID,
-		ProfileID:       bundle.ID,
-		CaseIDs:         request.CaseIDs,
-		NodeIDs:         request.NodeIDs,
-		WorkflowID:      request.WorkflowID,
-		Status:          store.StatusRunning,
-		Total:           len(plans),
-		ReportURL:       "/api/cases/batch-runs/" + url.PathEscape(batchRunID),
-		StartedAt:       now.Format(time.RFC3339Nano),
-		Nodes:           apiCaseBatchNodesFromPlans(plans),
-		Cases:           make([]apiCaseBatchCaseReport, 0, len(plans)),
-		HTMLReportPath:  filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "report.html"),
-		HTMLReportURL:   "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/report.html",
-		JUnitReportPath: filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "report.junit.xml"),
-		JUnitReportURL:  "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/report.junit.xml",
+		OK:                   true,
+		BatchRunID:           batchRunID,
+		RequestID:            request.RequestID,
+		ProfileID:            bundle.ID,
+		CaseIDs:              request.CaseIDs,
+		NodeIDs:              request.NodeIDs,
+		WorkflowID:           request.WorkflowID,
+		Status:               store.StatusRunning,
+		Total:                len(plans),
+		ReportURL:            "/api/cases/batch-runs/" + url.PathEscape(batchRunID),
+		StartedAt:            now.Format(time.RFC3339Nano),
+		Nodes:                apiCaseBatchNodesFromPlans(plans),
+		Cases:                make([]apiCaseBatchCaseReport, 0, len(plans)),
+		HTMLReportPath:       filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "report.html"),
+		HTMLReportURL:        "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/report.html",
+		JUnitReportPath:      filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "report.junit.xml"),
+		JUnitReportURL:       "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/report.junit.xml",
+		ArtifactManifestPath: filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "artifacts.json"),
+		ArtifactManifestURL:  "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/artifacts.json",
 	}
 	if request.Suite.configured() {
 		suite := request.Suite
@@ -216,6 +240,10 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	if err := writeAPICaseBatchArtifactManifest(report); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 	runner.save(report)
 
 	go runner.run(context.Background(), batchRunID, bundle.ID, plans, runtime)
@@ -226,11 +254,15 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	idValue := strings.TrimPrefix(r.URL.Path, "/api/cases/batch-runs/")
 	wantsHTML := strings.HasSuffix(idValue, "/report.html")
 	wantsJUnit := strings.HasSuffix(idValue, "/report.junit.xml")
+	wantsArtifacts := strings.HasSuffix(idValue, "/artifacts.json")
 	if wantsHTML {
 		idValue = strings.TrimSuffix(idValue, "/report.html")
 	}
 	if wantsJUnit {
 		idValue = strings.TrimSuffix(idValue, "/report.junit.xml")
+	}
+	if wantsArtifacts {
+		idValue = strings.TrimSuffix(idValue, "/artifacts.json")
 	}
 	id, err := url.PathUnescape(idValue)
 	if err != nil || strings.TrimSpace(id) == "" {
@@ -248,6 +280,10 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	}
 	if wantsJUnit {
 		http.ServeFile(w, r, report.JUnitReportPath)
+		return
+	}
+	if wantsArtifacts {
+		http.ServeFile(w, r, report.ArtifactManifestPath)
 		return
 	}
 	writeJSON(w, report)
@@ -329,6 +365,7 @@ func (r *apiCaseBatchRunner) updateCase(batchRunID string, index int, item apiCa
 	refreshAPICaseBatchCounts(&report)
 	_ = writeAPICaseBatchHTMLReport(report)
 	_ = writeAPICaseBatchJUnitReport(report)
+	_ = writeAPICaseBatchArtifactManifest(report)
 	r.runs[batchRunID] = report
 }
 
@@ -347,6 +384,7 @@ func (r *apiCaseBatchRunner) finish(batchRunID string) {
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	_ = writeAPICaseBatchHTMLReport(report)
 	_ = writeAPICaseBatchJUnitReport(report)
+	_ = writeAPICaseBatchArtifactManifest(report)
 	r.runs[batchRunID] = report
 }
 
@@ -391,6 +429,58 @@ func renderAPICaseBatchJUnit(report apiCaseBatchRunReport) ([]byte, error) {
 		})
 	}
 	return junit.Render(junit.Suite{Name: "API Case Batch " + report.RequestID, Cases: cases})
+}
+
+func writeAPICaseBatchArtifactManifest(report apiCaseBatchRunReport) error {
+	if strings.TrimSpace(report.ArtifactManifestPath) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(report.ArtifactManifestPath), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(apiCaseBatchArtifacts(report), "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(report.ArtifactManifestPath, append(raw, '\n'), 0o644)
+}
+
+func apiCaseBatchArtifacts(report apiCaseBatchRunReport) apiCaseBatchArtifactManifest {
+	manifest := apiCaseBatchArtifactManifest{
+		OK:          report.OK,
+		BatchRunID:  report.BatchRunID,
+		RequestID:   report.RequestID,
+		ProfileID:   report.ProfileID,
+		Status:      report.Status,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Artifacts:   []apiCaseBatchArtifact{},
+	}
+	manifest.Artifacts = append(manifest.Artifacts,
+		apiCaseBatchArtifact{Kind: "json", URL: report.ReportURL, MediaType: "application/json"},
+		apiCaseBatchArtifact{Kind: "html", URL: report.HTMLReportURL, Path: report.HTMLReportPath, MediaType: "text/html"},
+		apiCaseBatchArtifact{Kind: "junit", URL: report.JUnitReportURL, Path: report.JUnitReportPath, MediaType: "application/xml"},
+		apiCaseBatchArtifact{Kind: "artifact-manifest", URL: report.ArtifactManifestURL, Path: report.ArtifactManifestPath, MediaType: "application/json"},
+	)
+	for _, item := range report.Cases {
+		if strings.TrimSpace(item.DetailURL) != "" {
+			manifest.Artifacts = append(manifest.Artifacts, apiCaseBatchArtifact{
+				Kind:      "case-detail",
+				CaseID:    item.CaseID,
+				CaseRunID: item.CaseRunID,
+				URL:       item.DetailURL,
+				MediaType: "application/json",
+			})
+		}
+		if strings.TrimSpace(item.EvidencePath) != "" {
+			manifest.Artifacts = append(manifest.Artifacts, apiCaseBatchArtifact{
+				Kind:      "case-evidence",
+				CaseID:    item.CaseID,
+				CaseRunID: item.CaseRunID,
+				Path:      item.EvidencePath,
+			})
+		}
+	}
+	return manifest
 }
 
 func apiCaseBatchPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {

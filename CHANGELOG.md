@@ -38,3 +38,5 @@ should be called out in this file and in the relevant docs.
   deterministic executable payload.
 - Added JUnit XML output for maintained suite reports and asynchronous batch
   runs for CI systems that consume test result artifacts.
+- Added asynchronous batch artifact manifests that list JSON, HTML, JUnit, case
+  detail, and case Evidence artifacts for archival automation.
