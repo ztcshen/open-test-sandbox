@@ -277,6 +277,69 @@ func TestStabilityReportsRecentStatusTransitions(t *testing.T) {
 	}
 }
 
+func TestPriorityRanksImpactedUnstableAndFailedCases(t *testing.T) {
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Create", Path: "/v1/items"},
+			{ID: "node.beta", DisplayName: "Node Beta", Operation: "Search", Path: "/v1/items/search"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.impacted", DisplayName: "Impacted Case", NodeID: "node.alpha", CasePath: "cases/impacted.json", Tags: []string{"regression"}, Priority: "p1", SortOrder: 1},
+			{ID: "case.failed", DisplayName: "Failed Case", NodeID: "node.beta", CasePath: "cases/failed.json", Tags: []string{"regression"}, Priority: "p0", SortOrder: 2},
+			{ID: "case.blocked", DisplayName: "Blocked Case", NodeID: "node.beta", Tags: []string{"regression"}, Priority: "p0", SortOrder: 3},
+			{ID: "case.low", DisplayName: "Low Case", NodeID: "node.beta", CasePath: "cases/low.json", Tags: []string{"regression"}, Priority: "p2", SortOrder: 4},
+		},
+	}
+	records := []store.APICaseRunRecord{
+		record("run.impacted.1", "case.impacted", store.StatusPassed, base),
+		record("run.impacted.2", "case.impacted", store.StatusFailed, base.Add(time.Minute)),
+		record("run.impacted.3", "case.impacted", store.StatusPassed, base.Add(2*time.Minute)),
+		record("run.failed.1", "case.failed", store.StatusFailed, base.Add(3*time.Minute)),
+		record("run.low.1", "case.low", store.StatusPassed, base.Add(4*time.Minute)),
+	}
+	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
+
+	report, err := Priority(context.Background(), bundle, recordStore{records: records}, Filter{Tags: []string{"regression"}, Status: "active"}, cases, PriorityOptions{
+		Signals:        []string{"Create"},
+		Limit:          2,
+		RequestID:      "change-001",
+		BaseURL:        "http://127.0.0.1:8080",
+		TimeoutSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("priority: %v", err)
+	}
+	if !report.OK || report.Counts.Total != 4 || report.Counts.Ready != 3 || report.Counts.Blocked != 1 || report.Counts.Selected != 2 {
+		t.Fatalf("priority counts = %#v", report.Counts)
+	}
+	if got := strings.Join(report.CaseIDs, ","); got != "case.impacted,case.failed" {
+		t.Fatalf("priority case ids = %q", got)
+	}
+	if report.BatchRequest.RequestID != "change-001" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.impacted,case.failed" || report.BatchRequest.TimeoutSeconds != 5 {
+		t.Fatalf("priority batch = %#v", report.BatchRequest)
+	}
+	if report.Selected[0].Score <= report.Selected[1].Score || !containsString(report.Selected[0].Reasons, "impacted") || !containsString(report.Selected[0].Reasons, "unstable") {
+		t.Fatalf("first selected = %#v", report.Selected[0])
+	}
+	if !containsString(report.Selected[1].Reasons, "latest failed") || !containsString(report.Selected[1].Reasons, "priority p0") {
+		t.Fatalf("second selected = %#v", report.Selected[1])
+	}
+	if len(report.Blocked) != 1 || report.Blocked[0].CaseID != "case.blocked" {
+		t.Fatalf("blocked = %#v", report.Blocked)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
 type recordStore struct {
 	records []store.APICaseRunRecord
 }

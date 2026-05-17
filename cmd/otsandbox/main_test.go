@@ -2163,6 +2163,77 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 	}
 }
 
+func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
+	ctx := context.Background()
+	profileDir := writeCaseSuiteCoverageProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	recordCaseRunForCoverage(t, ctx, s, "run.default.1", "case.default", store.StatusPassed, base)
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.1", "case.variant", store.StatusPassed, base.Add(time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.2", "case.variant", store.StatusFailed, base.Add(2*time.Minute))
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t,
+		"case", "suite", "priority",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--tag", "regression",
+		"--status", "active",
+		"--signal", "Variant",
+		"--limit", "2",
+		"--request-id", "change-011",
+		"--base-url", "http://127.0.0.1:8080",
+		"--json",
+	)
+	var report struct {
+		OK      bool     `json:"ok"`
+		CaseIDs []string `json:"caseIds"`
+		Counts  struct {
+			Total    int `json:"total"`
+			Selected int `json:"selected"`
+			Skipped  int `json:"skipped"`
+			Blocked  int `json:"blocked"`
+		} `json:"counts"`
+		Selected []struct {
+			CaseID  string   `json:"caseId"`
+			Score   int      `json:"score"`
+			Reasons []string `json:"reasons"`
+		} `json:"selected"`
+		BatchRequest struct {
+			RequestID string   `json:"requestId"`
+			CaseIDs   []string `json:"caseIds"`
+			BaseURL   string   `json:"baseUrl"`
+		} `json:"batchRequest"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite priority json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Counts.Total != 3 || report.Counts.Selected != 2 || report.Counts.Blocked != 1 || strings.Join(report.CaseIDs, ",") != "case.variant,case.default" {
+		t.Fatalf("suite priority report = %#v", report)
+	}
+	if report.Selected[0].CaseID != "case.variant" || report.Selected[0].Score <= report.Selected[1].Score || len(report.Selected[0].Reasons) == 0 {
+		t.Fatalf("suite priority selected = %#v", report.Selected)
+	}
+	if report.BatchRequest.RequestID != "change-011" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.variant,case.default" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("suite priority batch = %#v", report.BatchRequest)
+	}
+
+	textOut := runCLI(t, "case", "suite", "priority", "--profile", profileDir, "--store-url", storePath, "--tag", "regression", "--signal", "Variant", "--limit", "1")
+	for _, want := range []string{"Case Suite Priority", "Selected: 1", "case.variant"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("priority text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)

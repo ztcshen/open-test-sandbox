@@ -217,6 +217,7 @@ Usage:
   otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
+  otsandbox case suite priority [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
@@ -3133,6 +3134,8 @@ func runCaseSuite(ctx context.Context, args []string) error {
 		return runCaseSuiteCoverage(ctx, args[1:])
 	case "stability":
 		return runCaseSuiteStability(ctx, args[1:])
+	case "priority":
+		return runCaseSuitePriority(ctx, args[1:])
 	case "inspect":
 		return runCaseSuiteInspect(ctx, args[1:])
 	case "plan":
@@ -3375,6 +3378,89 @@ func printCaseSuiteStability(report casesuite.StabilityReport) {
 		if item.Reason != "" {
 			fmt.Printf("  reason: %s\n", item.Reason)
 		}
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+func runCaseSuitePriority(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case suite priority", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "active", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	limit := flags.Int("limit", 0, "Maximum ready cases to select; 0 selects all ready cases")
+	requestID := flags.String("request-id", "", "Request id for the generated batch request")
+	baseURL := flags.String("base-url", "", "Base URL for the generated batch request")
+	evidenceDir := flags.String("evidence-dir", "", "Evidence directory for the generated batch request")
+	timeoutSeconds := flags.Int("timeout-seconds", 0, "Timeout seconds for the generated batch request")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	var signals stringListFlag
+	var changes stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	flags.Var(&signals, "signal", "Changed path, interface text, workflow text, tag, or case text; repeat for multiple signals")
+	flags.Var(&changes, "change", "Alias for --signal; repeat for multiple changes")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *limit < 0 {
+		return errors.New("--limit cannot be negative")
+	}
+	if *timeoutSeconds < 0 {
+		return errors.New("--timeout-seconds cannot be negative")
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	filterValue := caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	}
+	cases := selectedCaseSuiteCases(bundle, filterValue)
+	prioritySignals := append(signals.Values(), changes.Values()...)
+	report, err := casesuite.Priority(ctx, bundle, sourceStore, caseSuiteFilter(filterValue), cases, casesuite.PriorityOptions{
+		Signals:        prioritySignals,
+		Limit:          *limit,
+		RequestID:      *requestID,
+		BaseURL:        *baseURL,
+		EvidenceDir:    *evidenceDir,
+		TimeoutSeconds: *timeoutSeconds,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseSuitePriority(report)
+	return nil
+}
+
+func printCaseSuitePriority(report casesuite.PriorityReport) {
+	fmt.Println("Case Suite Priority")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Total: %d Ready: %d Blocked: %d Selected: %d Skipped: %d\n", report.Counts.Total, report.Counts.Ready, report.Counts.Blocked, report.Counts.Selected, report.Counts.Skipped)
+	for _, item := range report.Selected {
+		fmt.Printf("- %s score=%d latest=%s\n", item.CaseID, item.Score, item.LatestStatus)
+		for _, reason := range item.Reasons {
+			fmt.Printf("  reason: %s\n", reason)
+		}
+	}
+	for _, item := range report.Blocked {
+		fmt.Printf("- blocked %s score=%d\n", item.CaseID, item.Score)
 	}
 	for _, warning := range report.Warnings {
 		fmt.Printf("Warning: %s\n", warning)

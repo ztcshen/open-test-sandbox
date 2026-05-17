@@ -48,3 +48,6 @@ should be called out in this file and in the relevant docs.
   one-step impact selection plus report or asynchronous batch execution.
 - Added `case suite stability` and `/api/case/suite-stability` to flag
   maintained cases whose recent Store history alternates between pass and fail.
+- Added `case suite priority` and `/api/case/suite-priority` to rank maintained
+  cases by impact signals, latest Store status, stability, and case priority
+  before building a batch request.

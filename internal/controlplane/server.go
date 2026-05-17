@@ -251,6 +251,13 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 		}
 		handleCaseSuiteStability(w, r, profiles.Current(), runtime)
 	})
+	mux.HandleFunc("/api/case/suite-priority", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleCaseSuitePriority(w, r, profiles.Current(), runtime)
+	})
 	mux.HandleFunc("/api/case/suite-impact", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)

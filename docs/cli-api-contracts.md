@@ -107,6 +107,33 @@ The Control plane exposes the same stability contract:
 GET /api/case/suite-stability?tag=smoke&owner=team-a&status=active&limit=10
 ```
 
+## Maintained Case Suite Priority
+
+```sh
+otsandbox case suite priority \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --signal "/api/items" \
+  --tag smoke \
+  --status active \
+  --limit 20 \
+  --request-id change-005 \
+  --base-url http://127.0.0.1:8080 \
+  --json
+```
+
+The priority command ranks ready maintained cases before execution. It combines
+impact matches, latest Store status, recent stability, and case priority
+metadata into a score with explanation reasons. The response returns selected,
+skipped, and blocked cases plus a `batchRequest` object that can be posted to
+`/api/cases/batch-runs`.
+
+The Control plane exposes the same ranking contract:
+
+```http
+GET /api/case/suite-priority?signal=/api/items&tag=smoke&status=active&limit=20&requestId=change-005
+```
+
 ## Maintained Case Suite Inspection
 
 ```sh
