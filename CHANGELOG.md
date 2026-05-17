@@ -36,3 +36,5 @@ should be called out in this file and in the relevant docs.
 - Added `case suite plan`, `/api/case/suite-plan`, and exact `caseIds` support
   in asynchronous batch runs so agents can turn inspection results into a
   deterministic executable payload.
+- Added JUnit XML output for maintained suite reports and asynchronous batch
+  runs for CI systems that consume test result artifacts.

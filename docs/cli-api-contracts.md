@@ -54,8 +54,9 @@ otsandbox case suite report \
 The command turns case maintenance metadata into an executable suite. It
 selects active API cases by filter, node id, tag, owner, or priority; executes
 the selected cases; and writes `report.json` plus a compact `report.html`.
+It also writes `report.junit.xml` for CI systems that collect JUnit artifacts.
 The report keeps case title, node id, tags, priority, owner, elapsed time,
-status, and failed-case Evidence links.
+status, failed-case Evidence links, and `junitReportUrl`.
 
 ## Maintained Case Suite Coverage
 
@@ -219,7 +220,8 @@ The `suite` selector accepts `filter`, `nodeId`, `tags`, `status`, `owner`,
 maintenance selector.
 
 The API returns `202 Accepted` with a batch run id, JSON report URL, and HTML
-report URL. Poll the JSON report URL until the status is terminal.
+report URL, and JUnit report URL. Poll the JSON report URL until the status is
+terminal, then collect `/report.junit.xml` when CI needs a test result artifact.
 
 ## Failed Case Evidence
 

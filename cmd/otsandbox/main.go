@@ -20,6 +20,7 @@ import (
 	"open-test-sandbox/internal/casesuite"
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/evidence"
+	"open-test-sandbox/internal/junit"
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/profileaudit"
 	"open-test-sandbox/internal/profilecatalog"
@@ -3445,6 +3446,7 @@ type caseSuiteReport struct {
 	Title          string                        `json:"title"`
 	ReportURL      string                        `json:"reportUrl"`
 	JSONReportURL  string                        `json:"jsonReportUrl"`
+	JUnitReportURL string                        `json:"junitReportUrl,omitempty"`
 	ElapsedMs      int64                         `json:"elapsedMs"`
 	GeneratedAt    time.Time                     `json:"generatedAt"`
 	Filters        caseListFilter                `json:"filters"`
@@ -3683,8 +3685,10 @@ func caseSuiteReportItems(results []interfaceNodeCaseReportItem, cases []profile
 func writeCaseSuiteReportFiles(outputDir string, report *caseSuiteReport) error {
 	jsonPath := filepath.Join(outputDir, "report.json")
 	htmlPath := filepath.Join(outputDir, "report.html")
+	junitPath := filepath.Join(outputDir, "report.junit.xml")
 	report.JSONReportURL = jsonPath
 	report.ReportURL = htmlPath
+	report.JUnitReportURL = junitPath
 	raw, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return err
@@ -3692,7 +3696,29 @@ func writeCaseSuiteReportFiles(outputDir string, report *caseSuiteReport) error 
 	if err := os.WriteFile(jsonPath, append(raw, '\n'), 0o644); err != nil {
 		return err
 	}
-	return os.WriteFile(htmlPath, []byte(renderCaseSuiteReportHTML(*report)), 0o644)
+	if err := os.WriteFile(htmlPath, []byte(renderCaseSuiteReportHTML(*report)), 0o644); err != nil {
+		return err
+	}
+	junitRaw, err := renderCaseSuiteJUnit(*report)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(junitPath, junitRaw, 0o644)
+}
+
+func renderCaseSuiteJUnit(report caseSuiteReport) ([]byte, error) {
+	cases := make([]junit.Case, 0, len(report.Results))
+	for _, item := range report.Results {
+		cases = append(cases, junit.Case{
+			Name:           firstNonEmpty(item.CaseID, item.Title),
+			ClassName:      firstNonEmpty(item.NodeID, item.NodeName),
+			Status:         item.Status,
+			TimeSeconds:    float64(item.ElapsedMs) / 1000,
+			FailureMessage: item.Error,
+			Output:         firstNonEmpty(item.Error, item.BodyPreview),
+		})
+	}
+	return junit.Render(junit.Suite{Name: firstNonEmpty(report.Title, "Case Suite Report"), Cases: cases})
 }
 
 func renderCaseSuiteReportHTML(report caseSuiteReport) string {

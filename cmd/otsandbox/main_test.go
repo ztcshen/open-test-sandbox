@@ -1736,8 +1736,9 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 	)
 
 	var report struct {
-		OK      bool `json:"ok"`
-		Filters struct {
+		OK             bool   `json:"ok"`
+		JUnitReportURL string `json:"junitReportUrl"`
+		Filters        struct {
 			Tags  []string `json:"tags"`
 			Owner string   `json:"owner"`
 		} `json:"filters"`
@@ -1788,6 +1789,19 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 	}
 	if strings.Contains(string(html), "Case Alpha Variant") {
 		t.Fatalf("suite html should not include unselected case:\n%s", html)
+	}
+	junitPath := filepath.Join(outputDir, "report.junit.xml")
+	junitRaw, err := os.ReadFile(junitPath)
+	if err != nil {
+		t.Fatalf("suite junit report missing: %v", err)
+	}
+	if report.JUnitReportURL != junitPath {
+		t.Fatalf("junit report url = %q want %q", report.JUnitReportURL, junitPath)
+	}
+	for _, want := range []string{`<testsuite name="Case Suite Report" tests="1" failures="0"`, `name="case.alpha.default"`, `classname="node.alpha"`} {
+		if !strings.Contains(string(junitRaw), want) {
+			t.Fatalf("suite junit missing %q:\n%s", want, junitRaw)
+		}
 	}
 
 	variantOut := runCLI(t,
