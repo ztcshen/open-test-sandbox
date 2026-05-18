@@ -235,7 +235,7 @@ function ProfileImportPanel({ onImported }) {
 
   async function loadInstalledProfiles() {
     try {
-      const payload = await fetchJSON("/api/profile/installed");
+      const payload = await fetchJSON("/api/template-packages/installed");
       setInstalledProfiles(payload.profiles || []);
       setProfileHome(payload.profileHome || "");
     } catch (error) {
@@ -248,7 +248,7 @@ function ProfileImportPanel({ onImported }) {
     setMessage("importing...");
     setReport(null);
     try {
-      const nextReport = await postJSON("/api/profile/import", { path, audit, requireAuditOk, force: installForce });
+      const nextReport = await postJSON("/api/template-packages/import", { path, audit, requireAuditOk, force: installForce });
       setReport(nextReport);
       setMessage("imported");
       onImported?.();
@@ -261,7 +261,7 @@ function ProfileImportPanel({ onImported }) {
     setMessage("installing...");
     setReport(null);
     try {
-      const installReport = await postJSON("/api/profile/install", { path, force: installForce });
+      const installReport = await postJSON("/api/template-packages/install", { path, force: installForce });
       setPath(installReport.id || path);
       setReport({ profileId: installReport.id, bundleDigest: installReport.bundleDigest, counts: {} });
       setMessage("installed");
@@ -275,7 +275,7 @@ function ProfileImportPanel({ onImported }) {
     setMessage("verifying...");
     setReport(null);
     try {
-      const nextReport = await postJSON("/api/profile/verify", { path, requireCaseRuns, requireWorkflowRuns, force: installForce });
+      const nextReport = await postJSON("/api/template-packages/verify", { path, requireCaseRuns, requireWorkflowRuns, force: installForce });
       setReport(nextReport);
       setMessage(nextReport.ok ? "verified" : "verification failed");
       onImported?.();

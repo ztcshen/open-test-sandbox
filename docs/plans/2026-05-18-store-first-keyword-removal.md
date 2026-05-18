@@ -50,7 +50,17 @@ or migration. They are not the daily testing surface.
 
 ## Verification
 
-- Validation project `npm test` must stay green after every naming slice.
+- Main-project `npm run release-check` must stay green after every naming slice.
 - The local workbench must still expose the core workflow entry path.
 - Full runtime validation remains a heavy gate and must be run before declaring
   the core workflow green.
+
+## Implementation Progress
+
+- Store-first template package API aliases now cover import, verify,
+  audit-plan, install, installed list, and catalog-index routes under
+  `/api/template-packages/*`. Legacy `/api/profile/*` routes remain as
+  compatibility aliases.
+- The React workbench and headless smoke use the Store-first
+  `/api/template-packages/*` routes for daily import, install, verify, and
+  catalog-index flows.

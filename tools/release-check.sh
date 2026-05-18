@@ -47,6 +47,9 @@ OTSANDBOX_CLEAN_DEMO_OUTPUT=1 npm run demo:api-case
 step "building React workbench"
 npm run build:frontend
 
+step "running frontend model tests"
+npm run test:frontend
+
 step "running browser smoke tests"
 npm run smoke:frontend
 

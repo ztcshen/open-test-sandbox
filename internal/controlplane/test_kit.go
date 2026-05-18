@@ -60,7 +60,11 @@ func handleTestKitRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 		}
 		attachCaseRunEvidenceHandles(result, runID)
 		if runID != "" {
-			scheduleTestKitTraceTopology(runtime, collector, runID, payload, result)
+			if shouldInlineTestKitTraceTopology(payload) {
+				collectAndRecordTestKitTraceTopology(r.Context(), runtime, collector, runID, payload, result)
+			} else {
+				scheduleTestKitTraceTopology(runtime, collector, runID, payload, result)
+			}
 		}
 	}
 	writeJSONStatus(w, status, result)
@@ -809,6 +813,58 @@ func attachTestKitTraceTopology(ctx context.Context, runtime store.Store, collec
 	}
 	result["traceTopology"] = topology
 	result["traceTopologyRow"] = traceTopologyPayload(row)
+}
+
+func shouldInlineTestKitTraceTopology(payload map[string]any) bool {
+	return strings.TrimSpace(valueString(payload["workflowId"])) != "" && strings.TrimSpace(valueString(payload["stepId"])) != ""
+}
+
+func collectAndRecordTestKitTraceTopology(ctx context.Context, runtime store.Store, collector traceCollector, runID string, payload map[string]any, result map[string]any) {
+	collectPayload, ok := testKitTraceTopologyCollectPayload(runID, payload, result)
+	if !ok || runtime == nil {
+		return
+	}
+	if strings.TrimSpace(collector.GraphQLURL) == "" {
+		recordSkippedTestKitTraceTopologyTask(runtime, runID, payload, collectPayload, "TraceGraphQLURL is not configured; trace topology collection skipped")
+		return
+	}
+	started := time.Now().UTC()
+	status := store.StatusPassed
+	errText := ""
+	summary := map[string]any{}
+	defer func() {
+		finished := time.Now().UTC()
+		recordPostProcessTask(context.Background(), runtime, store.PostProcessTask{
+			ID:          runID + "." + safeRuntimeLogPathSegment(valueString(collectPayload["stepId"])) + "." + postProcessKindTraceTopology,
+			RunID:       runID,
+			WorkflowID:  valueString(payload["workflowId"]),
+			StepID:      valueString(collectPayload["stepId"]),
+			CaseID:      valueString(collectPayload["caseId"]),
+			Kind:        postProcessKindTraceTopology,
+			Status:      status,
+			StartedAt:   started,
+			FinishedAt:  finished,
+			DurationMs:  finished.Sub(started).Milliseconds(),
+			Error:       errText,
+			SummaryJSON: compactJSON(summary),
+			CreatedAt:   finished,
+		})
+	}()
+	collectCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	row, topology, err := collectTraceTopologyWithRetry(collectCtx, runtime, collector, collectPayload)
+	if err != nil {
+		status = store.StatusFailed
+		errText = err.Error()
+		result["traceTopologyError"] = err.Error()
+		return
+	}
+	result["traceTopology"] = topology
+	result["traceTopologyRow"] = traceTopologyPayload(row)
+	summary["traceId"] = row.TraceID
+	summary["requestId"] = row.RequestID
+	summary["topologyStatus"] = topology.Status
+	summary["spanCount"] = topology.SpanCount
 }
 
 func scheduleTestKitTraceTopology(runtime store.Store, collector traceCollector, runID string, payload map[string]any, result map[string]any) {

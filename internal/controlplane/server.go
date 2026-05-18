@@ -41,6 +41,48 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 	runtime := options.Runtime
 	collector := traceCollector{GraphQLURL: options.TraceGraphQLURL}
 	caseBatchRunner := newAPICaseBatchRunner()
+	mux.HandleFunc("/api/template-packages/import", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileImport(w, r, runtime, profiles.Replace, options.ProfileHome)
+	})
+	mux.HandleFunc("/api/template-packages/verify", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileVerify(w, r, runtime, profiles.Replace, options.ProfileHome)
+	})
+	mux.HandleFunc("/api/template-packages/audit-plan", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileAuditPlan(w, r, runtime, options.ProfileHome)
+	})
+	mux.HandleFunc("/api/template-packages/install", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileInstall(w, r, options.ProfileHome)
+	})
+	mux.HandleFunc("/api/template-packages/installed", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleInstalledProfiles(w, r, options.ProfileHome)
+	})
+	mux.HandleFunc("/api/template-packages/catalog-index", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileCatalogIndex(w, r, runtime)
+	})
 	mux.HandleFunc("/api/profile/import", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)

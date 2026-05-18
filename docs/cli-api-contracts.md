@@ -40,14 +40,14 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/profile/import` | Publish a profile into Store and activate it in the running control plane. |
-| `POST` | `/api/profile/verify` | Audit, publish, and verify Store/read-model effects. |
-| `POST` | `/api/profile/audit-plan` | Return a deterministic profile repair plan. |
-| `POST` | `/api/profile/install` | Install an archive or profile path into profile home. |
-| `GET` | `/api/profile/installed` | List installed profiles. |
+| `POST` | `/api/template-packages/import` | Publish a template package into Store and activate it in the running control plane. Legacy alias: `/api/profile/import`. |
+| `POST` | `/api/template-packages/verify` | Audit, publish, and verify Store/read-model effects. Legacy alias: `/api/profile/verify`. |
+| `POST` | `/api/template-packages/audit-plan` | Return a deterministic template package repair plan. Legacy alias: `/api/profile/audit-plan`. |
+| `POST` | `/api/template-packages/install` | Install an archive or template package path into profile home. Legacy alias: `/api/profile/install`. |
+| `GET` | `/api/template-packages/installed` | List installed template packages. Legacy alias: `/api/profile/installed`. |
 | `GET` | `/api/profile` | Return current active profile id, display name, and counts. |
 | `GET` | `/api/profile/assets` | Return current profile services, workflows, interface nodes, and API cases. |
-| `GET` | `/api/profile/catalog-index` | Return active Store catalog index and config version. |
+| `GET` | `/api/template-packages/catalog-index` | Return active Store catalog index and config version. Legacy alias: `/api/profile/catalog-index`. |
 | `GET` | `/api/state` | Return dashboard-friendly state from the active profile. |
 | `POST` | `/api/sandbox/services` | Register or update a Store-backed sandbox service. |
 | `POST` | `/api/sandbox/interfaces` | Register or update a Store-backed interface node, request template, API case, and execution config. |
@@ -108,14 +108,14 @@ and priority APIs accept `signal`, `signals`, `change`, `changes`,
 | Store status and schema upgrade | `store status`, `store upgrade` | None | CLI-only. |
 | Start registered sandbox service | `sandbox start` | None | CLI-only. |
 | Register sandbox service/interface in Store | None | `/api/sandbox/services`, `/api/sandbox/interfaces` | API-only and important. This is currently the clearest Store-first API gap in CLI. |
-| Profile install/list | `profile install`, `profile list` | `/api/profile/install`, `/api/profile/installed` | Mostly paired. |
+| Profile install/list | `profile install`, `profile list` | `/api/template-packages/install`, `/api/template-packages/installed` | Mostly paired through Store-first aliases; legacy `/api/profile/*` routes remain. |
 | Current profile summary/assets | `profile inspect` | `/api/profile`, `/api/profile/assets` | Partial. CLI inspects a package/reference; API reports the active served profile. |
-| Profile import/publish | `profile import`, `config publish` | `/api/profile/import` | Mostly paired. CLI can also audit/require audit ok. |
-| Profile verify | `profile verify` | `/api/profile/verify` | Paired. |
-| Profile audit repair plan | `profile audit-plan` | `/api/profile/audit-plan` | Paired. |
+| Profile import/publish | `profile import`, `config publish` | `/api/template-packages/import` | Mostly paired through Store-first alias. CLI can also audit/require audit ok. |
+| Profile verify | `profile verify` | `/api/template-packages/verify` | Paired through Store-first alias. |
+| Profile audit repair plan | `profile audit-plan` | `/api/template-packages/audit-plan` | Paired through Store-first alias. |
 | Profile init/pack/audit | `profile init`, `profile pack`, `profile audit` | None | CLI-only package authoring. |
 | Profile import/generation planning | `profile import-plan ...`, `profile generation-plan openapi` | None | CLI-only. |
-| Profile catalog index | None | `/api/profile/catalog-index` | API-only. |
+| Profile catalog index | None | `/api/template-packages/catalog-index` | API-only Store-first alias; legacy `/api/profile/catalog-index` remains. |
 | Catalog/dashboard/state | Roughly `profile inspect`, discovery commands | `/api/state`, `/api/dashboard`, `/api/catalog` | API-first UI payloads; no exact CLI. |
 | Interface-node discovery/list | `interface-node discover` | `/api/interface-nodes`, `/api/interface-node` | Partial. CLI has search filter; API has service/operation/detail. |
 | Interface-node coverage | None | `/api/interface-node/coverage`, `/api/interface-node/coverage-gaps` | API-only. |

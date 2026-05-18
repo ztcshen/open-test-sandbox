@@ -213,6 +213,10 @@ func handleSaveWorkflowRun(w http.ResponseWriter, r *http.Request, bundle profil
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	if err := copyWorkflowRunStepPostProcessTasks(r.Context(), runtime, run.ID, workflowID, payload, now); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 	writeJSON(w, map[string]any{"ok": true, "workflowRunId": run.ID, "run": workflowRunListItem(run)})
 }
 
@@ -255,6 +259,19 @@ func copyWorkflowRunStepTraceTopologies(ctx context.Context, runtime store.Store
 			continue
 		}
 		if _, err := copyWorkflowStepTraceTopologiesFromSources(ctx, runtime, runID, workflowID, step, fallback); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyWorkflowRunStepPostProcessTasks(ctx context.Context, runtime store.Store, runID string, workflowID string, payload map[string]any, fallback time.Time) error {
+	for _, raw := range workflowRunSteps(payload) {
+		step, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, err := copyWorkflowStepPostProcessTasksFromSources(ctx, runtime, runID, workflowID, step, fallback); err != nil {
 			return err
 		}
 	}
@@ -306,6 +323,50 @@ func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime sto
 	return copiedRows, nil
 }
 
+func copyWorkflowStepPostProcessTasksFromSources(ctx context.Context, runtime store.Store, runID string, workflowID string, step map[string]any, fallback time.Time) ([]map[string]any, error) {
+	copiedRows := []map[string]any{}
+	if runtime == nil {
+		return copiedRows, nil
+	}
+	stepID := strings.TrimSpace(valueString(step["stepId"]))
+	caseID := strings.TrimSpace(valueString(step["caseId"]))
+	for _, sourceRunID := range workflowStepSourceRunIDs(step) {
+		if sourceRunID == "" || sourceRunID == runID {
+			continue
+		}
+		rows, err := runtime.ListPostProcessTasks(ctx, sourceRunID)
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			if stepID != "" && row.StepID != "" && row.StepID != stepID {
+				continue
+			}
+			if caseID != "" && row.CaseID != "" && row.CaseID != caseID {
+				continue
+			}
+			copied := row
+			copied.ID = copiedWorkflowPostProcessTaskID(runID, stepID, row)
+			copied.RunID = runID
+			copied.WorkflowID = firstNonEmpty(workflowID, row.WorkflowID)
+			copied.StepID = firstNonEmpty(stepID, row.StepID)
+			copied.CaseID = firstNonEmpty(caseID, row.CaseID)
+			if copied.CreatedAt.IsZero() {
+				copied.CreatedAt = fallback
+			}
+			if copied.CreatedAt.IsZero() {
+				copied.CreatedAt = time.Now().UTC()
+			}
+			saved, err := runtime.RecordPostProcessTask(ctx, copied)
+			if err != nil {
+				return nil, err
+			}
+			copiedRows = append(copiedRows, postProcessTaskPayload(saved))
+		}
+	}
+	return copiedRows, nil
+}
+
 func workflowStepSourceRunIDs(step map[string]any) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -337,6 +398,11 @@ func runIDFromCaseRunID(caseRunID string) string {
 func copiedWorkflowTraceTopologyID(runID string, stepID string, row store.TraceTopology) string {
 	suffix := firstNonEmpty(row.TraceID, row.RequestID, row.ID, "topology")
 	return runID + "." + safeRuntimeLogPathSegment(stepID) + "." + safeRuntimeLogPathSegment(suffix) + "." + postProcessKindTraceTopology
+}
+
+func copiedWorkflowPostProcessTaskID(runID string, stepID string, row store.PostProcessTask) string {
+	suffix := firstNonEmpty(row.Kind, row.ID, "post-process")
+	return runID + "." + safeRuntimeLogPathSegment(stepID) + "." + safeRuntimeLogPathSegment(suffix)
 }
 
 func workflowStepCaseStatus(step map[string]any) string {
@@ -452,6 +518,13 @@ func writeWorkflowStepRunPayload(w http.ResponseWriter, ctx context.Context, run
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
+	}
+	if len(tasks) == 0 {
+		tasks, err = copyWorkflowStepPostProcessTasksFromSources(ctx, runtime, run.ID, run.WorkflowID, step, time.Now().UTC())
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
 	}
 	writeJSON(w, map[string]any{
 		"ok":               true,
@@ -585,23 +658,27 @@ func workflowRunPostProcessTasks(ctx context.Context, runtime store.Store, runID
 		if stepID != "" && row.StepID != stepID {
 			continue
 		}
-		out = append(out, map[string]any{
-			"id":          row.ID,
-			"runId":       row.RunID,
-			"workflowId":  row.WorkflowID,
-			"stepId":      row.StepID,
-			"caseId":      row.CaseID,
-			"kind":        row.Kind,
-			"status":      row.Status,
-			"startedAt":   row.StartedAt,
-			"finishedAt":  row.FinishedAt,
-			"durationMs":  row.DurationMs,
-			"error":       row.Error,
-			"summaryJson": row.SummaryJSON,
-			"createdAt":   row.CreatedAt,
-		})
+		out = append(out, postProcessTaskPayload(row))
 	}
 	return out, nil
+}
+
+func postProcessTaskPayload(row store.PostProcessTask) map[string]any {
+	return map[string]any{
+		"id":          row.ID,
+		"runId":       row.RunID,
+		"workflowId":  row.WorkflowID,
+		"stepId":      row.StepID,
+		"caseId":      row.CaseID,
+		"kind":        row.Kind,
+		"status":      row.Status,
+		"startedAt":   row.StartedAt,
+		"finishedAt":  row.FinishedAt,
+		"durationMs":  row.DurationMs,
+		"error":       row.Error,
+		"summaryJson": row.SummaryJSON,
+		"createdAt":   row.CreatedAt,
+	}
 }
 
 func workflowRunListItem(run store.Run) map[string]any {

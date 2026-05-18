@@ -7,14 +7,14 @@ describe("workflow runtime impact", () => {
   it("gates workflows on interface availability instead of service runtime", () => {
     const workflow = {
       steps: [
-        { id: "entry", serviceId: "retail-gateway", caseId: "case.entry", executable: true },
-        { id: "downstream", serviceId: "account-channel", caseId: "case.downstream", executable: true },
+        { id: "entry", serviceId: "entry-service", caseId: "case.entry", executable: true },
+        { id: "downstream", serviceId: "channel-service", caseId: "case.downstream", executable: true },
         { id: "internal", serviceId: "ledger-core", caseId: "case.internal", executable: true },
       ],
     };
     const statusById = new Map([
-      ["retail-gateway", { id: "retail-gateway", ok: true }],
-      ["account-channel", { id: "account-channel", ok: true }],
+      ["entry-service", { id: "entry-service", ok: true }],
+      ["channel-service", { id: "channel-service", ok: true }],
       ["ledger-core", { id: "ledger-core", ok: false }],
     ]);
 

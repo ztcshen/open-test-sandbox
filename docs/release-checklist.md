@@ -17,7 +17,10 @@ The gate verifies:
 - `git diff --check` passes;
 - Go tests pass;
 - the React workbench builds;
-- browser smoke tests pass in a headless context.
+- browser smoke tests pass in a headless context;
+- the headless smoke can enter the core workflow from the workbench, click the
+  workflow run button, persist the workflow run, open step Evidence, and verify
+  stored SkyWalking topology with provider, trace id, status, nodes, and edges.
 
 ## Manual Review
 

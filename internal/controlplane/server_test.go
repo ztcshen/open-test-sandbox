@@ -161,6 +161,28 @@ func TestServerImportsProfileBundleIntoRuntimeStore(t *testing.T) {
 	}
 }
 
+func TestServerTemplatePackageAliasesImportIntoRuntimeStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+	profileDir := writeEmptyProfileBundle(t)
+
+	payload := postJSONResponse(t, server.URL+"/api/template-packages/import", fmt.Sprintf(`{"path":%q}`, profileDir), http.StatusOK)
+
+	if payload["profileId"] != "empty" || payload["bundlePath"] != profileDir {
+		t.Fatalf("template package import payload identity = %#v", payload)
+	}
+	catalogIndex := decodeJSONResponse(t, server.URL+"/api/template-packages/catalog-index", http.StatusOK)
+	if catalogIndex["profileId"] != "empty" || catalogIndex["indexedAt"] == "" {
+		t.Fatalf("template package catalog index = %#v", catalogIndex)
+	}
+}
+
 func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "sandbox.sqlite")
@@ -1070,7 +1092,7 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/assets/react/interfaceNode.js", want: "/api/interface-node"},
 		{path: "/assets/react/interfaceNodes.js", want: "/api/interface-nodes"},
 		{path: "/assets/react/replayEvidence.js", want: "/api/replay/evidence"},
-		{path: "/assets/react/sandboxWorkbench.js", want: "/api/profile/import"},
+		{path: "/assets/react/sandboxWorkbench.js", want: "/api/template-packages/import"},
 		{path: "/assets/react/serviceInventory.js", want: "/api/catalog"},
 		{path: "/assets/react/traceTopology.js", want: "/api/workflow-runs/"},
 		{path: "/assets/react/workflowDetail.js", want: "/api/catalog"},
@@ -3105,12 +3127,29 @@ func TestServerCopiesStepTraceTopologyIntoSavedWorkflowRun(t *testing.T) {
 		RequestID:     "request.apply",
 		TraceID:       "trace.apply",
 		Status:        "complete",
-		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"retail-gateway","target":"loan-service"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["retail-gateway","loan-service"]}`,
-		TextTopology:  "retail-gateway -> loan-service",
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"entry-service","target":"worker-service"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["entry-service","worker-service"]}`,
+		TextTopology:  "entry-service -> worker-service",
 		CreatedAt:     started,
 	})
 	if err != nil {
 		t.Fatalf("save source topology: %v", err)
+	}
+	_, err = s.RecordPostProcessTask(ctx, store.PostProcessTask{
+		ID:          "task.single.apply.topology",
+		RunID:       "run.single.apply",
+		WorkflowID:  "workflow.alpha",
+		StepID:      "apply",
+		CaseID:      "case.apply",
+		Kind:        "trace_topology_collect",
+		Status:      store.StatusPassed,
+		StartedAt:   started,
+		FinishedAt:  started.Add(100 * time.Millisecond),
+		DurationMs:  100,
+		SummaryJSON: `{"traceId":"trace.apply","topologyStatus":"complete"}`,
+		CreatedAt:   started,
+	})
+	if err != nil {
+		t.Fatalf("record source post-process task: %v", err)
 	}
 
 	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
@@ -3140,6 +3179,13 @@ func TestServerCopiesStepTraceTopologyIntoSavedWorkflowRun(t *testing.T) {
 	topology := topologies[0].(map[string]any)
 	if topology["runId"] == "run.single.apply" || topology["stepId"] != "apply" || topology["traceId"] != "trace.apply" {
 		t.Fatalf("copied topology should belong to saved workflow run and keep step evidence: %#v", topology)
+	}
+	runID := topology["workflowRunId"].(string)
+	tasks := decodeJSONResponse(t, server.URL+"/api/post-process-tasks?runId="+url.QueryEscape(runID)+"&stepId=apply&kind=trace_topology_collect", http.StatusOK)
+	taskRows := tasks["tasks"].([]any)
+	counts := tasks["counts"].(map[string]any)
+	if len(taskRows) != 1 || counts["passed"] != float64(1) || taskRows[0].(map[string]any)["runId"] != runID {
+		t.Fatalf("latest saved workflow run should include copied topology task: %#v", tasks)
 	}
 }
 
@@ -3192,8 +3238,8 @@ func TestServerBackfillsSavedWorkflowStepTopologyAfterAsyncCollection(t *testing
 		RequestID:     "request.apply",
 		TraceID:       "trace.apply",
 		Status:        "complete",
-		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"retail-gateway","target":"loan-service"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["retail-gateway","loan-service"]}`,
-		TextTopology:  "retail-gateway -> loan-service",
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"entry-service","target":"worker-service"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["entry-service","worker-service"]}`,
+		TextTopology:  "entry-service -> worker-service",
 		CreatedAt:     started.Add(time.Second),
 	})
 	if err != nil {
@@ -3940,6 +3986,105 @@ func TestServerCollectsTraceTopologyForSingleTestKitRun(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("stored trace topology was not collected asynchronously")
+}
+
+func TestServerReturnsTraceTopologyForWorkflowStepTestKitRun(t *testing.T) {
+	ctx := context.Background()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Request-Id", "request.alpha")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer target.Close()
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode provider request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(payload.Query, "queryBasicTraces"):
+			_, _ = w.Write([]byte(`{"data":{"queryBasicTraces":{"traces":[{"endpointNames":["GET:/callback"],"duration":80,"start":"2026-05-15 0830","isError":false,"traceIds":["trace.alpha"]}]}}}`))
+		case strings.Contains(payload.Query, "queryTrace"):
+			_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[{"traceId":"trace.alpha","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/callback","type":"Entry","component":"Tomcat"},{"traceId":"trace.alpha","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.alpha","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"GET:/callback","type":"Entry","component":"Server"}]}}}`))
+		default:
+			t.Fatalf("unexpected provider query: %s", payload.Query)
+		}
+	}))
+	defer provider.Close()
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: time.Now().UTC(),
+		APICases: []store.CatalogAPICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active"},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.case.alpha",
+				TemplateID: "template.case.alpha",
+				NodeID:     "node.alpha",
+				WorkflowID: "workflow.alpha",
+				ScopeType:  "step",
+				ScopeID:    "step.alpha",
+				Title:      "Case Alpha Runtime",
+				Status:     "active",
+				ConfigJSON: `{
+					"caseId":"case.alpha",
+					"caseExecution":{
+						"method":"GET",
+						"nodeId":"service.alpha",
+						"path":"/callback",
+						"expectedHttpCodes":[200]
+					}
+				}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{
+		Runtime:         s,
+		TraceGraphQLURL: provider.URL,
+	}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/test-kit/run", "application/json", strings.NewReader(fmt.Sprintf(`{
+		"caseId":"case.alpha",
+		"workflowId":"workflow.alpha",
+		"stepId":"step.alpha",
+		"baseUrl":%q,
+		"timeoutSeconds":5
+	}`, target.URL)))
+	if err != nil {
+		t.Fatalf("post test kit run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("test kit run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode test kit result: %v", err)
+	}
+	topology := result["traceTopology"].(map[string]any)
+	if topology["provider"] != "skywalking" || topology["status"] != "complete" || topology["traceId"] != "trace.alpha" {
+		t.Fatalf("trace topology should be returned inline: %#v", topology)
+	}
+	if edges := topology["confirmedEdges"].([]any); len(edges) != 1 {
+		t.Fatalf("trace topology edges = %#v", edges)
+	}
 }
 
 func TestServerRecordsSkippedTraceTopologyTaskWhenTraceProviderMissing(t *testing.T) {

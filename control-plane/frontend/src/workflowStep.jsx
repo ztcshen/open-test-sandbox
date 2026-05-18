@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Chip, fetchJSON, queryParam, selectedStep, selectedWorkflow, serviceName, workflowIdFromURL } from "./workflowPagesCommon.jsx";
-import { TopologyDiagram, parseTopology, topologyEdges, topologyNodes } from "./topologyView.jsx";
+import { TopologyDiagram, topologyEdges, topologyNodes } from "./topologyView.jsx";
+import { trustedTopologyFromStepRun } from "./workflowStepModel.mjs";
 
 function unique(values) {
   return [...new Set((values || []).filter(Boolean))];
@@ -180,10 +181,7 @@ function responseEvidence(stepResult) {
 }
 
 function topologyFromStepRun(stepRun, stepResult) {
-  if (stepResult?.traceTopology && Object.keys(stepResult.traceTopology).length) return stepResult.traceTopology;
-  const rows = stepRun?.traceTopologies || [];
-  const row = rows.find((item) => !stepResult?.stepId || item.stepId === stepResult.stepId) || rows[0];
-  return parseTopology(row);
+  return trustedTopologyFromStepRun(stepRun, stepResult);
 }
 
 function logSystems(stepResult) {

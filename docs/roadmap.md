@@ -10,11 +10,17 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 
 - Keep the core repository generic and free of bundled team import bundles.
 - Maintain a green `npm run release-check` gate.
+- Keep the headless smoke focused on the core workflow path: enter from the
+  workbench, run the workflow button flow, confirm green steps, inspect step
+  Evidence, and require real SkyWalking topology instead of fallback diagrams.
 - Improve README, bilingual docs, and first-run experience.
 - Keep CLI and API contracts documented as they change.
 
 - 保持核心仓库通用，不内置团队 import bundle。
 - 保持 `npm run release-check` 门禁稳定通过。
+- 保持 headless smoke 覆盖核心 Workflow 路径：从工作台进入，点击运行
+  Workflow，确认节点绿色，查看 step Evidence，并要求真实 SkyWalking 拓扑，
+  不使用 fallback 假图。
 - 完善 README、双语文档和首次运行体验。
 - CLI/API 契约变化时同步更新文档。
 
@@ -22,13 +28,15 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 
 - Add richer generic example import bundles that remain safe for open-source use.
 - Improve import bundle authoring ergonomics and validation messages.
-- Make post-process tasks for topology, logs, and reports easier to inspect.
+- Make post-process tasks for topology, logs, and reports easier to inspect,
+  including clear passed, skipped, and failed reasons for Evidence collection.
 - Expand report templates while keeping them compact and table-first.
 - Add more focused smoke checks for CLI report generation.
 
 - 增加更丰富但仍然通用的公开示例 import bundle。
 - 改善 import bundle 作者体验和校验错误信息。
-- 让拓扑、日志、报告等后处理任务更容易查看。
+- 让拓扑、日志、报告等后处理任务更容易查看，并清晰展示 Evidence 采集的
+  成功、跳过和失败原因。
 - 扩展报告模板，同时保持紧凑、表格优先。
 - 增加 CLI 报告生成的聚焦冒烟测试。
 
