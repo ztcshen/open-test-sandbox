@@ -43,7 +43,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Stability analysis | Review recent case-run history to find maintained cases that alternate between pass and fail. |
 | Impact and priority planning | Convert changed paths, interface hints, workflow hints, tags, latest status, stability, priority metadata, or case text into an explainable case selection, ranked batch request, synchronous report, or asynchronous batch run. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports; maintained suite and batch runs also expose JUnit XML and failure summaries for CI/agent triage. |
-| Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. |
+| Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. Report previews redact common sensitive JSON keys and URL query parameters. |
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
 | Open-source guardrails | Release checks prevent generated state and source-domain terms from entering the generic core. |
 

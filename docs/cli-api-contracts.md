@@ -408,6 +408,8 @@ otsandbox interface-node case report \
 The command runs every API case attached to the selected interface node. The
 report includes per-case status, elapsed time, run id, case run id, Evidence
 path, and detail URL. A failing case should still appear in the report.
+Response body previews and request URLs in reports redact common sensitive JSON
+keys and query parameters such as tokens, passwords, cookies, and secrets.
 
 ## Workflow Report
 

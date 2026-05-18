@@ -25,6 +25,7 @@ import (
 	"open-test-sandbox/internal/profileaudit"
 	"open-test-sandbox/internal/profilecatalog"
 	"open-test-sandbox/internal/profilehome"
+	"open-test-sandbox/internal/redaction"
 	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
@@ -2397,10 +2398,10 @@ func interfaceNodeCaseReportItems(value any) []interfaceNodeCaseReportItem {
 			ElapsedMs:   int64(intFromReportAny(item["elapsedMs"])),
 			Method:      valueString(request["method"]),
 			Path:        valueString(request["path"]),
-			FullURL:     valueString(request["fullUrl"]),
+			FullURL:     redaction.URL(valueString(request["fullUrl"])),
 			BaseURL:     firstNonEmpty(valueString(summary["targetBaseUrl"]), valueString(request["baseUrl"])),
 			Error:       firstNonEmpty(valueString(item["error"]), valueString(summary["failureReason"])),
-			BodyPreview: truncateReportText(valueString(response["body"]), 160),
+			BodyPreview: truncateReportText(redaction.Text(valueString(response["body"])), 160),
 		})
 	}
 	return out

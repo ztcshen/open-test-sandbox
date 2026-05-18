@@ -13,6 +13,8 @@ should be called out in this file and in the relevant docs.
   Store/read-model publishing.
 - Added `profile audit-plan` and `/api/profile/audit-plan` to turn profile
   audit issues into stable repair actions for agents and profile authors.
+- Added report-preview redaction for common sensitive JSON keys and URL query
+  parameters before rendering interface and maintained-suite reports.
 - Added API case run Evidence, asynchronous batch reports, workflow reports,
   and synchronous failed case Evidence lookup.
 - Added source-domain guardrails to keep core code generic.

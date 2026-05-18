@@ -1780,10 +1780,10 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 		switch r.URL.Query().Get("mode") {
 		case "bad":
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprint(w, `{"status":"rejected"}`)
+			_, _ = fmt.Fprint(w, `{"status":"rejected","password":"variant-secret"}`)
 		default:
 			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprint(w, `{"status":"accepted"}`)
+			_, _ = fmt.Fprint(w, `{"status":"accepted","token":"report-secret"}`)
 		}
 	}))
 	defer server.Close()
@@ -1826,9 +1826,10 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 			DerivedConfigs int `json:"derivedConfigs"`
 		} `json:"counts"`
 		Results []struct {
-			RunID     string `json:"runId"`
-			CaseRunID string `json:"caseRunId"`
-			DetailURL string `json:"detailUrl"`
+			RunID       string `json:"runId"`
+			CaseRunID   string `json:"caseRunId"`
+			DetailURL   string `json:"detailUrl"`
+			BodyPreview string `json:"bodyPreview"`
 		} `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
@@ -1839,6 +1840,14 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 	}
 	if len(report.Results) != 2 || report.Results[0].RunID == "" || report.Results[0].CaseRunID != report.Results[0].RunID+".case" || report.Results[0].DetailURL == "" {
 		t.Fatalf("report evidence handles = %#v", report.Results)
+	}
+	for _, item := range report.Results {
+		if strings.Contains(item.BodyPreview, "report-secret") || strings.Contains(item.BodyPreview, "variant-secret") {
+			t.Fatalf("report body preview leaked sensitive value: %#v", item)
+		}
+		if !strings.Contains(item.BodyPreview, "[REDACTED]") {
+			t.Fatalf("report body preview was not redacted: %#v", item)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "report.json")); err != nil {
 		t.Fatalf("json report missing: %v", err)
@@ -1851,6 +1860,11 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 	for _, want := range []string{"Result Lookup", "Case Alpha Default", "Case Alpha Variant", "passed", "caseRunId"} {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("html report missing %q:\n%s", want, html)
+		}
+	}
+	for _, leaked := range []string{"report-secret", "variant-secret"} {
+		if strings.Contains(string(html), leaked) {
+			t.Fatalf("html report leaked %q:\n%s", leaked, html)
 		}
 	}
 	if report.ReportURL != htmlPath {
