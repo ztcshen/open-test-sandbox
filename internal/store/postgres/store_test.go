@@ -76,6 +76,18 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 	if !strings.Contains(exec.query, "insert into config_read_model") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6)") {
 		t.Fatalf("delegated read model did not use postgres sqlstore dialect:\n%s", exec.query)
 	}
+
+	err = s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "profile.alpha",
+		Services:  []store.CatalogService{{ID: "service.alpha"}},
+	})
+	if err != nil {
+		t.Fatalf("replace profile catalog through postgres store: %v", err)
+	}
+	exec = state.lastExec(t)
+	if !strings.Contains(exec.query, "insert into profile_catalogs") || !strings.Contains(exec.query, "values ($1, $2, $3") {
+		t.Fatalf("delegated profile catalog did not use postgres sqlstore dialect:\n%s", exec.query)
+	}
 }
 
 const fakePostgresDriverName = "otsandbox_postgres_open_fake"

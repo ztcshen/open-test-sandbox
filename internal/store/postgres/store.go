@@ -143,20 +143,16 @@ func (s *Store) GetReadModel(ctx context.Context, profileID string, key string) 
 	return s.core.GetReadModel(ctx, profileID, key)
 }
 
-func (s *Store) ReplaceProfileCatalog(context.Context, store.ProfileCatalog) error {
-	return errPostgresStoreNotImplemented()
+func (s *Store) ReplaceProfileCatalog(ctx context.Context, catalog store.ProfileCatalog) error {
+	return s.core.ReplaceProfileCatalog(ctx, catalog)
 }
 
-func (s *Store) GetProfileCatalog(context.Context) (store.ProfileCatalog, error) {
-	return store.ProfileCatalog{}, errPostgresStoreNotImplemented()
+func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, error) {
+	return s.core.GetProfileCatalog(ctx)
 }
 
-func (s *Store) GetProfileCatalogIndex(context.Context) (store.ProfileCatalogIndex, error) {
-	return store.ProfileCatalogIndex{}, errPostgresStoreNotImplemented()
-}
-
-func errPostgresStoreNotImplemented() error {
-	return errors.New("postgres store contract is not implemented yet")
+func (s *Store) GetProfileCatalogIndex(ctx context.Context) (store.ProfileCatalogIndex, error) {
+	return s.core.GetProfileCatalogIndex(ctx)
 }
 
 type SchemaStatusResult struct {

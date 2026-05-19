@@ -143,5 +143,21 @@ create table if not exists config_read_model (
   updated_at %s not null,
   primary key (profile_id, model_key)
 );`, text, text, text, jsonType, timeType, timeType),
+		fmt.Sprintf(`
+create table if not exists profile_catalogs (
+  profile_id %s primary key,
+  indexed_at %s not null,
+  catalog_json %s not null,
+  services %s not null,
+  workflows %s not null,
+  interface_nodes %s not null,
+  api_cases %s not null,
+  request_templates %s not null,
+  workflow_bindings %s not null,
+  case_dependencies %s not null,
+  fixtures %s not null,
+  templates %s not null,
+  template_configs %s not null
+);`, text, timeType, jsonType, intType, intType, intType, intType, intType, intType, intType, intType, intType, intType),
 	}
 }
