@@ -1291,3 +1291,23 @@ Incomplete work:
 - This wires the release gate for PG-gated unit coverage, but final completion
   still needs the full external release-check and live SkyWalking 10-step proof
   run against a real endpoint.
+
+## 2026-05-20 Named PostgreSQL Planning Gate Test Migration
+
+Estimated PostgreSQL mainline progress: 99.995%.
+
+Completed evidence:
+
+- Migrated representative `baseline get/set` tests from explicit SQLite Store
+  flags to active named PostgreSQL Store coverage.
+- Migrated `workflow plan` text, JSON, and missing-workflow tests to publish
+  catalog data into the active named PostgreSQL Store and invoke the daily
+  commands without per-command Store flags.
+- The migrated baseline tests use unique subject ids so a shared PostgreSQL
+  test DSN does not make assertions depend on existing rows.
+
+Incomplete work:
+
+- Some older product-like tests still use explicit SQLite for compatibility
+  coverage. Final completion still requires the external PostgreSQL release
+  gate plus live SkyWalking 10-step proof run.

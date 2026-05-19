@@ -2971,15 +2971,16 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 }
 
 func TestBaselineGateCommandsSetAndGetState(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	configureNamedPostgreSQLActiveStore(t, "daily-baseline-pg")
+	subjectID := uniqueTestID(t, "workflow.alpha")
 
-	out := runCLI(t, "baseline", "set", "--store", "sqlite://"+storePath, "--profile", "sample", "--subject", "workflow.alpha", "--status", "passed", "--required")
-	if !strings.Contains(out, "Baseline Gate: sample workflow.alpha") || !strings.Contains(out, "Status: passed") {
+	out := runCLI(t, "baseline", "set", "--profile", "sample", "--subject", subjectID, "--status", "passed", "--required")
+	if !strings.Contains(out, "Baseline Gate: sample "+subjectID) || !strings.Contains(out, "Status: passed") {
 		t.Fatalf("baseline set output = %q", out)
 	}
 
-	out = runCLI(t, "baseline", "get", "--store", "sqlite://"+storePath, "--profile", "sample", "--subject", "workflow.alpha")
-	for _, want := range []string{"Baseline Gate: sample workflow.alpha", "Status: passed", "Required: true"} {
+	out = runCLI(t, "baseline", "get", "--profile", "sample", "--subject", subjectID)
+	for _, want := range []string{"Baseline Gate: sample " + subjectID, "Status: passed", "Required: true"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("baseline get output missing %q: %q", want, out)
 		}
@@ -2987,10 +2988,11 @@ func TestBaselineGateCommandsSetAndGetState(t *testing.T) {
 }
 
 func TestBaselineGetCommandRejectsMissingGate(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	configureNamedPostgreSQLActiveStore(t, "daily-baseline-missing-pg")
+	subjectID := uniqueTestID(t, "workflow.missing")
 
-	out := runCLIFails(t, "baseline", "get", "--store", "sqlite://"+storePath, "--profile", "sample", "--subject", "workflow.missing")
-	if !strings.Contains(out, "baseline gate not found") || !strings.Contains(out, "sample workflow.missing") {
+	out := runCLIFails(t, "baseline", "get", "--profile", "sample", "--subject", subjectID)
+	if !strings.Contains(out, "baseline gate not found") || !strings.Contains(out, "sample "+subjectID) {
 		t.Fatalf("missing baseline gate output = %q", out)
 	}
 }
@@ -2998,10 +3000,10 @@ func TestBaselineGetCommandRejectsMissingGate(t *testing.T) {
 func TestWorkflowPlanCommandPrintsBoundSteps(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
+	configureNamedPostgreSQLActiveStore(t, "daily-workflow-plan-pg")
+	runCLI(t, "config", "publish", "--from", dir)
 
-	out := runCLI(t, "workflow", "plan", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha")
+	out := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha")
 
 	for _, want := range []string{
 		"Workflow: workflow.alpha",
@@ -3017,12 +3019,12 @@ func TestWorkflowPlanCommandPrintsBoundSteps(t *testing.T) {
 }
 
 func TestWorkflowPlanCommandCanEmitJSONFromStore(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := t.TempDir()
 	writeWorkflowProfile(t, profileDir)
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+dbPath)
+	configureNamedPostgreSQLActiveStore(t, "daily-workflow-plan-json-pg")
+	runCLI(t, "config", "publish", "--from", profileDir)
 
-	out := runCLI(t, "workflow", "plan", "--store", "sqlite://"+dbPath, "--workflow", "workflow.alpha", "--json")
+	out := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha", "--json")
 
 	var payload struct {
 		OK         bool   `json:"ok"`
@@ -3052,10 +3054,10 @@ func TestWorkflowPlanCommandCanEmitJSONFromStore(t *testing.T) {
 func TestWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
+	configureNamedPostgreSQLActiveStore(t, "daily-workflow-plan-missing-pg")
+	runCLI(t, "config", "publish", "--from", dir)
 
-	out := runCLIFails(t, "workflow", "plan", "--store", "sqlite://"+storePath, "--workflow", "workflow.missing")
+	out := runCLIFails(t, "workflow", "plan", "--workflow", "workflow.missing")
 	if !strings.Contains(out, "workflow not found") || !strings.Contains(out, "workflow.missing") {
 		t.Fatalf("missing workflow output = %q", out)
 	}
