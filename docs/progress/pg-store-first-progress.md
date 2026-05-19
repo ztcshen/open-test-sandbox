@@ -361,3 +361,34 @@ Incomplete work:
   reached the `cmd/otsandbox` package but hit Go's default 10 minute package
   timeout while the suite was still progressing; full validation is deferred by
   user direction.
+
+## 2026-05-19 Frontend Topology Trust Gate
+
+Estimated PostgreSQL mainline progress: 93%.
+
+Completed evidence:
+
+- Evidence Viewer and Interface Node UI now reuse the same SkyWalking trust
+  check used by Workflow Step. Providerless or non-SkyWalking topology payloads
+  are rendered as unavailable SkyWalking topology instead of being displayed as
+  real call graph evidence.
+- Evidence timeline modeling now counts topology as a timeline item only when
+  the payload explicitly identifies SkyWalking through `provider` or `source`.
+- The API case documentation now describes daily Store indexing through the
+  active Store or `--store NAME_OR_DSN`; deprecated `--store-url` is documented
+  as migration and legacy compatibility only.
+- Light validation passed:
+  `node --test control-plane/frontend/src/evidenceTimelineModel.test.mjs control-plane/frontend/src/workflowStepModel.test.mjs`,
+  `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- This is still not a 98% state because the core 10-step button-level smoke has
+  not been re-run against a real PostgreSQL Store plus real SkyWalking endpoint
+  in this slice.
+- Broader CLI/API parity and daily-path test migration to named PostgreSQL
+  Stores remain open. Existing explicit `--store sqlite://...` tests are now
+  compatibility coverage, not proof of the PostgreSQL daily path.
+- Full `npm run release-check` remains intentionally deferred by user direction
+  to keep momentum on the PG line instead of blocking on the heavy suite.

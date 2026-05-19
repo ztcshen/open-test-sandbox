@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { RefreshCw } from "lucide-react";
 import { TopologyDiagram, topologyEdges, topologyNodes } from "./topologyView.jsx";
+import { isSkyWalkingTopology, unavailableSkyWalkingTopology } from "./workflowStepModel.mjs";
 
 function queryParam(name) {
   return new URLSearchParams(window.location.search).get(name) || "";
@@ -130,7 +131,8 @@ function RunBadge({ item }) {
 }
 
 function CaseTopology({ run, payload }) {
-  const topology = run?.topology || run?.traceTopology || {};
+  const rawTopology = run?.topology || run?.traceTopology || {};
+  const topology = isSkyWalkingTopology(rawTopology) ? rawTopology : unavailableSkyWalkingTopology();
   const edges = topologyEdges(topology);
   const nodes = topologyNodes(topology, edges);
   if (!topology.status && !topology.traceId && !nodes.length) return null;

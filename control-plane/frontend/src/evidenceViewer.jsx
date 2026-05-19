@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { fetchJSON } from "./api.js";
 import { buildEvidenceArtifacts, buildEvidenceNavigation, buildEvidenceReproduction, buildEvidenceTimeline } from "./evidenceTimelineModel.mjs";
 import { TopologyDiagram, topologyEdges } from "./topologyView.jsx";
+import { isSkyWalkingTopology, unavailableSkyWalkingTopology } from "./workflowStepModel.mjs";
 
 const STORAGE_PREFIX = "open-test-sandbox-evidence:";
 
@@ -311,11 +312,12 @@ function FixtureEvidence({ fixture }) {
 }
 
 function TopologyCard({ topology }) {
-  if (!topology || (!topology.status && !topology.traceId && !topology.requestId)) return null;
-  const edges = topologyEdges(topology);
+  const trustedTopology = isSkyWalkingTopology(topology) ? topology : unavailableSkyWalkingTopology();
+  if (!trustedTopology.status && !trustedTopology.traceId && !trustedTopology.requestId) return null;
+  const edges = topologyEdges(trustedTopology);
   return (
-    <Card title="Topology" meta={`${topology.status || "-"} · ${topology.requestId || "-"} · ${topology.traceId || "-"}`} className="viewer-case-topology">
-      <TopologyDiagram topology={topology} markerPrefix="evidence" />
+    <Card title="Topology" meta={`${trustedTopology.status || "-"} · ${trustedTopology.requestId || "-"} · ${trustedTopology.traceId || "-"}`} className="viewer-case-topology">
+      <TopologyDiagram topology={trustedTopology} markerPrefix="evidence" />
       <div className="workflow-step-topology-edges">
         {edges.length ? edges.map((edge, index) => (
           <article className={`workflow-step-topology-edge ${edge.kind}`} key={`${edge.source}-${edge.target}-${index}`}>
@@ -326,7 +328,7 @@ function TopologyCard({ topology }) {
           </article>
         )) : <div className="empty-note">没有确认调用边；保留当前 trace 状态。</div>}
       </div>
-      {topology.textTopology ? <pre className="viewer-pre">{topology.textTopology}</pre> : null}
+      {trustedTopology.textTopology ? <pre className="viewer-pre">{trustedTopology.textTopology}</pre> : null}
     </Card>
   );
 }

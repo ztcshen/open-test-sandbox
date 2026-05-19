@@ -20,7 +20,7 @@ function isSkyWalkingTopologyRow(row) {
   return isSkyWalkingTopology(parseTopologyJSON(row.topologyJson));
 }
 
-function isSkyWalkingTopology(value) {
+export function isSkyWalkingTopology(value) {
   if (!value || typeof value !== "object") return false;
   const provider = String(value.provider || value.source || "").trim().toLowerCase();
   return provider === "skywalking";
@@ -36,7 +36,7 @@ function parseTopologyJSON(value) {
   }
 }
 
-function unavailableSkyWalkingTopology() {
+export function unavailableSkyWalkingTopology() {
   return {
     provider: "skywalking",
     status: "unavailable",
@@ -47,4 +47,3 @@ function unavailableSkyWalkingTopology() {
     warnings: ["SkyWalking topology was not captured for this step."],
   };
 }
-

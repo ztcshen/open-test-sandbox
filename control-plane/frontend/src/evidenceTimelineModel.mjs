@@ -1,3 +1,5 @@
+import { isSkyWalkingTopology } from "./workflowStepModel.mjs";
+
 export function buildEvidenceTimeline(payload = {}, filters = {}) {
   const items = evidenceTimelineItems(payload);
   const activeFilters = normalizeFilters(filters);
@@ -233,7 +235,7 @@ function evidenceTimelineItems(payload = {}) {
     });
   }
 
-  if (hasObjectData(topology)) {
+  if (isSkyWalkingTopology(topology)) {
     items.push({
       id: "topology",
       type: "topology",
