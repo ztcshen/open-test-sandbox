@@ -70,10 +70,11 @@ OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmod
 Go 测试、demo、React build、active PostgreSQL CLI smoke 和 PostgreSQL-only
 无头浏览器冒烟。
 
-默认 smoke 使用确定性的 synthetic SkyWalking GraphQL provider，便于本地重复
-验证。要连真实 SkyWalking，请额外设置 `OTS_TRACE_GRAPHQL_URL`；如需指定 10 步
-工作流的真实 trace id，可设置
-`OTS_SMOKE_TRACE_IDS='{"step-01":"trace-real-01"}'`。
+默认 smoke 使用确定性的 synthetic SkyWalking GraphQL provider，只用于可重复
+验证本地 wiring，不作为真实 SkyWalking 发布证据。要验证真实拓扑路径，请额外
+设置 `OTS_TRACE_GRAPHQL_URL`；如需指定 10 步工作流的真实 trace id，可设置
+`OTS_SMOKE_TRACE_IDS='{"step-01":"trace-real-01"}'`。未配置 SkyWalking endpoint
+时，拓扑采集必须明确显示 unavailable、failed 或 skipped，不能生成假拓扑。
 
 ## 架构
 

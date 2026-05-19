@@ -788,3 +788,30 @@ Incomplete work:
 - Remaining PG-line gaps are now mostly final CLI/API parity documentation,
   release preparation, and live SkyWalking endpoint validation with real trace
   ids.
+
+## 2026-05-20 Real SkyWalking Release Proof Documentation
+
+Estimated PostgreSQL mainline progress: 98.9%.
+
+Completed evidence:
+
+- Tightened README and Store backend documentation so the deterministic
+  synthetic SkyWalking GraphQL provider is described only as a local wiring
+  smoke aid, not release evidence for a real SkyWalking deployment.
+- Documented that real topology validation requires `OTS_TRACE_GRAPHQL_URL`
+  and, when needed, `OTS_SMOKE_TRACE_IDS` so the core 10-step smoke uses real
+  trace ids.
+- Documented that when no SkyWalking endpoint is configured, topology
+  collection must report unavailable, failed, or skipped status instead of
+  inventing topology.
+- The wording is aligned with Apache SkyWalking's own model: topology and
+  dependency are queried from SkyWalking data built from trace/service traffic,
+  not generated as a local substitute.
+
+Incomplete work:
+
+- This is a documentation/parity closure only. The later human-machine
+  validation pass still needs a real SkyWalking GraphQL endpoint and real trace
+  ids to prove the final 10-step topology chain.
+- Full release-check remains deferred by user direction while the PG line is
+  being advanced quickly.

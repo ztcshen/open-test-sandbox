@@ -135,9 +135,13 @@ schema, and serves the workbench through `--store smoke-postgres`. The smoke
 must still complete through that PostgreSQL Store.
 
 Smoke topology collection uses a deterministic synthetic SkyWalking GraphQL
-provider unless `OTS_TRACE_GRAPHQL_URL` is set. Set that URL, plus optional
-`OTS_SMOKE_TRACE_IDS` step-to-trace mappings, when the gate must prove a real
-SkyWalking endpoint rather than local smoke wiring.
+provider unless `OTS_TRACE_GRAPHQL_URL` is set. That provider is only a local
+wiring check: it proves PostgreSQL Store writes, Evidence lookup, and topology
+rendering semantics, but it is not release evidence for a real SkyWalking
+deployment. Set `OTS_TRACE_GRAPHQL_URL`, plus optional `OTS_SMOKE_TRACE_IDS`
+step-to-trace mappings, when the gate must prove a real SkyWalking endpoint.
+When no SkyWalking endpoint is configured, product paths must report topology
+as unavailable, failed, or skipped rather than generating an invented topology.
 
 SQLite smoke or demo execution is available only for explicit compatibility
 checks with `OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE=1` or

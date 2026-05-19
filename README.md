@@ -83,10 +83,13 @@ the React build, active PostgreSQL CLI smoke tests, and PostgreSQL-only
 headless browser smoke tests.
 
 By default, smoke tests use a deterministic synthetic SkyWalking GraphQL
-provider so local verification is repeatable. To validate against a real
-SkyWalking endpoint, also set `OTS_TRACE_GRAPHQL_URL` and, when needed,
+provider so local wiring checks are repeatable. This is not release evidence
+for a real SkyWalking deployment. To validate the real topology path, set
+`OTS_TRACE_GRAPHQL_URL` and, when needed,
 `OTS_SMOKE_TRACE_IDS='{"step-01":"trace-real-01"}'` so the 10-step smoke uses
-real trace ids.
+real trace ids. When no SkyWalking endpoint is configured, topology collection
+must report unavailable, failed, or skipped status instead of inventing a
+topology.
 
 ## Architecture
 
