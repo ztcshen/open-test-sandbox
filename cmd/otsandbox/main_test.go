@@ -2025,10 +2025,10 @@ func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *test
 
 func TestInterfaceNodeCoverageCommandCanEmitJSON(t *testing.T) {
 	profileDir := writeInterfaceNodeCoverageProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	configureNamedPostgreSQLActiveStore(t, "daily-interface-coverage-pg")
+	runCLI(t, "config", "publish", "--from", profileDir)
 
-	out := runCLI(t, "interface-node", "coverage", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha", "--json")
+	out := runCLI(t, "interface-node", "coverage", "--workflow", "workflow.alpha", "--json")
 
 	var report struct {
 		OK      bool `json:"ok"`
@@ -2068,10 +2068,10 @@ func TestInterfaceNodeCoverageGapsCommandCanEmitJSON(t *testing.T) {
   "workflowBindings": [{"workflowId":"workflow.alpha","stepId":"step.missing","nodeId":"node.missing","caseId":"case.missing","required":true}],
   "fixtures": []
 }`)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
+	configureNamedPostgreSQLActiveStore(t, "daily-interface-coverage-gaps-pg")
+	runCLI(t, "config", "publish", "--from", dir)
 
-	out := runCLI(t, "interface-node", "coverage-gaps", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha", "--json")
+	out := runCLI(t, "interface-node", "coverage-gaps", "--workflow", "workflow.alpha", "--json")
 
 	var report struct {
 		OK      bool `json:"ok"`

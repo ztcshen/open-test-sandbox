@@ -1311,3 +1311,24 @@ Incomplete work:
 - Some older product-like tests still use explicit SQLite for compatibility
   coverage. Final completion still requires the external PostgreSQL release
   gate plus live SkyWalking 10-step proof run.
+
+## 2026-05-20 Named PostgreSQL Interface Coverage Test Migration
+
+Estimated PostgreSQL mainline progress: 99.996%.
+
+Completed evidence:
+
+- Migrated `interface-node coverage` and `interface-node coverage-gaps` CLI
+  tests from explicit SQLite Store flags to active named PostgreSQL Store
+  coverage.
+- The tests now publish catalog data into the active named PostgreSQL Store and
+  invoke the daily coverage commands without per-command Store flags.
+- SQLite read-model materialization tests remain available above this layer as
+  explicit Store compatibility coverage rather than daily command proof.
+
+Incomplete work:
+
+- Additional older product-like tests still use explicit SQLite and should keep
+  moving to named PostgreSQL coverage or explicit compatibility labeling. Final
+  completion still requires the external PostgreSQL release gate plus live
+  SkyWalking 10-step proof run.
