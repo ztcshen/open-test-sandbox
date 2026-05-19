@@ -1370,3 +1370,24 @@ Incomplete work:
 
 - The final remaining proof is still the external PostgreSQL release gate plus
   live SkyWalking 10-step validation against a real endpoint.
+
+## 2026-05-20 Named PostgreSQL Incomplete Batch Test Migration
+
+Estimated PostgreSQL mainline progress: 99.9985%.
+
+Completed evidence:
+
+- Migrated the primary `case incomplete-batches` test path from explicit SQLite
+  Store flags to active named PostgreSQL Store coverage.
+- The test now runs one API case into the active named PostgreSQL Store and
+  invokes `case incomplete-batches` without a per-command Store flag while
+  preserving the text and JSON assertions for the not-run case.
+- The test uses unique case and run ids so a shared PostgreSQL test DSN does not
+  let old rows hide incomplete cases.
+- The existing store-only SQLite section remains as explicit compatibility
+  coverage for catalog-only inspection.
+
+Incomplete work:
+
+- Final completion still requires the external PostgreSQL release gate plus
+  live SkyWalking 10-step validation against a real endpoint.

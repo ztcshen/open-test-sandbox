@@ -6189,13 +6189,29 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
 	profileDir := filepath.Join(dir, "profile")
 	alphaPath := filepath.Join(dir, "case.alpha.json")
 	betaPath := filepath.Join(dir, "case.beta.json")
-	writeAPICaseFile(t, alphaPath)
-	writeFile(t, betaPath, `{
-  "id": "case.beta",
+	alphaCaseID := uniqueTestID(t, "case.alpha")
+	betaCaseID := uniqueTestID(t, "case.beta")
+	runID := uniqueTestID(t, "run-alpha")
+	writeFile(t, alphaPath, fmt.Sprintf(`{
+  "id": %q,
+  "title": "Create Item",
+  "request": {
+    "method": "POST",
+    "path": "/v1/items",
+    "headers": {"Content-Type": "application/json"},
+    "body": {"id": "item-001"}
+  },
+  "assertions": {
+    "expectedStatusCodes": [200],
+    "responseContains": ["created"]
+  }
+}`, alphaCaseID))
+	writeFile(t, betaPath, fmt.Sprintf(`{
+  "id": %q,
   "title": "Read Item",
   "request": {"method": "GET", "path": "/v1/items/item-001"},
   "assertions": {"expectedStatusCodes": [200]}
-}`)
+}`, betaCaseID))
 	writeFile(t, filepath.Join(profileDir, "profile.json"), fmt.Sprintf(`{
   "id": "sample",
   "displayName": "Sample Profile",
@@ -6203,26 +6219,26 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
   "workflows": [],
   "interfaceNodes": [],
   "apiCases": [
-    {"id":"case.alpha","displayName":"Case Alpha","casePath":%q},
-    {"id":"case.beta","displayName":"Case Beta","casePath":%q}
+    {"id":%q,"displayName":"Case Alpha","casePath":%q},
+    {"id":%q,"displayName":"Case Beta","casePath":%q}
   ],
   "requestTemplates": [],
   "caseDependencies": [],
   "workflowBindings": [],
   "fixtures": []
-}`, alphaPath, betaPath))
+}`, alphaCaseID, alphaPath, betaCaseID, betaPath))
 
-	storePath := filepath.Join(dir, "store.sqlite")
-	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", "run-alpha", "--store", "sqlite://"+storePath, "--profile", "sample")
+	configureNamedPostgreSQLActiveStore(t, "daily-incomplete-batches-pg")
+	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", runID, "--profile", "sample")
 
-	out := runCLI(t, "case", "incomplete-batches", "--profile", profileDir, "--store", "sqlite://"+storePath)
-	for _, want := range []string{"Incomplete API Cases: 1", "case.beta", "not-run", betaPath} {
+	out := runCLI(t, "case", "incomplete-batches", "--profile", profileDir)
+	for _, want := range []string{"Incomplete API Cases: 1", betaCaseID, "not-run", betaPath} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("incomplete case output missing %q: %q", want, out)
 		}
 	}
 
-	jsonOut := runCLI(t, "case", "incomplete-batches", "--profile", profileDir, "--store", "sqlite://"+storePath, "--json")
+	jsonOut := runCLI(t, "case", "incomplete-batches", "--profile", profileDir, "--json")
 	var report struct {
 		OK    bool `json:"ok"`
 		Count int  `json:"count"`
@@ -6238,7 +6254,7 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
 	if !report.OK || report.Count != 1 || len(report.Items) != 1 {
 		t.Fatalf("incomplete cases report = %#v", report)
 	}
-	if report.Items[0].ID != "case.beta" || report.Items[0].Reason != "not-run" {
+	if report.Items[0].ID != betaCaseID || report.Items[0].Reason != "not-run" {
 		t.Fatalf("incomplete case item = %#v", report.Items[0])
 	}
 	if !strings.Contains(report.Items[0].Command, betaPath) {
