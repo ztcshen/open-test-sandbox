@@ -169,6 +169,17 @@ func TestStoreReferenceResolutionKeepsLocalAndRemotePostgresCommandShape(t *test
 	}
 }
 
+func TestLegacyStoreURLPathIsExplicitSQLiteCompatibility(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	resolved, err := resolveRequiredStoreReference("", storePath)
+	if err != nil {
+		t.Fatalf("resolve legacy store url path: %v", err)
+	}
+	if resolved != "sqlite://"+storePath {
+		t.Fatalf("legacy store url path = %q want sqlite://%s", resolved, storePath)
+	}
+}
+
 func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	storeRef := "sqlite://" + storePath

@@ -218,7 +218,7 @@ func resolveStoreReference(storeRef string, legacyStoreURL string) (string, erro
 	if storeRef == "" {
 		legacyStoreURL = strings.TrimSpace(legacyStoreURL)
 		if legacyStoreURL != "" {
-			return legacyStoreURL, nil
+			return normalizeLegacyStoreURL(legacyStoreURL)
 		}
 		entry, err := activeStoreConfig()
 		if err != nil {
@@ -241,6 +241,20 @@ func resolveStoreReference(storeRef string, legacyStoreURL string) (string, erro
 		return "", fmt.Errorf("store config %q not found", storeRef)
 	}
 	return entry.URL, nil
+}
+
+func normalizeLegacyStoreURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if _, err := storeBackendFromURL(raw); err == nil {
+		return raw, nil
+	}
+	if strings.Contains(raw, "://") {
+		return "", fmt.Errorf("invalid store url %q", raw)
+	}
+	return "sqlite://" + raw, nil
 }
 
 func resolveRequiredStoreReference(storeRef string, legacyStoreURL string) (string, error) {

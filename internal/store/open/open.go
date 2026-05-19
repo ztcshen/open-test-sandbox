@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/postgres"
@@ -22,6 +24,14 @@ const (
 var ErrBackendUnavailable = errors.New("store backend unavailable")
 
 func BackendFromReference(reference string) (Backend, error) {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return "", errors.New("store reference is required")
+	}
+	parsed, err := url.Parse(reference)
+	if err != nil || parsed.Scheme == "" {
+		return "", fmt.Errorf("store reference must be a DSN with an explicit backend scheme: %q", reference)
+	}
 	dialect, err := sqlstore.DialectFromReference(reference)
 	if err != nil {
 		return "", err

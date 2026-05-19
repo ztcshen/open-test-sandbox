@@ -16,8 +16,6 @@ func TestBackendFromReferenceRecognizesSupportedDatabaseFamilies(t *testing.T) {
 		ref  string
 		want storeopen.Backend
 	}{
-		{name: "empty defaults to sqlite compatibility", ref: "", want: storeopen.BackendSQLite},
-		{name: "plain path is sqlite compatibility", ref: filepath.Join("runtime", "store.sqlite"), want: storeopen.BackendSQLite},
 		{name: "sqlite dsn", ref: "sqlite:///tmp/store.sqlite", want: storeopen.BackendSQLite},
 		{name: "file dsn", ref: "file:/tmp/store.sqlite", want: storeopen.BackendSQLite},
 		{name: "postgres dsn", ref: "postgres://user:pass@localhost:5432/otsandbox", want: storeopen.BackendPostgres},
@@ -32,6 +30,17 @@ func TestBackendFromReferenceRecognizesSupportedDatabaseFamilies(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("backend = %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBackendFromReferenceRequiresExplicitBackendScheme(t *testing.T) {
+	for _, ref := range []string{"", filepath.Join("runtime", "store.sqlite")} {
+		t.Run(ref, func(t *testing.T) {
+			_, err := storeopen.BackendFromReference(ref)
+			if err == nil {
+				t.Fatalf("expected %q to require an explicit backend scheme", ref)
 			}
 		})
 	}

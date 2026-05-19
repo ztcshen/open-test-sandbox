@@ -52,6 +52,26 @@ Risk:
   not complete until all daily CLI/API/UI paths are checked under PostgreSQL
   with SQLite disabled.
 
+## 2026-05-19 Store Opener Closure
+
+Completed evidence:
+
+- `internal/store/open` now rejects empty references and plain file paths; the
+  daily opener requires an explicit backend scheme such as `postgres://`,
+  `postgresql://`, or `sqlite://`.
+- Deprecated `--store-url PATH` compatibility is normalized at the CLI boundary
+  into an explicit `sqlite://PATH` reference, so SQLite compatibility is visible
+  before the shared opener sees it.
+- Targeted tests passed for Store reference resolution and the shared opener.
+- Full PostgreSQL release gate passed with
+  `OTSANDBOX_SMOKE_STORE_DSN=postgres://zlh@127.0.0.1:5432/otsandbox_release_pg_smoke?sslmode=disable`.
+
+Remaining risk:
+
+- CLI tests still use SQLite compatibility broadly; future slices should migrate
+  daily-path tests to named PostgreSQL Stores and keep SQLite tests scoped to
+  migration or compatibility behavior.
+
 Reference pattern:
 
 - Mature Go/open-source products such as Gitea and Grafana expose the database
