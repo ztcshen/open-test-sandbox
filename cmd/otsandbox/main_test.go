@@ -19,6 +19,7 @@ import (
 
 	"open-test-sandbox/internal/apicase"
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/profilecatalog"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/postgres"
 	"open-test-sandbox/internal/store/schema"
@@ -5253,7 +5254,7 @@ func TestServeHandlerCanBootFromPublishedStoreCatalogWithoutProfilePath(t *testi
 	}
 }
 
-func TestServeBundleLoadsPublishedProfilePathWhenAvailable(t *testing.T) {
+func TestServeBundleUsesPublishedCatalogBeforeProfilePath(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "store.sqlite")
@@ -5280,15 +5281,21 @@ func TestServeBundleLoadsPublishedProfilePathWhenAvailable(t *testing.T) {
 	if _, err := publishProfileBundleToStore(ctx, s, profileDir, storePath, false, false); err != nil {
 		t.Fatalf("publish profile: %v", err)
 	}
+	sourceBundle, err := profile.Load(profileDir)
+	if err != nil {
+		t.Fatalf("load profile: %v", err)
+	}
+	catalog := profilecatalog.FromBundle(sourceBundle, time.Now().UTC())
+	catalog.APICases[0].CasePath = "store/case-alpha.json"
+	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		t.Fatalf("replace catalog: %v", err)
+	}
 
 	bundle, err := serveBundle(ctx, s)
 	if err != nil {
 		t.Fatalf("serve bundle: %v", err)
 	}
-	if bundle.BaseDir != profileDir {
-		t.Fatalf("serve bundle base dir = %q, want %q", bundle.BaseDir, profileDir)
-	}
-	if len(bundle.APICases) != 1 || bundle.APICases[0].CasePath != "runnable/case-alpha.json" {
+	if len(bundle.APICases) != 1 || bundle.APICases[0].CasePath != "store/case-alpha.json" {
 		t.Fatalf("serve bundle api cases = %#v", bundle.APICases)
 	}
 }

@@ -5412,7 +5412,7 @@ func runTemplateRender(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, cleanup, err := loadTemplateRenderBundle(context.Background(), *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, cleanup, err := loadTemplateRenderBundle(context.Background(), *profilePath, *profileHome, *storeRef, *storeURL, *templateID)
 	if err != nil {
 		return err
 	}
@@ -5429,7 +5429,7 @@ func runTemplateRender(args []string) error {
 	return encoder.Encode(rendered)
 }
 
-func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, func(), error) {
+func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string, templateID string) (profile.Bundle, func(), error) {
 	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
 	if err != nil {
 		return profile.Bundle{}, func() {}, err
@@ -5451,7 +5451,30 @@ func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHom
 		_ = runtime.Close()
 		return profile.Bundle{}, func() {}, err
 	}
+	if templateNeedsPublishedProfile(bundle, templateID) {
+		if catalogIndex, err := runtime.GetProfileCatalogIndex(ctx); err == nil && strings.TrimSpace(catalogIndex.ProfileID) != "" {
+			if profileIndex, err := runtime.GetProfileIndex(ctx, catalogIndex.ProfileID); err == nil && strings.TrimSpace(profileIndex.BundlePath) != "" {
+				if pathBundle, err := profile.Load(profileIndex.BundlePath); err == nil {
+					bundle = pathBundle
+				}
+			}
+		}
+	}
 	return bundle, func() { _ = runtime.Close() }, nil
+}
+
+func templateNeedsPublishedProfile(bundle profile.Bundle, templateID string) bool {
+	templateID = strings.TrimSpace(templateID)
+	if templateID == "" {
+		return false
+	}
+	for _, item := range bundle.RequestTemplates {
+		if item.ID != templateID {
+			continue
+		}
+		return strings.TrimSpace(item.Method) == "" || strings.TrimSpace(item.Path) == ""
+	}
+	return false
 }
 
 func runEvidence(ctx context.Context, args []string) error {
@@ -8214,19 +8237,19 @@ func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
 
 func serveBundle(ctx context.Context, runtime store.Store) (profile.Bundle, error) {
 	if runtime != nil {
-		if catalogIndex, err := runtime.GetProfileCatalogIndex(ctx); err == nil && strings.TrimSpace(catalogIndex.ProfileID) != "" {
-			if profileIndex, err := runtime.GetProfileIndex(ctx, catalogIndex.ProfileID); err == nil && strings.TrimSpace(profileIndex.BundlePath) != "" {
-				if bundle, err := profile.Load(profileIndex.BundlePath); err == nil {
-					return bundle, nil
-				}
-			}
-		}
 		catalog, err := runtime.GetProfileCatalog(ctx)
 		if err == nil && catalog.ProfileID != "" {
 			return profilecatalog.ToBundle(catalog), nil
 		}
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return profile.Bundle{}, err
+		}
+		if catalogIndex, err := runtime.GetProfileCatalogIndex(ctx); err == nil && strings.TrimSpace(catalogIndex.ProfileID) != "" {
+			if profileIndex, err := runtime.GetProfileIndex(ctx, catalogIndex.ProfileID); err == nil && strings.TrimSpace(profileIndex.BundlePath) != "" {
+				if bundle, err := profile.Load(profileIndex.BundlePath); err == nil {
+					return bundle, nil
+				}
+			}
 		}
 	}
 	return profile.EmptyBundle(), nil
