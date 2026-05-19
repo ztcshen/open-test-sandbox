@@ -72,11 +72,11 @@ Go 测试、demo、React build、active PostgreSQL CLI smoke 和 PostgreSQL-only
 
 默认 smoke 使用确定性的 synthetic SkyWalking GraphQL provider，只用于可重复
 验证本地 wiring，不作为真实 SkyWalking 发布证据。要验证真实拓扑路径，请额外
-设置 `OTS_TRACE_GRAPHQL_URL`；如需指定 10 步工作流的真实 trace id，可设置
-`OTS_SMOKE_TRACE_IDS='{"step-01":"trace-real-01"}'`。如果最终验收必须拒绝
-synthetic topology evidence，还要设置 `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`。
-未配置 SkyWalking endpoint 时，拓扑采集必须明确显示 unavailable、failed 或
-skipped，不能生成假拓扑。
+设置 `OTS_TRACE_GRAPHQL_URL` 和 `OTS_SMOKE_TRACE_IDS`，让 10 步 smoke 使用真实
+trace id。如果最终验收必须拒绝 synthetic topology evidence，还要设置
+`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`；该模式要求 `OTS_SMOKE_TRACE_IDS` 覆盖
+`step-01` 到 `step-10` 的每一步。未配置 SkyWalking endpoint 时，拓扑采集必须
+明确显示 unavailable、failed 或 skipped，不能生成假拓扑。
 
 ## 架构
 

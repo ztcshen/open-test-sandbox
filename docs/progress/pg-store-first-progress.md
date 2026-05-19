@@ -1128,3 +1128,22 @@ Incomplete work:
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real `OTS_TRACE_GRAPHQL_URL`, and
   real trace ids for all 10 workflow steps against an actual SkyWalking
   endpoint.
+
+## 2026-05-20 Live Trace ID Documentation Guard
+
+Estimated PostgreSQL mainline progress: 99.97%.
+
+Completed evidence:
+
+- README, README.zh-CN, Quick Start, and the release checklist now state that
+  final live SkyWalking sign-off needs real trace id mappings for every
+  workflow step from `step-01` through `step-10`.
+- The Store-first contract guardrail now rejects release-check drift that drops
+  the "all 10 workflow steps" requirement from the script or release checklist.
+- This aligns the public entrypoints with the stricter release preflight and
+  removes the older partial `step-01` example from the live sign-off path.
+
+Incomplete work:
+
+- Final proof still requires a real PostgreSQL release-check and live
+  SkyWalking run with all 10 trace ids supplied by the external environment.

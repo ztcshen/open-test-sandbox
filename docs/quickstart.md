@@ -28,8 +28,9 @@ source-domain guardrail, the React build, active PostgreSQL CLI smoke, and a
 PostgreSQL-only headless browser smoke test against a generated generic import
 bundle. For final live topology sign-off, add
 `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
-`OTS_SMOKE_TRACE_IDS` so release-check fails instead of using the synthetic
-SkyWalking provider.
+`OTS_SMOKE_TRACE_IDS` with trace id mappings for every workflow step from
+`step-01` through `step-10` so release-check fails instead of using the
+synthetic SkyWalking provider or a partial trace-id set.
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active PostgreSQL Store
 or `OTSANDBOX_DEMO_STORE=postgres://...`, and prints the Evidence bundle path.

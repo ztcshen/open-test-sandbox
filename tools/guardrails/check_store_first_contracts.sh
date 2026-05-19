@@ -84,6 +84,11 @@ if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS' to
   violations=1
 fi
 
+if ! rg -q 'all 10 workflow steps' tools/release-check.sh docs/release-checklist.md; then
+  echo "release-check real SkyWalking mode must require trace ids for all 10 workflow steps." >&2
+  violations=1
+fi
+
 generic_resolver_count=$(rg -n 'resolveStoreReference\(' cmd/otsandbox/main.go | wc -l | tr -d ' ')
 if [[ "$generic_resolver_count" != "4" ]]; then
   echo "Daily command code must not add generic Store resolver calls; use resolveRequiredDailyStoreReference unless the path is Store maintenance, offline review, or migration." >&2

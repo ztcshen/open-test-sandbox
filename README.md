@@ -85,12 +85,12 @@ headless browser smoke tests.
 By default, smoke tests use a deterministic synthetic SkyWalking GraphQL
 provider so local wiring checks are repeatable. This is not release evidence
 for a real SkyWalking deployment. To validate the real topology path, set
-`OTS_TRACE_GRAPHQL_URL` and, when needed,
-`OTS_SMOKE_TRACE_IDS='{"step-01":"trace-real-01"}'` so the 10-step smoke uses
-real trace ids. For final sign-off that must fail instead of using synthetic
-topology evidence, also set `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`. When no
-SkyWalking endpoint is configured, topology collection must report unavailable,
-failed, or skipped status instead of inventing a topology.
+`OTS_TRACE_GRAPHQL_URL` and `OTS_SMOKE_TRACE_IDS` so the 10-step smoke uses real
+trace ids. For final sign-off that must fail instead of using synthetic
+topology evidence, also set `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`; in that mode
+`OTS_SMOKE_TRACE_IDS` must map every workflow step from `step-01` through
+`step-10`. When no SkyWalking endpoint is configured, topology collection must
+report unavailable, failed, or skipped status instead of inventing a topology.
 
 ## Architecture
 

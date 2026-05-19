@@ -9,21 +9,22 @@ outside a trusted team.
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
 ```
 
-For real SkyWalking validation, add `OTS_TRACE_GRAPHQL_URL` and optional
+For real SkyWalking validation, add `OTS_TRACE_GRAPHQL_URL` and
 `OTS_SMOKE_TRACE_IDS` step-to-trace mappings. Without that URL the smoke uses a
 deterministic synthetic SkyWalking GraphQL provider, which verifies Store,
 Evidence, topology persistence, and UI wiring but is not proof of a live
 SkyWalking deployment. A release sign-off that claims real topology coverage
-must show the configured SkyWalking endpoint, the trace ids used by the 10-step
-workflow, and persisted topology rows with provider, trace id, status, nodes,
-and edges. If the endpoint is absent or a trace cannot be queried, the expected
+must show the configured SkyWalking endpoint, trace ids for all 10 workflow
+steps, and persisted topology rows with provider, trace id, status, nodes, and
+edges. If the endpoint is absent or a trace cannot be queried, the expected
 result is unavailable, failed, or skipped topology collection, not a generated
 topology.
 
 To make release-check fail unless it is using live topology evidence, set
 `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` together with `OTS_TRACE_GRAPHQL_URL` and
-`OTS_SMOKE_TRACE_IDS`. This mode rejects synthetic smoke before the expensive
-gate starts.
+`OTS_SMOKE_TRACE_IDS`. This mode requires trace id mappings for every workflow
+step from `step-01` through `step-10` and rejects synthetic or partial smoke
+before the expensive gate starts.
 
 The gate verifies:
 
