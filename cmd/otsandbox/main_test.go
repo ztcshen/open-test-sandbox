@@ -217,6 +217,21 @@ func TestDailyStoreReferenceRejectsNamedSQLiteConfig(t *testing.T) {
 	}
 }
 
+func TestDailyStoreReferenceRejectsDirectSQLiteStoreFlag(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	for _, storeRef := range []string{"sqlite://" + storePath, "file://" + storePath} {
+		_, err := resolveRequiredDailyStoreReference(storeRef, "")
+		if err == nil {
+			t.Fatalf("daily Store reference should reject direct SQLite store flag %q", storeRef)
+		}
+		for _, want := range []string{"--store", "daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("daily SQLite store flag error missing %q: %v", want, err)
+			}
+		}
+	}
+}
+
 func TestEnvironmentCommandsRejectActiveSQLiteStore(t *testing.T) {
 	tests := []struct {
 		name string

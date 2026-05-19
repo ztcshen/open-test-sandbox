@@ -1165,3 +1165,23 @@ Incomplete work:
 
 - This is still a release preflight hardening slice. The remaining external
   proof is the real PostgreSQL plus live SkyWalking 10-step run.
+
+## 2026-05-20 Direct SQLite Store Flag Rejection
+
+Estimated PostgreSQL mainline progress: 99.985%.
+
+Completed evidence:
+
+- Daily Store resolution now rejects direct `--store sqlite://...` and
+  `--store file://...` inputs, matching the existing rejection for active,
+  named, and deprecated `--store-url` SQLite paths.
+- The rejection message points users back to PostgreSQL Store setup and keeps
+  SQLite scoped to explicit migration/compatibility commands.
+- Added targeted resolver coverage so direct SQLite DSNs cannot re-enter the
+  daily command path.
+
+Incomplete work:
+
+- Store maintenance and migration/compatibility paths still intentionally allow
+  SQLite. Final external sign-off remains the real PostgreSQL plus live
+  SkyWalking 10-step run.

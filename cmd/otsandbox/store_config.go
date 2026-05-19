@@ -296,14 +296,14 @@ func resolveRequiredDailyStoreReference(storeRef string, legacyStoreURL string) 
 		return resolved, nil
 	}
 	configName, checkConfiguredStore := configuredStoreName(storeRef, legacyStoreURL)
-	if !checkConfiguredStore {
-		return resolved, nil
-	}
 	backend, err := storeBackendFromURL(resolved)
 	if err != nil {
 		return "", err
 	}
 	if backend != "postgres" {
+		if !checkConfiguredStore {
+			configName = "--store"
+		}
 		return "", dailyStoreRequiresPostgresError(configName, "SQLite")
 	}
 	return resolved, nil
