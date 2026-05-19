@@ -3762,7 +3762,11 @@ func runInterfaceNodeCaseReport(ctx context.Context, args []string) error {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
 
-	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -4711,7 +4715,7 @@ func runWorkflowReport(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*workflowID) == "" {
 		return errors.New("--workflow is required")
 	}
-	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -7129,7 +7133,11 @@ func runCaseSuiteReport(ctx context.Context, args []string) error {
 	if *timeoutSeconds <= 0 {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
-	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}

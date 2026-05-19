@@ -3574,6 +3574,53 @@ func TestDailyReportExecutionsUseSelectedStoreWithoutSQLiteDefault(t *testing.T)
 	}
 }
 
+func TestInterfaceNodeCaseReportRequiresStoreBeforeProfileLoad(t *testing.T) {
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	out := runCLIFailsWithEnv(t, env,
+		"interface-node", "case", "report",
+		"--node", "node.alpha",
+		"--profile", filepath.Join(t.TempDir(), "missing-profile"),
+		"--json",
+	)
+	if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
+		t.Fatalf("interface-node case report output = %q", out)
+	}
+	if strings.Contains(out, "missing-profile") {
+		t.Fatalf("interface-node case report loaded profile before Store binding: %q", out)
+	}
+}
+
+func TestWorkflowReportRequiresStoreBeforeProfileLoad(t *testing.T) {
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	out := runCLIFailsWithEnv(t, env,
+		"workflow", "report",
+		"--workflow", "workflow.alpha",
+		"--profile", filepath.Join(t.TempDir(), "missing-profile"),
+		"--json",
+	)
+	if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
+		t.Fatalf("workflow report output = %q", out)
+	}
+	if strings.Contains(out, "missing-profile") {
+		t.Fatalf("workflow report loaded profile before Store binding: %q", out)
+	}
+}
+
+func TestCaseSuiteReportRequiresStoreBeforeProfileLoad(t *testing.T) {
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	out := runCLIFailsWithEnv(t, env,
+		"case", "suite", "report",
+		"--profile", filepath.Join(t.TempDir(), "missing-profile"),
+		"--json",
+	)
+	if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
+		t.Fatalf("case suite report output = %q", out)
+	}
+	if strings.Contains(out, "missing-profile") {
+		t.Fatalf("case suite report loaded profile before Store binding: %q", out)
+	}
+}
+
 func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
