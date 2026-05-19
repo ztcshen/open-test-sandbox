@@ -1559,3 +1559,26 @@ Incomplete work:
 
 - Final completion still requires the external PostgreSQL release gate plus
   live SkyWalking 10-step validation against a real endpoint.
+
+## 2026-05-20 Pause Checkpoint After Workflow Audit Migration
+
+Estimated PostgreSQL mainline progress: 99.9986%.
+
+Completed evidence:
+
+- Current pause checkpoint includes the latest local commits through
+  `a43f3d2 Migrate workflow audit tests to named PostgreSQL`.
+- The just-finished slice migrated workflow audit JSON and text summary tests
+  to active named PostgreSQL Store coverage behind `OTSANDBOX_TEST_PG_DSN`.
+- The current branch is `test`, the worktree is clean, and the local branch is
+  ahead of `origin/test` by 70 commits.
+- Light validation for the final slice passed:
+  `go test ./cmd/otsandbox -run 'TestWorkflowAuditCommand(EmitsJSONWithScopedStoreState|PrintsTextSummary)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- Stop point per user request. Do not start another slice until resumed.
+- Final completion still requires the external PostgreSQL release gate plus
+  live SkyWalking 10-step validation against a real endpoint and real trace ids.
