@@ -5569,19 +5569,22 @@ func TestCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T) {
 
 func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 	ctx := context.Background()
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-stability-pg")
 	profileDir := writeCaseSuiteCoverageProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	base := mustParseTime(t, "2026-05-16T01:00:00Z")
-	recordCaseRunForCoverage(t, ctx, s, "run.variant.1", "case.variant", store.StatusPassed, base)
-	recordCaseRunForCoverage(t, ctx, s, "run.variant.2", "case.variant", store.StatusFailed, base.Add(time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, "run.variant.3", "case.variant", store.StatusPassed, base.Add(2*time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, "run.default.1", "case.default", store.StatusPassed, base.Add(3*time.Minute))
+	base := time.Now().UTC()
+	variantRun1ID := uniqueTestID(t, "run.variant.1")
+	variantRun2ID := uniqueTestID(t, "run.variant.2")
+	variantRun3ID := uniqueTestID(t, "run.variant.3")
+	recordCaseRunForCoverage(t, ctx, s, variantRun1ID, "case.variant", store.StatusPassed, base.Add(-3*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, variantRun2ID, "case.variant", store.StatusFailed, base.Add(-2*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, variantRun3ID, "case.variant", store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.1"), "case.default", store.StatusPassed, base)
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
@@ -5589,7 +5592,6 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "stability",
 		"--profile", profileDir,
-		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--limit", "3",
@@ -5637,11 +5639,11 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 			}
 		}{item.LatestStatus, item.Transitions, item.Unstable, item.Recent}
 	}
-	if !byCase["case.variant"].Unstable || byCase["case.variant"].Transitions != 2 || byCase["case.variant"].LatestStatus != store.StatusPassed || byCase["case.variant"].Recent[0].RunID != "run.variant.3" {
+	if !byCase["case.variant"].Unstable || byCase["case.variant"].Transitions != 2 || byCase["case.variant"].LatestStatus != store.StatusPassed || byCase["case.variant"].Recent[0].RunID != variantRun3ID {
 		t.Fatalf("variant stability = %#v", byCase["case.variant"])
 	}
 
-	textOut := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression", "--limit", "3")
+	textOut := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--tag", "regression", "--limit", "3")
 	for _, want := range []string{"Case Suite Stability", "Unstable: 1", "case.variant"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("stability text missing %q:\n%s", want, textOut)
