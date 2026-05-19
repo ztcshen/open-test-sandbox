@@ -82,6 +82,12 @@ checks, generated-state checks, source-domain guardrails, Go tests, the demo,
 the React build, active PostgreSQL CLI smoke tests, and PostgreSQL-only
 headless browser smoke tests.
 
+By default, smoke tests use a deterministic synthetic SkyWalking GraphQL
+provider so local verification is repeatable. To validate against a real
+SkyWalking endpoint, also set `OTS_TRACE_GRAPHQL_URL` and, when needed,
+`OTS_SMOKE_TRACE_IDS='{"step-01":"trace-real-01"}'` so the 10-step smoke uses
+real trace ids.
+
 ## Architecture
 
 ```text

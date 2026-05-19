@@ -18,6 +18,12 @@ if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
   exit 1
 fi
 
+step "checking SkyWalking smoke provider"
+if [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
+  echo "OTS_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
+  echo "Set OTS_TRACE_GRAPHQL_URL and optional OTS_SMOKE_TRACE_IDS for real SkyWalking validation." >&2
+fi
+
 step "checking generated state is not tracked"
 if [[ -d team-configs ]]; then
   echo "root team-configs directory is not allowed in the core repository" >&2

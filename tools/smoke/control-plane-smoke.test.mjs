@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { prepareSmokeTraceProvider, smokeTraceID, writeSmokeProfile } from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -96,6 +96,18 @@ describe("control-plane smoke Store selection", () => {
     });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /cannot be combined/);
+  });
+
+  it("uses a configured real SkyWalking GraphQL URL without starting the synthetic provider", async () => {
+    const provider = await prepareSmokeTraceProvider({ OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql" });
+    assert.equal(provider.graphQLURL, "http://skywalking.example/graphql");
+    assert.equal(provider.mode, "real");
+    assert.equal(provider.server, null);
+  });
+
+  it("accepts per-step real trace id overrides for external SkyWalking smoke", () => {
+    assert.equal(smokeTraceID("step-01", "trace.smoke.01", { OTS_SMOKE_TRACE_IDS: '{"step-01":"trace.real.01"}' }), "trace.real.01");
+    assert.equal(smokeTraceID("step-02", "trace.smoke.02", { OTS_SMOKE_TRACE_IDS: "step-02=trace.real.02" }), "trace.real.02");
   });
 });
 

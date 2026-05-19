@@ -8,16 +8,36 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+
+function smokeTraceOverrides(env = process.env) {
+  const raw = String(env.OTS_SMOKE_TRACE_IDS || "").trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, String(value)]));
+    }
+  } catch {
+    // Accept comma-separated step=trace mappings when JSON is inconvenient in shell.
+  }
+  return Object.fromEntries(raw.split(",").map((item) => item.split("=").map((part) => part.trim())).filter(([key, value]) => key && value));
+}
+
+export function smokeTraceID(stepID, defaultTraceID, env = process.env) {
+  return smokeTraceOverrides(env)[stepID] || defaultTraceID;
+}
+
 const coreSmokeSteps = Array.from({ length: 10 }, (_, index) => {
   const number = String(index + 1).padStart(2, "0");
+  const id = `step-${number}`;
   return {
-    id: `step-${number}`,
+    id,
     caseID: `case.step-${number}`,
     nodeID: `node.step-${number}`,
     serviceID: `service.step-${number}`,
     templateID: `template.step-${number}`,
     path: `/v1/items/step-${number}`,
-    traceID: `trace.smoke.${number}`,
+    traceID: smokeTraceID(id, `trace.smoke.${number}`),
   };
 });
 
@@ -163,6 +183,16 @@ async function startSmokeTraceProvider(port) {
     server.listen(port, "127.0.0.1", resolve);
   });
   return server;
+}
+
+export async function prepareSmokeTraceProvider(env = process.env) {
+  const configuredURL = String(env.OTS_TRACE_GRAPHQL_URL || "").trim();
+  if (configuredURL) {
+    return { graphQLURL: configuredURL, mode: "real", server: null };
+  }
+  const port = await freePort();
+  const server = await startSmokeTraceProvider(port);
+  return { graphQLURL: `http://127.0.0.1:${port}`, mode: "synthetic", server };
 }
 
 async function closeHTTPServer(server) {
@@ -665,8 +695,7 @@ async function main() {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "otsandbox-smoke-"));
   const targetPort = await freePort();
   const targetServer = await startSmokeTargetServer(targetPort);
-  const traceProviderPort = await freePort();
-  const traceProviderServer = await startSmokeTraceProvider(traceProviderPort);
+  const traceProvider = await prepareSmokeTraceProvider();
   const profileDir = await writeSmokeProfile(tempDir, targetPort);
   const profileHome = path.join(tempDir, "profile-home");
   const { storeRef, serverEnv } = await prepareSmokeStoreReference(tempDir);
@@ -687,7 +716,7 @@ async function main() {
     "--port",
     String(port),
     "--trace-graphql-url",
-    `http://127.0.0.1:${traceProviderPort}`,
+    traceProvider.graphQLURL,
   ], {
     cwd: rootDir,
     env: serverEnv,
@@ -754,9 +783,9 @@ async function main() {
     } finally {
       await browser.close();
     }
-    console.log(`control-plane smoke passed on ${baseURL}`);
+    console.log(`control-plane smoke passed on ${baseURL} with ${traceProvider.mode} SkyWalking GraphQL provider`);
   } finally {
-    await closeHTTPServer(traceProviderServer);
+    await closeHTTPServer(traceProvider.server);
     await closeHTTPServer(targetServer);
     await stopServer(server);
     await rm(tempDir, { recursive: true, force: true });

@@ -6,16 +6,17 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertSkyWalkingTopologyEvidence, assertWorkflowCaseEvidence, writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { assertSkyWalkingTopologyEvidence, assertWorkflowCaseEvidence, prepareSmokeTraceProvider, smokeTraceID, writeSmokeProfile } from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const cliSmokeSteps = Array.from({ length: 10 }, (_, index) => {
   const number = String(index + 1).padStart(2, "0");
+  const id = `step-${number}`;
   return {
-    id: `step-${number}`,
+    id,
     caseID: `case.step-${number}`,
     path: `/v1/items/step-${number}`,
-    traceID: `trace.smoke.${number}`,
+    traceID: smokeTraceID(id, `trace.smoke.${number}`),
   };
 });
 
@@ -55,59 +56,6 @@ async function startTargetServer(port) {
       "request-id": `cli-smoke-request-${step.id}`,
     });
     response.end(JSON.stringify({ ok: true, id: step.id }));
-  });
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", resolve);
-  });
-  return server;
-}
-
-async function startTraceProvider(port) {
-  const server = createServer(async (request, response) => {
-    let body = "";
-    for await (const chunk of request) body += chunk;
-    let payload = {};
-    try {
-      payload = JSON.parse(body || "{}");
-    } catch {
-      response.writeHead(400, { "content-type": "application/json" });
-      response.end(JSON.stringify({ errors: [{ message: "invalid json" }] }));
-      return;
-    }
-    const traceID = payload.variables?.traceId || "trace.smoke.01";
-    const step = cliSmokeSteps.find((item) => item.traceID === traceID) || cliSmokeSteps[0];
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({
-      data: {
-        queryTrace: {
-          spans: [
-            {
-              traceId: step.traceID,
-              segmentId: "segment.entry",
-              spanId: 0,
-              parentSpanId: -1,
-              refs: [],
-              serviceCode: "service.alpha",
-              endpointName: step.path,
-              type: "Entry",
-              component: "Tomcat",
-            },
-            {
-              traceId: step.traceID,
-              segmentId: "segment.worker",
-              spanId: 0,
-              parentSpanId: -1,
-              refs: [{ traceId: step.traceID, parentSegmentId: "segment.entry", parentSpanId: 0, type: "CrossProcess" }],
-              serviceCode: "service.worker",
-              endpointName: `GET:${step.path}`,
-              type: "Entry",
-              component: "Server",
-            },
-          ],
-        },
-      },
-    }));
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -163,17 +111,16 @@ async function main() {
   const dsn = requiredPGStoreDSN();
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-cli-pg-smoke-"));
   const targetPort = await freePort();
-  const tracePort = await freePort();
   let targetServer;
   let traceProvider;
   try {
     targetServer = await startTargetServer(targetPort);
-    traceProvider = await startTraceProvider(tracePort);
+    traceProvider = await prepareSmokeTraceProvider();
     const profileDir = await writeSmokeProfile(tempDir, targetPort);
     const env = {
       OTSANDBOX_CONFIG_HOME: path.join(tempDir, "config"),
       OTSANDBOX_DISABLE_SQLITE_STORE: "1",
-      OTS_TRACE_GRAPHQL_URL: `http://127.0.0.1:${tracePort}/graphql`,
+      OTS_TRACE_GRAPHQL_URL: traceProvider.graphQLURL,
     };
     await mkdir(env.OTSANDBOX_CONFIG_HOME, { recursive: true });
 
@@ -251,7 +198,7 @@ async function main() {
     }
   } finally {
     await closeServer(targetServer);
-    await closeServer(traceProvider);
+    await closeServer(traceProvider?.server);
     await rm(tempDir, { recursive: true, force: true });
   }
 }

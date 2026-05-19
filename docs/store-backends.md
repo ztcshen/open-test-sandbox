@@ -131,6 +131,11 @@ harness configures a temporary named Store, selects it as active, upgrades the
 schema, and serves the workbench through `--store smoke-postgres`. The smoke
 must still complete through that PostgreSQL Store.
 
+Smoke topology collection uses a deterministic synthetic SkyWalking GraphQL
+provider unless `OTS_TRACE_GRAPHQL_URL` is set. Set that URL, plus optional
+`OTS_SMOKE_TRACE_IDS` step-to-trace mappings, when the gate must prove a real
+SkyWalking endpoint rather than local smoke wiring.
+
 SQLite smoke or demo execution is available only for explicit compatibility
 checks with `OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE=1` or
 `OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1`. Do not combine those compatibility

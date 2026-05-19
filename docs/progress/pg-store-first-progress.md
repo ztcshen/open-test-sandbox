@@ -432,3 +432,32 @@ Incomplete work:
 - The main remaining PG-line work is broad named PostgreSQL daily-path test
   migration and env-gated real SkyWalking validation. Full release-check is
   still deferred by user direction.
+
+## 2026-05-19 Real SkyWalking Smoke Hook
+
+Estimated PostgreSQL mainline progress: 95%.
+
+Completed evidence:
+
+- Browser and CLI PostgreSQL smoke now share one trace provider selector:
+  `OTS_TRACE_GRAPHQL_URL` uses an external real SkyWalking GraphQL endpoint;
+  otherwise the smoke starts the deterministic synthetic provider.
+- The 10-step smoke supports per-step real trace ids through
+  `OTS_SMOKE_TRACE_IDS`, either as JSON such as
+  `{"step-01":"trace-real-01"}` or comma-separated `step-01=trace-real-01`
+  mappings.
+- Public docs and release checklist now state the boundary clearly: default
+  smoke proves PostgreSQL Store wiring, Evidence indexing, topology persistence,
+  and UI behavior with a synthetic provider; real SkyWalking proof requires
+  `OTS_TRACE_GRAPHQL_URL`.
+- `tools/release-check.sh` now prints a SkyWalking provider notice when the
+  real GraphQL URL is absent, without blocking the lightweight local release
+  gate.
+
+Incomplete work:
+
+- Real SkyWalking validation still requires a live endpoint and trace ids from
+  the target environment. This slice adds the hook and documentation, but does
+  not execute the external endpoint validation.
+- Named PostgreSQL daily-path test migration remains broad and incomplete
+  beyond the current env-gated discovery coverage.

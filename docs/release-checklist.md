@@ -9,6 +9,12 @@ outside a trusted team.
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
 ```
 
+For real SkyWalking validation, add `OTS_TRACE_GRAPHQL_URL` and optional
+`OTS_SMOKE_TRACE_IDS` step-to-trace mappings. Without that URL the smoke uses a
+deterministic synthetic SkyWalking GraphQL provider, which verifies Store,
+Evidence, topology persistence, and UI wiring but is not proof of a live
+SkyWalking deployment.
+
 The gate verifies:
 
 - no root `import bundles/` directory exists;
