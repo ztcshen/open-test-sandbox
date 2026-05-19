@@ -6031,6 +6031,7 @@ func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 }
 
 func TestCaseSuiteImpactReportRunsImpactedCases(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-impact-report-pg")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/lookup" || r.URL.Query().Get("mode") != "ok" {
 			w.WriteHeader(http.StatusNotFound)
@@ -6041,14 +6042,12 @@ func TestCaseSuiteImpactReportRunsImpactedCases(t *testing.T) {
 	}))
 	defer server.Close()
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
 	outputDir := filepath.Join(t.TempDir(), "impact-report")
 	out := runCLI(t,
 		"case", "suite", "impact-report",
 		"--profile", profileDir,
-		"--store", "sqlite://"+storePath,
 		"--signal", "/lookup",
 		"--tag", "smoke",
 		"--status", "active",
