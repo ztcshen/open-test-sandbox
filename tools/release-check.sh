@@ -28,6 +28,16 @@ if [[ "${OTSANDBOX_REQUIRE_REAL_SKYWALKING:-}" == "1" ]]; then
     echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for the 10-step workflow." >&2
     exit 1
   fi
+  missing_trace_steps=()
+  for step_id in step-01 step-02 step-03 step-04 step-05 step-06 step-07 step-08 step-09 step-10; do
+    if [[ "${OTS_SMOKE_TRACE_IDS}" != *"${step_id}"* ]]; then
+      missing_trace_steps+=("${step_id}")
+    fi
+  done
+  if [[ ${#missing_trace_steps[@]} -gt 0 ]]; then
+    echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for all 10 workflow steps; missing: ${missing_trace_steps[*]}." >&2
+    exit 1
+  fi
   echo "Real SkyWalking validation required; using configured GraphQL endpoint and smoke trace ids." >&2
 elif [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
   echo "OTS_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2

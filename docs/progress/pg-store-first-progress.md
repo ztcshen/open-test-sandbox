@@ -1107,3 +1107,24 @@ Incomplete work:
 - The checklist is contract documentation. The final missing evidence remains
   executing the PostgreSQL release gate plus live SkyWalking 10-step validation
   against an actual endpoint.
+
+## 2026-05-20 Ten-Step Live Trace ID Preflight
+
+Estimated PostgreSQL mainline progress: 99.96%.
+
+Completed evidence:
+
+- Release-check live SkyWalking mode now requires `OTS_SMOKE_TRACE_IDS` to
+  contain trace id mappings for every workflow step from `step-01` through
+  `step-10`, instead of accepting a partial trace-id set.
+- The smoke test suite now covers missing GraphQL URL, missing trace ids, and
+  partial trace-id mappings before release-check reaches expensive gates.
+- This keeps synthetic local smoke separate from the final real-topology
+  sign-off and prevents a partial 10-step run from being treated as complete.
+
+Incomplete work:
+
+- Final proof still requires running PostgreSQL release-check with
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real `OTS_TRACE_GRAPHQL_URL`, and
+  real trace ids for all 10 workflow steps against an actual SkyWalking
+  endpoint.

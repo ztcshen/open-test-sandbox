@@ -47,3 +47,16 @@ test("release-check real SkyWalking mode requires 10-step trace ids before expen
   assert.match(result.stderr, /requires OTS_SMOKE_TRACE_IDS/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
+
+test("release-check real SkyWalking mode requires trace ids for every workflow step", () => {
+  const result = runReleaseCheck(releaseCheckEnv({
+    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    OTS_SMOKE_TRACE_IDS: "step-01=trace.real.01",
+  }));
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /all 10 workflow steps/);
+  assert.match(result.stderr, /step-02/);
+  assert.doesNotMatch(result.stdout, /running Go tests/);
+});
