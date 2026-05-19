@@ -216,3 +216,37 @@ Incomplete work:
 - Case discover and case suite commands still need Store resolver audits.
 - Workflow discover/plan/audit/report, baseline, template, executor, trace
   topology collection, and interface-node query families remain to be checked.
+
+## 2026-05-19 Independent Progress Recheck
+
+Estimated PostgreSQL mainline progress: 84%.
+
+Completed evidence:
+
+- Independent subagent review confirmed the branch is `test`, the worktree is
+  clean, and the local branch is ahead of `origin/test` by five commits.
+- The latest local commits are the daily Store gates for active/named SQLite
+  rejection across selected daily command families: environment catalog,
+  Evidence reads, workflow run reads, and case reads.
+- The exact-word guardrail scan has no matches in the current worktree.
+- PostgreSQL release and smoke wiring remains present: release-check requires a
+  PostgreSQL smoke DSN, and the active Store CLI plus browser smoke paths run
+  with SQLite disabled.
+
+Incomplete work:
+
+- Several daily or near-daily command families still use generic Store
+  resolution and need explicit resolver classification: sandbox interface/start,
+  executor plan, trace topology collect, profile catalog/verify/import/config
+  publish, interface-node discover/coverage/report, workflow
+  discover/plan/audit/report, baseline get/set, template render, case discover,
+  case suite, case incomplete-batches, and serve.
+- Current HEAD after the latest five local commits has targeted test evidence,
+  but not a fresh full release-check record. Re-run an isolated PostgreSQL
+  release-check before treating this state as release-ready.
+
+Risk:
+
+- The headline progress remains 84% because the PostgreSQL-first backbone is in
+  place and many daily read paths are now gated, but breadth and full-release
+  proof are still incomplete.
