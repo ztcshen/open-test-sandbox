@@ -78,7 +78,9 @@ workflow passed and the Store contains indexed Evidence plus real SkyWalking
 topology for that run. `environment verify` records the run status and
 completeness flags; `environment publish-verified` checks the selected Store for
 the passed run, indexed Evidence, and complete SkyWalking topology before
-promotion.
+promotion. The `--topology-complete` flag is only a recorded completeness
+signal; collect real topology separately through a configured SkyWalking
+endpoint before publishing a verified environment.
 
 ## Create and Install a Import Bundle
 

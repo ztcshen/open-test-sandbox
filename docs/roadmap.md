@@ -19,13 +19,16 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
   bootstrap an environment, verify it, publish it to verified discovery, register
   a local code service by repository path and branch, register interfaces,
   register workflows, add or edit API cases, run cases or workflows, and inspect
-  reports, Evidence, and real SkyWalking topology.
+  reports, Evidence, and stored topology, with real SkyWalking validation when
+  a live endpoint is configured.
 - Keep the HTTP API as the local control-plane surface for the workbench,
   automation, and agents. Do not require every offline authoring command to be
   an API; require API parity for daily testing operations.
 - Keep the headless smoke focused on the core workflow path: enter from the
   workbench, run the workflow button flow, confirm green steps, inspect step
-  Evidence, and require real SkyWalking topology instead of fake diagrams.
+  Evidence, and require provider-labelled topology evidence. Real SkyWalking
+  proof is gated by a live endpoint; otherwise the topology path must report
+  unavailable, failed, or skipped status rather than a fake diagram.
 - Improve README, bilingual docs, and first-run experience.
 - Keep CLI and API contracts documented as they change.
 
@@ -37,12 +40,14 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 - 让日常核心流程能通过 CLI 和本地工作台完成：配置 Store，按本地仓库路径和
   分支注册代码服务，登记和发现环境目录，查看、初始化、验收环境并发布到
   verified 发现列表，登记接口，登记工作流，新增或修改 API 用例，执行用例或
-  工作流，并查看报告、Evidence 和真实 SkyWalking 拓扑。
+  工作流，并查看报告、Evidence 和已存储拓扑；配置真实 endpoint 时验证真实
+  SkyWalking 拓扑。
 - HTTP API 保留为本地 control-plane，服务工作台、自动化和 agent；离线作者工具
   不要求全部 API 化，但日常测试操作必须保持 API parity。
 - 保持 headless smoke 覆盖核心 Workflow 路径：从工作台进入，点击运行
   Workflow，确认节点绿色，查看 step Evidence，并要求真实 SkyWalking 拓扑，
-  不使用假拓扑图。
+  不使用假拓扑图。真实 SkyWalking 证明由 live endpoint 触发；未配置时拓扑
+  路径必须明确显示 unavailable、failed 或 skipped。
 - 完善 README、双语文档和首次运行体验。
 - CLI/API 契约变化时同步更新文档。
 

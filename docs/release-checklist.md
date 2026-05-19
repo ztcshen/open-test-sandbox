@@ -32,7 +32,9 @@ The gate verifies:
 - PostgreSQL-only browser smoke tests pass in a headless context;
 - the headless smoke can enter the core workflow from the workbench, click the
   workflow run button, persist the workflow run, open step Evidence, and verify
-  stored SkyWalking topology with provider, trace id, status, nodes, and edges.
+  stored topology with provider, trace id, status, nodes, and edges. This is a
+  deterministic local wiring check unless `OTS_TRACE_GRAPHQL_URL` is configured
+  for live SkyWalking validation.
 
 ## Manual Review
 

@@ -103,7 +103,9 @@ packages. The supported lifecycle is:
 The verified discovery list must not include environments that only have a
 successful registration. Verification requires a passed workflow run, indexed
 Evidence, and stored real SkyWalking topology with provider, trace id, status,
-nodes, and edges.
+nodes, and edges. This verified-environment gate is stricter than deterministic
+local smoke: local synthetic provider rows do not replace live endpoint
+validation for team-ready environments.
 
 ## SQLite Compatibility
 

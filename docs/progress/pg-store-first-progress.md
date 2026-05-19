@@ -841,3 +841,31 @@ Incomplete work:
 - This closes a contract/documentation gap. It does not replace the later live
   validation pass against a real SkyWalking endpoint.
 - Full release-check remains deferred by user direction.
+
+## 2026-05-20 Topology Documentation Boundary Sweep
+
+Estimated PostgreSQL mainline progress: 99.1%.
+
+Completed evidence:
+
+- Swept the remaining release, quickstart, roadmap, Store backend, CLI/API, and
+  release-check script wording that could make real SkyWalking topology sound
+  like the default local smoke path.
+- Roadmap now distinguishes stored topology review from real SkyWalking
+  validation with a live endpoint, in both English and Chinese.
+- Quickstart now states that `environment verify --topology-complete` is only a
+  recorded completeness signal; real topology must be collected separately
+  before publishing a verified environment.
+- Store backend and release checklist docs now distinguish verified-environment
+  real topology proof from deterministic local smoke wiring.
+- CLI/API parity now labels `evidence import` as a legacy runtime SQLite
+  migration/compatibility path into the active or named Store, not a normal
+  daily SQLite execution path.
+- `tools/release-check.sh` now prints "SkyWalking smoke provider mode" and
+  explicitly says synthetic smoke is not live topology proof.
+
+Incomplete work:
+
+- Remaining gap is no longer product contract shape; it is final execution
+  evidence: run the PG release gate and 10-step smoke against a real SkyWalking
+  endpoint with real trace ids in the human-machine validation pass.
