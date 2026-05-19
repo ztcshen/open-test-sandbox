@@ -799,8 +799,7 @@ Completed evidence:
   synthetic SkyWalking GraphQL provider is described only as a local wiring
   smoke aid, not release evidence for a real SkyWalking deployment.
 - Documented that real topology validation requires `OTS_TRACE_GRAPHQL_URL`
-  and, when needed, `OTS_SMOKE_TRACE_IDS` so the core 10-step smoke uses real
-  trace ids.
+  and `OTS_SMOKE_TRACE_IDS` so the core 10-step smoke uses real trace ids.
 - Documented that when no SkyWalking endpoint is configured, topology
   collection must report unavailable, failed, or skipped status instead of
   inventing topology.
@@ -1206,3 +1205,21 @@ Incomplete work:
 - This closes another bypass around real-topology sign-off, but completion
   still requires the external PostgreSQL release gate plus a real SkyWalking
   10-step proof run.
+
+## 2026-05-20 Live Sign-Off Text Cleanup
+
+Estimated PostgreSQL mainline progress: 99.991%.
+
+Completed evidence:
+
+- Store backend docs and Share Kit now state that final live SkyWalking
+  sign-off requires `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` plus trace id mappings
+  for every workflow step from `step-01` through `step-10`.
+- The release-check warning for synthetic smoke now points to the full live
+  validation env set instead of calling trace ids optional for the sign-off
+  path.
+
+Incomplete work:
+
+- Remaining completion evidence is still the external PostgreSQL release-check
+  and live SkyWalking 10-step run against a real endpoint.

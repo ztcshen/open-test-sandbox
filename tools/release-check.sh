@@ -52,7 +52,7 @@ NODE
   echo "Real SkyWalking validation required; using configured GraphQL endpoint and smoke trace ids." >&2
 elif [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
   echo "OTS_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
-  echo "Set OTS_TRACE_GRAPHQL_URL and optional OTS_SMOKE_TRACE_IDS for real SkyWalking validation; synthetic smoke is not live topology proof." >&2
+  echo "Set OTS_TRACE_GRAPHQL_URL, OTS_SMOKE_TRACE_IDS, and OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 for final live SkyWalking validation; synthetic smoke is not live topology proof." >&2
 fi
 
 step "checking generated state is not tracked"
