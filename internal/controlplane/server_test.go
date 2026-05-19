@@ -1060,6 +1060,58 @@ func TestServerManagesVerifiedEnvironmentCatalogFromStore(t *testing.T) {
 		t.Fatalf("verified environment = %#v", verifiedEnv)
 	}
 
+	now := time.Now().UTC()
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         "run.core-10",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.core-10",
+		Status:     store.StatusPassed,
+		StartedAt:  now.Add(-time.Second),
+		FinishedAt: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}); err != nil {
+		t.Fatalf("seed verification run: %v", err)
+	}
+	stillDenied := postJSONResponse(t, server.URL+"/api/environments/env.team.api/publish-verified", `{}`, http.StatusConflict)
+	if !strings.Contains(fmt.Sprint(stillDenied["error"]), "no indexed Evidence") {
+		t.Fatalf("publish without verification artifacts should be denied: %#v", stillDenied)
+	}
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:         "run.core-10.summary",
+		RunID:      "run.core-10",
+		Kind:       "summary",
+		URI:        "store://verification/run.core-10/summary.json",
+		MediaType:  "application/json",
+		SHA256:     "verification-summary-sha256",
+		SizeBytes:  2,
+		Summary:    `{"status":"passed"}`,
+		Category:   "verification",
+		Visibility: "internal",
+		CreatedAt:  now,
+	}); err != nil {
+		t.Fatalf("seed verification Evidence: %v", err)
+	}
+	noTopology := postJSONResponse(t, server.URL+"/api/environments/env.team.api/publish-verified", `{}`, http.StatusConflict)
+	if !strings.Contains(fmt.Sprint(noTopology["error"]), "no complete SkyWalking topology") {
+		t.Fatalf("publish without topology should be denied: %#v", noTopology)
+	}
+	if _, err := s.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            "run.core-10.topology.skywalking",
+		WorkflowRunID: "run.core-10",
+		WorkflowID:    "workflow.core-10",
+		StepID:        "step.core-10",
+		CaseID:        "case.core-10",
+		RequestID:     "request.core-10",
+		TraceID:       "trace.core-10",
+		Status:        "complete",
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","traceId":"trace.core-10","spanCount":2,"confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"observedNodes":["service.entry","service.worker"]}`,
+		TextTopology:  "service.entry -> service.worker",
+		CreatedAt:     now,
+	}); err != nil {
+		t.Fatalf("seed verification topology: %v", err)
+	}
+
 	published := postJSONResponse(t, server.URL+"/api/environments/env.team.api/publish-verified", `{}`, http.StatusOK)
 	publishedEnv := published["environment"].(map[string]any)
 	if publishedEnv["status"] != "verified" || publishedEnv["verified"] != true {

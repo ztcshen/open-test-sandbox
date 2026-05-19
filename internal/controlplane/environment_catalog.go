@@ -128,8 +128,8 @@ func handleEnvironmentPublishVerifiedAPI(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	if env.LastVerificationStatus != store.StatusPassed || !env.EvidenceComplete || !env.TopologyComplete {
-		writeJSONStatus(w, http.StatusConflict, map[string]any{"ok": false, "error": "environment is not publishable: verification must pass with complete Evidence and SkyWalking topology"})
+	if err := ValidateEnvironmentPublishable(r.Context(), runtime, env); err != nil {
+		writeJSONStatus(w, http.StatusConflict, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
 	env.Verified = true

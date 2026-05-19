@@ -67,15 +67,18 @@ publishing it to the verified discovery list:
 ```sh
 ./bin/otsandbox.sh environment register --store local-personal --id local-sample
 ./bin/otsandbox.sh environment discover --store local-personal
-./bin/otsandbox.sh environment inspect --store local-personal --environment local-sample
-./bin/otsandbox.sh environment bootstrap --store local-personal --environment local-sample
-./bin/otsandbox.sh environment verify --store local-personal --environment local-sample
-./bin/otsandbox.sh environment publish-verified --store team-verified --environment local-sample
+./bin/otsandbox.sh environment inspect --store local-personal local-sample
+./bin/otsandbox.sh environment bootstrap --store local-personal local-sample
+./bin/otsandbox.sh environment verify --store local-personal local-sample --run RUN_ID --status passed --evidence-complete --topology-complete
+./bin/otsandbox.sh environment publish-verified --store local-personal local-sample
 ```
 
 An environment can appear in verified discovery only after its verification
 workflow passed and the Store contains indexed Evidence plus real SkyWalking
-topology for that run.
+topology for that run. `environment verify` records the run status and
+completeness flags; `environment publish-verified` checks the selected Store for
+the passed run, indexed Evidence, and complete SkyWalking topology before
+promotion.
 
 ## Create and Install a Import Bundle
 

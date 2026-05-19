@@ -366,6 +366,12 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 		t.Fatalf("verified environment = %#v", verified.Environment)
 	}
 
+	missingArtifacts := runCLIFails(t, "environment", "publish-verified", "--store", storeRef, "env.team.verified")
+	if !strings.Contains(missingArtifacts, "was not found in Store") {
+		t.Fatalf("publish should require indexed verification artifacts: %q", missingArtifacts)
+	}
+	seedEnvironmentVerificationArtifacts(t, storeRef, "run.core-10")
+
 	publishOut := runCLI(t, "environment", "publish-verified", "--store", storeRef, "--json", "env.team.verified")
 	var published struct {
 		Environment struct {
@@ -412,7 +418,8 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 }
 
 func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
-	configureNamedPostgreSQLActiveStore(t, "daily-environment-pg")
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-environment-pg")
+	runID := "run.core-10." + time.Now().UTC().Format("20060102150405.000000000")
 
 	registerOut := runCLI(t, "environment", "register",
 		"--id", "env.team.pg",
@@ -465,7 +472,7 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	}
 
 	verifyOut := runCLI(t, "environment", "verify",
-		"--run", "run.core-10",
+		"--run", runID,
 		"--status", "passed",
 		"--evidence-complete",
 		"--topology-complete",
@@ -484,9 +491,15 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	if err := json.Unmarshal([]byte(verifyOut), &verified); err != nil {
 		t.Fatalf("decode verify json: %v\n%s", err, verifyOut)
 	}
-	if verified.Environment.Status != "verified-ready" || verified.Environment.LastVerificationRunID != "run.core-10" || verified.Environment.LastVerificationStatus != "passed" || !verified.Environment.EvidenceComplete || !verified.Environment.TopologyComplete {
+	if verified.Environment.Status != "verified-ready" || verified.Environment.LastVerificationRunID != runID || verified.Environment.LastVerificationStatus != "passed" || !verified.Environment.EvidenceComplete || !verified.Environment.TopologyComplete {
 		t.Fatalf("verified PostgreSQL environment = %#v", verified.Environment)
 	}
+
+	missingArtifacts := runCLIFails(t, "environment", "publish-verified", "env.team.pg")
+	if !strings.Contains(missingArtifacts, "was not found in Store") {
+		t.Fatalf("publish should require indexed PostgreSQL verification artifacts: %q", missingArtifacts)
+	}
+	seedEnvironmentVerificationArtifacts(t, storeRef, runID)
 
 	publishOut := runCLI(t, "environment", "publish-verified", "--json", "env.team.pg")
 	var published struct {
@@ -6244,7 +6257,7 @@ func runCLI(t *testing.T, args ...string) string {
 	return string(out)
 }
 
-func configureNamedPostgreSQLActiveStore(t *testing.T, name string) {
+func configureNamedPostgreSQLActiveStore(t *testing.T, name string) string {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_TEST_PG_DSN"))
 	if dsn == "" {
@@ -6254,6 +6267,60 @@ func configureNamedPostgreSQLActiveStore(t *testing.T, name string) {
 	runCLI(t, "store", "config", "set", name, "--url", dsn)
 	runCLI(t, "store", "use", name)
 	runCLI(t, "store", "upgrade")
+	return dsn
+}
+
+func seedEnvironmentVerificationArtifacts(t *testing.T, storeRef string, runID string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open verification artifact Store: %v", err)
+	}
+	defer runtime.Close()
+	now := time.Now().UTC()
+	if _, err := runtime.CreateRun(ctx, store.Run{
+		ID:         runID,
+		ProfileID:  "sample",
+		WorkflowID: "workflow.core-10",
+		Status:     store.StatusPassed,
+		StartedAt:  now.Add(-time.Second),
+		FinishedAt: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}); err != nil {
+		t.Fatalf("seed verification run: %v", err)
+	}
+	if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:         runID + ".summary",
+		RunID:      runID,
+		Kind:       "summary",
+		URI:        "store://verification/" + runID + "/summary.json",
+		MediaType:  "application/json",
+		SHA256:     "verification-summary-sha256",
+		SizeBytes:  2,
+		Summary:    `{"status":"passed"}`,
+		Category:   "verification",
+		Visibility: "internal",
+		CreatedAt:  now,
+	}); err != nil {
+		t.Fatalf("seed verification Evidence: %v", err)
+	}
+	if _, err := runtime.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            runID + ".topology.skywalking",
+		WorkflowRunID: runID,
+		WorkflowID:    "workflow.core-10",
+		StepID:        "step.core-10",
+		CaseID:        "case.core-10",
+		RequestID:     "request.core-10",
+		TraceID:       "trace.core-10",
+		Status:        "complete",
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","traceId":"trace.core-10","spanCount":2,"confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"observedNodes":["service.entry","service.worker"]}`,
+		TextTopology:  "service.entry -> service.worker",
+		CreatedAt:     now,
+	}); err != nil {
+		t.Fatalf("seed verification topology: %v", err)
+	}
 }
 
 func runCLIWithEnv(t *testing.T, env []string, args ...string) string {

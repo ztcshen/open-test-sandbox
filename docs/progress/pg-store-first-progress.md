@@ -587,3 +587,47 @@ Incomplete work:
 - Remaining 98% to final-release gaps are now mostly Evidence import/tasks,
   profile import/verify, serve/UI handler coverage, CLI/API parity, and release
   preparation rather than core daily PG command shape.
+
+## 2026-05-19 Environment Publish Verification Gate
+
+Estimated PostgreSQL mainline progress: 98%.
+
+Completed evidence:
+
+- `environment publish-verified` now performs an actual selected-Store
+  inspection before promotion instead of trusting only previously recorded
+  completeness flags.
+- CLI and API publish paths share `ValidateEnvironmentPublishable`, which
+  requires a passed recorded verification status, a non-empty verification run
+  id, a matching passed run row in Store, at least one indexed Evidence record,
+  and a complete SkyWalking topology row with provider/source identity, trace
+  id, observed nodes, and confirmed edges.
+- `environment verify` is documented as a recording step for the result of an
+  already-run acceptance workflow. `publish-verified` is documented as the
+  Store inspection gate that checks the persisted run, Evidence, and topology
+  artifacts.
+- Quickstart Environment Catalog commands now use the actual positional
+  `ENV_ID` CLI shape and publish from the same Store that contains the verified
+  run artifacts.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(EnvironmentCommandsGateVerifiedDiscovery|EnvironmentCommandsUseNamedPostgreSQLActiveStore|CaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore)$' -count=1`,
+  `go test ./internal/controlplane -run 'TestServerManagesVerifiedEnvironmentCatalogFromStore|TestTraceTopologyCollectPersistsProviderSpanRefs|TestTopologyEvidenceViewForCaseListsOnlySkyWalkingRows$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Reference pattern:
+
+- Mature control planes separate recorded status from observed state. The
+  [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
+  and [Argo CD health status model](https://argo-cd.readthedocs.io/en/stable/operator-manual/health/)
+  both keep current health/sync state as explicit controller-observed status
+  rather than treating requested input as proof. Open Test Sandbox now follows
+  the same direction for verified environment publication.
+
+Incomplete work:
+
+- The gate checks persisted artifacts in the selected Store, but live
+  SkyWalking endpoint validation with real trace ids still needs the later
+  human-machine validation pass.
+- Full release-check remains deferred by user direction while the PG line is
+  being advanced quickly.

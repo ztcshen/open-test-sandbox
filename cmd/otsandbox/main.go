@@ -634,8 +634,8 @@ func runEnvironmentPublishVerified(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if env.LastVerificationStatus != store.StatusPassed || !env.EvidenceComplete || !env.TopologyComplete {
-		return fmt.Errorf("environment %s is not publishable: verification must pass with complete Evidence and SkyWalking topology", env.ID)
+	if err := controlplane.ValidateEnvironmentPublishable(ctx, runtime, env); err != nil {
+		return err
 	}
 	env.Verified = true
 	env.Status = "verified"

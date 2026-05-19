@@ -88,14 +88,17 @@ packages. The supported lifecycle is:
 - `register`: record the minimal runtime facts needed to reach a service,
   workflow target, or observability endpoint.
 - `discover`: list environments from the active Store or `--store NAME_OR_DSN`.
-- `inspect`: show connection facts, workflow coverage, Evidence health, and
-  verification status for one environment.
+- `inspect`: show connection facts, workflow coverage metadata, recorded
+  Evidence/topology completeness flags, and verification status for one
+  environment.
 - `bootstrap`: prepare local runtime facts and Store rows needed before the
   first run.
-- `verify`: run the configured acceptance workflow and persist the result,
-  Evidence indexes, and real SkyWalking topology.
-- `publish-verified`: promote only environments whose verification workflow
-  passed and whose Evidence plus SkyWalking topology are complete.
+- `verify`: record the selected verification run status and completeness flags.
+  Evidence and topology are expected to have been produced and indexed by the
+  run or collection paths before publication.
+- `publish-verified`: promote only after the recorded flags pass and the
+  selected Store contains a passed verification run, indexed Evidence, and a
+  complete SkyWalking topology row.
 
 The verified discovery list must not include environments that only have a
 successful registration. Verification requires a passed workflow run, indexed
