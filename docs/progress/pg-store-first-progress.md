@@ -758,3 +758,33 @@ Incomplete work:
   PostgreSQL validation pass.
 - Remaining PG-line gaps are now mostly CLI/API parity polish, release
   preparation, and live SkyWalking endpoint validation with real trace ids.
+
+## 2026-05-20 Named PostgreSQL Serve Evidence Import API Coverage
+
+Estimated PostgreSQL mainline progress: 98.8%.
+
+Completed evidence:
+
+- Extended the env-gated named PostgreSQL serve coverage to include POST
+  `/api/evidence/import` and GET `/api/evidence/list`.
+- The new API path coverage imports a legacy runtime SQLite database through
+  the running `serve` handler into the active named PostgreSQL Store.
+- The same handler then reads the imported run back through `/api/evidence/list`
+  and verifies the API case run count, Evidence count, Evidence id, case run id,
+  kind, and URI mapping.
+- This closes the main Evidence import CLI/API parity gap while preserving
+  `evidence import` as an explicit legacy migration path rather than a normal
+  daily SQLite path.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(ServeAndEvidenceTasksUseNamedPostgreSQLActiveStore|EvidenceImportUsesNamedPostgreSQLActiveStore)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The serve Evidence import API coverage is env-gated and skipped without
+  `OTSANDBOX_TEST_PG_DSN`; it does not replace the later human-machine
+  PostgreSQL validation pass.
+- Remaining PG-line gaps are now mostly final CLI/API parity documentation,
+  release preparation, and live SkyWalking endpoint validation with real trace
+  ids.

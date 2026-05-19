@@ -6607,6 +6607,60 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 	if verifiedCatalog.ProfileID != "sample" || len(verifiedCatalog.APICases) != 2 {
 		t.Fatalf("PostgreSQL serve profile catalog = %#v", verifiedCatalog)
 	}
+
+	apiLegacyPath := filepath.Join(t.TempDir(), "legacy-api.sqlite")
+	apiLegacySuffix := time.Now().UTC().UnixNano()
+	apiLegacyWorkflowID := apiLegacySuffix
+	apiLegacyCaseID := apiLegacySuffix + 1
+	apiLegacyParentRunID := fmt.Sprintf("case-run-parent-api-pg-%d", apiLegacySuffix)
+	createLegacyRuntimeDBWithIDs(t, apiLegacyPath, apiLegacyWorkflowID, apiLegacyCaseID, apiLegacyParentRunID)
+	importEvidenceRec := httptest.NewRecorder()
+	handler.ServeHTTP(importEvidenceRec, httptest.NewRequest(http.MethodPost, "/api/evidence/import", strings.NewReader(`{"sourcePath":`+mustJSON(t, apiLegacyPath)+`,"profileId":"sample"}`)))
+	if importEvidenceRec.Code != http.StatusOK {
+		t.Fatalf("evidence import status = %d body=%s", importEvidenceRec.Code, importEvidenceRec.Body.String())
+	}
+	var importEvidencePayload struct {
+		OK              bool   `json:"ok"`
+		SourcePath      string `json:"sourcePath"`
+		ProfileID       string `json:"profileId"`
+		RunCount        int    `json:"runCount"`
+		APICaseRunCount int    `json:"apiCaseRunCount"`
+		EvidenceCount   int    `json:"evidenceCount"`
+	}
+	if err := json.Unmarshal(importEvidenceRec.Body.Bytes(), &importEvidencePayload); err != nil {
+		t.Fatalf("decode PostgreSQL serve evidence import payload: %v\n%s", err, importEvidenceRec.Body.String())
+	}
+	if !importEvidencePayload.OK || importEvidencePayload.SourcePath != apiLegacyPath || importEvidencePayload.ProfileID != "sample" || importEvidencePayload.RunCount != 2 || importEvidencePayload.APICaseRunCount != 1 || importEvidencePayload.EvidenceCount != 1 {
+		t.Fatalf("PostgreSQL serve evidence import payload = %#v", importEvidencePayload)
+	}
+	evidenceListRec := httptest.NewRecorder()
+	handler.ServeHTTP(evidenceListRec, httptest.NewRequest(http.MethodGet, "/api/evidence/list?run="+apiLegacyParentRunID, nil))
+	if evidenceListRec.Code != http.StatusOK {
+		t.Fatalf("evidence list status = %d body=%s", evidenceListRec.Code, evidenceListRec.Body.String())
+	}
+	var importedEvidencePayload struct {
+		Runs []struct {
+			ID              string `json:"id"`
+			APICaseRunCount int    `json:"apiCaseRunCount"`
+			EvidenceCount   int    `json:"evidenceCount"`
+			EvidenceRecords []struct {
+				ID        string `json:"id"`
+				CaseRunID string `json:"caseRunId"`
+				Kind      string `json:"kind"`
+				URI       string `json:"uri"`
+			} `json:"evidenceRecords"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(evidenceListRec.Body.Bytes(), &importedEvidencePayload); err != nil {
+		t.Fatalf("decode PostgreSQL serve evidence list payload: %v\n%s", err, evidenceListRec.Body.String())
+	}
+	if len(importedEvidencePayload.Runs) != 1 || importedEvidencePayload.Runs[0].ID != apiLegacyParentRunID || importedEvidencePayload.Runs[0].APICaseRunCount != 1 || importedEvidencePayload.Runs[0].EvidenceCount != 1 || len(importedEvidencePayload.Runs[0].EvidenceRecords) != 1 {
+		t.Fatalf("PostgreSQL serve evidence list payload = %#v", importedEvidencePayload.Runs)
+	}
+	importedRecord := importedEvidencePayload.Runs[0].EvidenceRecords[0]
+	if importedRecord.ID != fmt.Sprintf("legacy-evidence-%d", apiLegacyCaseID) || importedRecord.CaseRunID != fmt.Sprintf("legacy-case-run-%d", apiLegacyCaseID) || importedRecord.Kind != "case-run" || importedRecord.URI != ".runtime/cases/"+apiLegacyParentRunID {
+		t.Fatalf("PostgreSQL serve evidence list record = %#v", importedRecord)
+	}
 }
 
 func runCLI(t *testing.T, args ...string) string {
