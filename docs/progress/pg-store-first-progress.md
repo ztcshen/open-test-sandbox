@@ -1223,3 +1223,21 @@ Incomplete work:
 
 - Remaining completion evidence is still the external PostgreSQL release-check
   and live SkyWalking 10-step run against a real endpoint.
+
+## 2026-05-20 Smoke Harness Live Mode Guardrail
+
+Estimated PostgreSQL mainline progress: 99.992%.
+
+Completed evidence:
+
+- Store-first contract guardrails now require the control-plane smoke harness
+  itself to reject `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` without
+  `OTS_TRACE_GRAPHQL_URL`.
+- The guardrail also requires the smoke harness and its tests to keep the
+  "all 10 workflow steps" trace-id requirement in place, so direct smoke runs
+  cannot drift away from release-check's live topology sign-off contract.
+
+Incomplete work:
+
+- Final completion still depends on the external PostgreSQL release-check and
+  live SkyWalking 10-step proof run.

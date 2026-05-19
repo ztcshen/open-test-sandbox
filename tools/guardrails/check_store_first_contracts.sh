@@ -89,6 +89,16 @@ if ! rg -q 'all 10 workflow steps' tools/release-check.sh docs/release-checklist
   violations=1
 fi
 
+if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL' tools/smoke/control-plane-smoke.mjs; then
+  echo "control-plane smoke harness must reject required real SkyWalking mode without OTS_TRACE_GRAPHQL_URL." >&2
+  violations=1
+fi
+
+if ! rg -q 'all 10 workflow steps' tools/smoke/control-plane-smoke.mjs tools/smoke/control-plane-smoke.test.mjs; then
+  echo "control-plane smoke harness must require trace ids for all 10 workflow steps in real SkyWalking mode." >&2
+  violations=1
+fi
+
 generic_resolver_count=$(rg -n 'resolveStoreReference\(' cmd/otsandbox/main.go | wc -l | tr -d ' ')
 if [[ "$generic_resolver_count" != "4" ]]; then
   echo "Daily command code must not add generic Store resolver calls; use resolveRequiredDailyStoreReference unless the path is Store maintenance, offline review, or migration." >&2
