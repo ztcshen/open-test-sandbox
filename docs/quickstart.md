@@ -26,7 +26,10 @@ OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmod
 The release check requires a PostgreSQL smoke Store DSN. It runs Go tests, the
 source-domain guardrail, the React build, active PostgreSQL CLI smoke, and a
 PostgreSQL-only headless browser smoke test against a generated generic import
-bundle.
+bundle. For final live topology sign-off, add
+`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
+`OTS_SMOKE_TRACE_IDS` so release-check fails instead of using the synthetic
+SkyWalking provider.
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active PostgreSQL Store
 or `OTSANDBOX_DEMO_STORE=postgres://...`, and prints the Evidence bundle path.

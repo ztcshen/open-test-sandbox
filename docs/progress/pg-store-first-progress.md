@@ -1017,3 +1017,28 @@ Incomplete work:
 - The final proof remains the external live validation run with PostgreSQL DSN,
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real SkyWalking GraphQL endpoint,
   and real 10-step trace ids.
+
+## 2026-05-20 Quickstart Live Topology Sign-Off
+
+Estimated PostgreSQL mainline progress: 99.9%.
+
+Completed evidence:
+
+- Quick Start now distinguishes ordinary PostgreSQL release-check from final
+  live topology sign-off, and names the required env trio:
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS`.
+- Share Kit now states that live SkyWalking validation is the stricter sign-off
+  mode, while demos without those env vars use deterministic synthetic topology
+  wiring for repeatable local smoke.
+- The Share Kit note is bilingual, matching the rest of the page.
+- README and README.zh-CN now also name
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` beside `OTS_TRACE_GRAPHQL_URL` and
+  `OTS_SMOKE_TRACE_IDS`, so the primary user entrypoints distinguish live
+  sign-off from synthetic smoke.
+
+Incomplete work:
+
+- The final proof remains the external live validation run with PostgreSQL DSN,
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real SkyWalking GraphQL endpoint,
+  and real 10-step trace ids.

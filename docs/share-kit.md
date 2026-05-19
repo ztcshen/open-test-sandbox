@@ -60,6 +60,10 @@ What to point out:
 - `release-check` requires a PostgreSQL smoke Store DSN, then runs guardrails,
   Go tests, the demo, the React build, active PostgreSQL CLI smoke, and
   PostgreSQL-only headless browser smoke tests.
+- Live SkyWalking validation is a stricter sign-off mode: set
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS`; otherwise the demo uses deterministic synthetic
+  topology wiring for repeatable local smoke.
 - import bundles are external by design; the core repository stays generic.
 
 讲解重点：
@@ -68,6 +72,10 @@ What to point out:
   PostgreSQL Store 或 `OTSANDBOX_DEMO_STORE=postgres://...`。
 - `release-check` 要求提供 PostgreSQL smoke Store DSN，然后运行守卫、Go 测试、
   demo、React build、active PostgreSQL CLI smoke 和 PostgreSQL-only 无头浏览器冒烟。
+- 真实 SkyWalking 验证是更严格的 sign-off 模式：设置
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`、`OTS_TRACE_GRAPHQL_URL` 和
+  `OTS_SMOKE_TRACE_IDS`；否则 demo 使用确定性的 synthetic topology wiring
+  做可重复本地冒烟。
 - import bundle 默认在核心仓库外维护，核心保持通用。
 
 ## Social Snippets / 社交文案
