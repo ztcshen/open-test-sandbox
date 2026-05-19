@@ -3006,7 +3006,7 @@ func runInterfaceNodeCoverage(ctx context.Context, args []string, gapsOnly bool)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, runtime, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, runtime, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -3836,6 +3836,18 @@ func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profi
 
 func loadInterfaceNodeReportBundleFromStoreFlags(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, store.Store, string, func(), error) {
 	resolvedStoreURL, err := resolveOptionalBundleStoreReference(profileRef, storeRef, legacyStoreURL)
+	if err != nil {
+		return profile.Bundle{}, nil, "", func() {}, err
+	}
+	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(ctx, profileRef, profileHomeRef, resolvedStoreURL)
+	if err != nil {
+		return profile.Bundle{}, nil, resolvedStoreURL, cleanup, err
+	}
+	return bundle, runtime, resolvedStoreURL, cleanup, nil
+}
+
+func loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, store.Store, string, func(), error) {
+	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
 	if err != nil {
 		return profile.Bundle{}, nil, "", func() {}, err
 	}
@@ -5190,11 +5202,10 @@ func runWorkflowPlan(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
-	if err != nil {
-		return err
+	if strings.TrimSpace(*workflowID) == "" {
+		return errors.New("--workflow is required")
 	}
-	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(context.Background(), *profilePath, *profileHome, resolvedStoreURL)
+	bundle, runtime, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(context.Background(), *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6122,7 +6133,7 @@ func runCaseSuiteCoverage(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6217,7 +6228,7 @@ func runCaseSuiteStability(ctx context.Context, args []string) error {
 	if *limit <= 0 {
 		return errors.New("--limit must be greater than zero")
 	}
-	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6290,7 +6301,7 @@ func runCaseSuitePriority(ctx context.Context, args []string) error {
 	if *timeoutSeconds < 0 {
 		return errors.New("--timeout-seconds cannot be negative")
 	}
-	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6378,7 +6389,7 @@ func runCaseSuiteBrief(ctx context.Context, args []string) error {
 	if *timeoutSeconds < 0 {
 		return errors.New("--timeout-seconds cannot be negative")
 	}
-	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6451,7 +6462,7 @@ func runCaseSuiteQuality(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6521,7 +6532,7 @@ func runCaseSuiteQualityPlan(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6605,7 +6616,7 @@ func runCaseSuiteQualityReport(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6754,7 +6765,7 @@ func runCaseSuiteInspect(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6821,7 +6832,7 @@ func runCaseSuitePlan(ctx context.Context, args []string) error {
 	if *timeoutSeconds < 0 {
 		return errors.New("--timeout-seconds cannot be negative")
 	}
-	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6898,7 +6909,7 @@ func runCaseSuiteImpact(ctx context.Context, args []string) error {
 	if *timeoutSeconds < 0 {
 		return errors.New("--timeout-seconds cannot be negative")
 	}
-	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6986,7 +6997,7 @@ func runCaseSuiteImpactReport(ctx context.Context, args []string) error {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
 	started := time.Now()
-	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}

@@ -1472,8 +1472,10 @@ func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *test
 
 func TestInterfaceNodeCoverageCommandCanEmitJSON(t *testing.T) {
 	profileDir := writeInterfaceNodeCoverageProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
 
-	out := runCLI(t, "interface-node", "coverage", "--profile", profileDir, "--workflow", "workflow.alpha", "--json")
+	out := runCLI(t, "interface-node", "coverage", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha", "--json")
 
 	var report struct {
 		OK      bool `json:"ok"`
@@ -1513,8 +1515,10 @@ func TestInterfaceNodeCoverageGapsCommandCanEmitJSON(t *testing.T) {
   "workflowBindings": [{"workflowId":"workflow.alpha","stepId":"step.missing","nodeId":"node.missing","caseId":"case.missing","required":true}],
   "fixtures": []
 }`)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
 
-	out := runCLI(t, "interface-node", "coverage-gaps", "--profile", dir, "--workflow", "workflow.alpha", "--json")
+	out := runCLI(t, "interface-node", "coverage-gaps", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha", "--json")
 
 	var report struct {
 		OK      bool `json:"ok"`
@@ -2456,8 +2460,10 @@ func TestBaselineGetCommandRejectsMissingGate(t *testing.T) {
 func TestWorkflowPlanCommandPrintsBoundSteps(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
 
-	out := runCLI(t, "workflow", "plan", "--profile", dir, "--workflow", "workflow.alpha")
+	out := runCLI(t, "workflow", "plan", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha")
 
 	for _, want := range []string{
 		"Workflow: workflow.alpha",
@@ -2508,8 +2514,10 @@ func TestWorkflowPlanCommandCanEmitJSONFromStore(t *testing.T) {
 func TestWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
 
-	out := runCLIFails(t, "workflow", "plan", "--profile", dir, "--workflow", "workflow.missing")
+	out := runCLIFails(t, "workflow", "plan", "--store", "sqlite://"+storePath, "--workflow", "workflow.missing")
 	if !strings.Contains(out, "workflow not found") || !strings.Contains(out, "workflow.missing") {
 		t.Fatalf("missing workflow output = %q", out)
 	}
@@ -3618,6 +3626,84 @@ func TestCaseSuiteReportRequiresStoreBeforeProfileLoad(t *testing.T) {
 	}
 	if strings.Contains(out, "missing-profile") {
 		t.Fatalf("case suite report loaded profile before Store binding: %q", out)
+	}
+}
+
+func TestDailyPlanningCommandsRequireStoreBeforeProfileLoad(t *testing.T) {
+	missingProfile := filepath.Join(t.TempDir(), "missing-profile")
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "interface-node coverage",
+			args: []string{"interface-node", "coverage", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "interface-node coverage-gaps",
+			args: []string{"interface-node", "coverage-gaps", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "workflow plan",
+			args: []string{"workflow", "plan", "--workflow", "workflow.alpha", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite stability",
+			args: []string{"case", "suite", "stability", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite coverage",
+			args: []string{"case", "suite", "coverage", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite priority",
+			args: []string{"case", "suite", "priority", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite brief",
+			args: []string{"case", "suite", "brief", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite quality",
+			args: []string{"case", "suite", "quality", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite quality-plan",
+			args: []string{"case", "suite", "quality-plan", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite quality-report",
+			args: []string{"case", "suite", "quality-report", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite inspect",
+			args: []string{"case", "suite", "inspect", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite plan",
+			args: []string{"case", "suite", "plan", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite impact",
+			args: []string{"case", "suite", "impact", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "case suite impact-report",
+			args: []string{"case", "suite", "impact-report", "--profile", missingProfile, "--json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+			out := runCLIFailsWithEnv(t, env, tt.args...)
+			if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
+				t.Fatalf("%s output = %q", tt.name, out)
+			}
+			if strings.Contains(out, "missing-profile") {
+				t.Fatalf("%s loaded profile before Store binding: %q", tt.name, out)
+			}
+		})
 	}
 }
 
