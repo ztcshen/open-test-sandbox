@@ -30,6 +30,13 @@ async function assertStepPage(page, baseURL, workflowID, runID, stepID) {
 
   const graphNodes = await page.locator(".workflow-step-topology-svg-node").count();
   if (graphNodes === 0) throw new Error(`${stepID} did not render topology nodes`);
+  const stepNumber = (stepID.match(/\d+$/)?.[0] || "").padStart(2, "0");
+  const expectedTraceID = stepNumber ? `trace.smoke.${stepNumber}` : "";
+  for (const expected of ["complete", "service.alpha", "service.worker", expectedTraceID].filter(Boolean)) {
+    if (!pageText.includes(expected)) {
+      throw new Error(`${stepID} topology did not show ${expected}`);
+    }
+  }
 
   const requestText = await page.locator("[data-smoke-id='step-request']").innerText();
   if (requestText.trim().length < 20 || requestText.trim() === "{}") {

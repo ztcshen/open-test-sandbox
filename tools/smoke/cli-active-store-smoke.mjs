@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertWorkflowCaseEvidence, writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { assertSkyWalkingTopologyEvidence, assertWorkflowCaseEvidence, writeSmokeProfile } from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const cliSmokeSteps = Array.from({ length: 10 }, (_, index) => {
@@ -226,7 +226,9 @@ async function main() {
         "--trace-id", step.traceID,
         "--json",
       ], env);
-      if (topology?.traceTopology?.provider !== "skywalking" || topology?.traceTopology?.status !== "complete") {
+      try {
+        assertSkyWalkingTopologyEvidence(topology?.traceTopology, { traceID: step.traceID });
+      } catch (error) {
         throw new Error(`trace topology did not persist SkyWalking data for ${step.id}: ${JSON.stringify(topology)}`);
       }
       const evidence = await runJSON([

@@ -312,8 +312,22 @@ export function assertWorkflowCaseEvidence(payload, { runID, caseID, stepID, pat
     throw new Error(`unexpected case evidence assertions: ${JSON.stringify(assertions)}`);
   }
   const topology = evidence.topology || {};
-  if (topology.provider !== "skywalking" || topology.status !== "complete" || topology.traceId !== traceID || (topology.confirmedEdges || []).length < 1) {
-    throw new Error(`case evidence missing real SkyWalking topology: ${JSON.stringify(topology)}`);
+  assertSkyWalkingTopologyEvidence(topology, { traceID });
+}
+
+export function assertSkyWalkingTopologyEvidence(topology, { traceID, source = "service.alpha", target = "service.worker" } = {}) {
+  const edges = Array.isArray(topology?.confirmedEdges) ? topology.confirmedEdges : [];
+  const nodes = Array.isArray(topology?.observedNodes) ? topology.observedNodes : [];
+  const edge = edges.find((item) => item?.source === source && item?.target === target);
+  if (
+    topology?.provider !== "skywalking"
+    || topology?.status !== "complete"
+    || (traceID && topology?.traceId !== traceID)
+    || !nodes.includes(source)
+    || !nodes.includes(target)
+    || !edge
+  ) {
+    throw new Error(`case evidence missing complete SkyWalking topology evidence: ${JSON.stringify(topology)}`);
   }
 }
 
@@ -404,11 +418,14 @@ async function checkWorkflowDetailRunButton(browser, baseURL) {
     }
     const runID = new URL(href, baseURL).searchParams.get("id");
     const detail = runID ? await waitForJSON(`${baseURL}/api/workflow-runs/${encodeURIComponent(runID)}`) : {};
-    const topologies = detail.traceTopologies || [];
-    const topologySteps = new Set(topologies.filter((item) => item.provider === "skywalking").map((item) => item.stepId));
-    const missingTopologySteps = coreSmokeSteps.filter((step) => !topologySteps.has(step.id)).map((step) => step.id);
-    if (missingTopologySteps.length > 0) {
-      throw new Error(`/workflow-detail.html run did not persist SkyWalking topology: ${JSON.stringify({ runID, topologies, summary: detail.summary })}`);
+    const topologies = Array.isArray(detail.traceTopologies) ? detail.traceTopologies : [];
+    for (const step of coreSmokeSteps) {
+      const topology = topologies.find((item) => item.stepId === step.id && item.provider === "skywalking");
+      if (!topology) {
+        throw new Error(`/workflow-detail.html run did not persist SkyWalking topology for ${step.id}: ${JSON.stringify({ runID, topologies, summary: detail.summary })}`);
+      }
+      const parsed = typeof topology.topologyJson === "string" ? JSON.parse(topology.topologyJson) : topology.topologyJson;
+      assertSkyWalkingTopologyEvidence(parsed, { traceID: step.traceID });
     }
     return runID;
   } finally {
@@ -449,9 +466,7 @@ async function checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID) {
       throw new Error(`/api/workflow-runs/${runID} missing stored SkyWalking topology: ${JSON.stringify(topologies)}`);
     }
     const parsed = typeof topology.topologyJson === "string" ? JSON.parse(topology.topologyJson) : topology.topologyJson;
-    if (parsed.provider !== "skywalking" || parsed.status !== "complete" || parsed.traceId !== step.traceID || (parsed.confirmedEdges || []).length !== 1) {
-      throw new Error(`unexpected SkyWalking topology payload: ${JSON.stringify(parsed)}`);
-    }
+    assertSkyWalkingTopologyEvidence(parsed, { traceID: step.traceID });
     const tasks = await waitForJSON(`${baseURL}/api/post-process-tasks?runId=${encodeURIComponent(runID)}&stepId=${step.id}&kind=trace_topology_collect`);
     if (tasks.counts?.passed !== 1 || tasks.counts?.failed !== 0 || tasks.counts?.skipped !== 0 || tasks.tasks?.[0]?.status !== "passed") {
       throw new Error(`unexpected SkyWalking post-process task status: ${JSON.stringify(tasks)}`);

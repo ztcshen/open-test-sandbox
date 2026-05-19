@@ -46,6 +46,9 @@ check_pattern '^[[:space:]]*npm run demo:api-case[[:space:]]*$' \
 check_pattern 'OTSANDBOX_CLEAN_DEMO_OUTPUT=1 npm run demo:api-case' \
   "Release-check must pass OTSANDBOX_DEMO_STORE and disable SQLite Store for the demo."
 
+check_pattern "topology:[[:space:]]*\\{[[:space:]]*status:[[:space:]]*['\"](partial|complete|unavailable)|\"topology\":[[:space:]]*\\{[[:space:]]*\"status\"[[:space:]]*:[[:space:]]*\"(partial|complete|unavailable)" \
+  "SkyWalking topology fixtures must set provider/source before status."
+
 blocked_a="fall"
 blocked_b="back"
 blocked_word="${blocked_a}${blocked_b}"

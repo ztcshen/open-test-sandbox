@@ -106,13 +106,29 @@ describe("control-plane smoke Evidence assertions", () => {
       "-e",
       [
         "import { assertWorkflowCaseEvidence } from './tools/smoke/control-plane-smoke.mjs';",
-        "assertWorkflowCaseEvidence({ ok: true, evidence: { summary: { case_id: 'case.alpha', case_run_id: 'run.case', run_id: 'run.workflow', step_id: 'step.alpha', status: 'passed' }, request: { method: 'GET', path: '/v1/items', evidence_uri: '/e/request.json' }, response: { http_code: 200, evidence_uri: '/e/response.json' }, assertions: { status: 'passed', passed: true }, topology: { provider: 'skywalking', status: 'complete', traceId: 'trace.smoke.1', confirmedEdges: [{}] } } }, { runID: 'run.workflow', caseID: 'case.alpha', stepID: 'step.alpha' });",
+        "assertWorkflowCaseEvidence({ ok: true, evidence: { summary: { case_id: 'case.alpha', case_run_id: 'run.case', run_id: 'run.workflow', step_id: 'step.alpha', status: 'passed' }, request: { method: 'GET', path: '/v1/items', evidence_uri: '/e/request.json' }, response: { http_code: 200, evidence_uri: '/e/response.json' }, assertions: { status: 'passed', passed: true }, topology: { provider: 'skywalking', status: 'complete', traceId: 'trace.smoke.1', observedNodes: ['service.alpha', 'service.worker'], confirmedEdges: [{ source: 'service.alpha', target: 'service.worker' }] } } }, { runID: 'run.workflow', caseID: 'case.alpha', stepID: 'step.alpha' });",
       ].join("\n"),
     ], {
       cwd: rootDir,
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
+  it("rejects empty SkyWalking topology edges in workflow run case evidence", () => {
+    const result = spawnSync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        "import { assertWorkflowCaseEvidence } from './tools/smoke/control-plane-smoke.mjs';",
+        "assertWorkflowCaseEvidence({ ok: true, evidence: { summary: { case_id: 'case.alpha', case_run_id: 'run.case', run_id: 'run.workflow', step_id: 'step.alpha', status: 'passed' }, request: { method: 'GET', path: '/v1/items', evidence_uri: '/e/request.json' }, response: { http_code: 200, evidence_uri: '/e/response.json' }, assertions: { status: 'passed', passed: true }, topology: { provider: 'skywalking', status: 'complete', traceId: 'trace.smoke.1', observedNodes: ['service.alpha', 'service.worker'], confirmedEdges: [{}] } } }, { runID: 'run.workflow', caseID: 'case.alpha', stepID: 'step.alpha' });",
+      ].join("\n"),
+    ], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /complete SkyWalking topology evidence/);
   });
 });
 

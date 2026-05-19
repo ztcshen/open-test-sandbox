@@ -392,3 +392,43 @@ Incomplete work:
   compatibility coverage, not proof of the PostgreSQL daily path.
 - Full `npm run release-check` remains intentionally deferred by user direction
   to keep momentum on the PG line instead of blocking on the heavy suite.
+
+## 2026-05-19 Smoke Topology Strictness Gate
+
+Estimated PostgreSQL mainline progress: 94%.
+
+Completed evidence:
+
+- A background subagent independently confirmed that `--store-url
+  .runtime/store.sqlite` is no longer promoted as a daily example, and flagged
+  the remaining high-value gap as smoke topology strictness rather than Store
+  routing.
+- Control-plane smoke Evidence assertions now reject empty SkyWalking topology
+  edges. A topology must include `provider: "skywalking"`, `status:
+  "complete"`, the expected trace id, both observed service nodes, and a
+  confirmed `service.alpha -> service.worker` edge.
+- The core 10-step browser workflow smoke now validates every persisted
+  topology row with the same complete SkyWalking evidence rule, not just
+  presence of a provider-labeled row.
+- CLI active PostgreSQL Store smoke now uses the same topology evidence rule
+  after each `trace topology collect`.
+- Workflow-step evidence smoke now checks the page renders the complete status,
+  trace id, and source/target services, not only that a topology SVG node
+  exists.
+- Store-first guardrails now reject topology fixtures that set a topology
+  status before declaring provider/source, preventing providerless complete
+  topology examples from re-entering smoke or docs.
+- Light validation passed:
+  `node --test tools/smoke/control-plane-smoke.test.mjs`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The smoke provider remains synthetic for local deterministic smoke. It proves
+  PostgreSQL Store wiring, Evidence indexing, UI rendering, and topology
+  persistence semantics, but the final real SkyWalking endpoint validation is
+  still open.
+- The main remaining PG-line work is broad named PostgreSQL daily-path test
+  migration and env-gated real SkyWalking validation. Full release-check is
+  still deferred by user direction.
