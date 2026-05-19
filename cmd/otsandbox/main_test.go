@@ -5653,18 +5653,18 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 
 func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
 	ctx := context.Background()
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-priority-pg")
 	profileDir := writeCaseSuiteCoverageProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	base := mustParseTime(t, "2026-05-16T01:00:00Z")
-	recordCaseRunForCoverage(t, ctx, s, "run.default.1", "case.default", store.StatusPassed, base)
-	recordCaseRunForCoverage(t, ctx, s, "run.variant.1", "case.variant", store.StatusPassed, base.Add(time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, "run.variant.2", "case.variant", store.StatusFailed, base.Add(2*time.Minute))
+	base := time.Now().UTC()
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.1"), "case.default", store.StatusPassed, base.Add(-2*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.1"), "case.variant", store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.2"), "case.variant", store.StatusFailed, base)
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
@@ -5672,7 +5672,6 @@ func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "priority",
 		"--profile", profileDir,
-		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--signal", "Variant",
@@ -5714,7 +5713,7 @@ func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
 		t.Fatalf("suite priority batch = %#v", report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "priority", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression", "--signal", "Variant", "--limit", "1")
+	textOut := runCLI(t, "case", "suite", "priority", "--profile", profileDir, "--tag", "regression", "--signal", "Variant", "--limit", "1")
 	for _, want := range []string{"Case Suite Priority", "Selected: 1", "case.variant"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("priority text missing %q:\n%s", want, textOut)
