@@ -500,7 +500,7 @@ async function checkEvidenceViewerTimeline(browser, baseURL) {
             coreLogs: ["2026-05-18T01:00:00Z request_id=req-1 create item", "2026-05-18T01:00:01Z response 500"],
           },
         ],
-        topology: { status: "partial", requestId: "req-1", traceId: "trace-1" },
+        topology: { provider: "skywalking", status: "complete", requestId: "req-1", traceId: "trace-1", confirmedEdges: [{ source: "service.alpha", target: "service.worker" }] },
       },
       caseDiagnostics: {
         summary: { case_id: "case.alpha", operation: "POST /items", evidence_path: ".runtime/evidence/smoke-timeline" },
@@ -508,7 +508,7 @@ async function checkEvidenceViewerTimeline(browser, baseURL) {
         response: { http_code: 500, request_id: "req-1" },
         assertions: { status: "failed", passed: false, http_status_ok: false, failure_reason: "unexpected status" },
         fixture: { status: "configured", applyRuns: [{ status: "applied", fixtureInstanceId: "fixture-1" }], dependencies: [{ id: "dependency.alpha" }], summary: { applyCount: 1, dependencyCount: 1 } },
-        topology: { status: "partial", requestId: "req-1", traceId: "trace-1" },
+        topology: { provider: "skywalking", status: "complete", requestId: "req-1", traceId: "trace-1", confirmedEdges: [{ source: "service.alpha", target: "service.worker" }] },
         artifacts: [{ label: "case bundle", path: "/api/case/evidence?caseRun=run.alpha&caseId=case.alpha", kind: "json" }],
       },
     };

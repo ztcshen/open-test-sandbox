@@ -320,6 +320,8 @@ Completed evidence:
   explicitly identify SkyWalking as provider/source; otherwise they return the
   unavailable SkyWalking view instead of exposing workflow order or legacy
   summaries as real topology.
+- Evidence viewer smoke fixtures now use explicit SkyWalking complete topology
+  payloads instead of providerless partial topology examples.
 - Explicit `--store sqlite://...` compatibility coverage remains green for
   discovery reads, and offline template package review remains available only
   through `--offline-template-package`.
