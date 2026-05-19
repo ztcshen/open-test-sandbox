@@ -23,6 +23,8 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 				"summary_json jsonb not null",
 				"started_at timestamptz",
 				"labels_json jsonb not null",
+				"payload_json jsonb not null",
+				"active boolean not null",
 			},
 			mustNot: []string{"summary_json text not null"},
 		},
@@ -34,6 +36,8 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 				"summary_json json not null",
 				"started_at datetime(6)",
 				"labels_json json not null",
+				"payload_json json not null",
+				"active boolean not null",
 			},
 			mustNot: []string{"timestamptz", "jsonb"},
 		},
@@ -45,6 +49,8 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 				"summary_json text not null",
 				"started_at text",
 				"labels_json text not null",
+				"payload_json text not null",
+				"active integer not null",
 			},
 			mustNot: []string{"timestamptz", "datetime(6)", "jsonb"},
 		},
@@ -78,6 +84,7 @@ func TestCoreSchemaSQLKeepsSharedIndexesStable(t *testing.T) {
 		"create index if not exists idx_evidence_records_run_id_created_at",
 		"create index if not exists idx_trace_topologies_workflow_run_id_created_at",
 		"create index if not exists idx_post_process_tasks_run_id_created_at",
+		"create index if not exists idx_config_versions_active_published",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("core schema missing index %q:\n%s", want, joined)

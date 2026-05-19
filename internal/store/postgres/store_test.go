@@ -62,6 +62,20 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)") {
 		t.Fatalf("delegated create run did not use postgres sqlstore dialect:\n%s", exec.query)
 	}
+
+	_, err = s.UpsertReadModel(ctx, store.ReadModel{
+		ProfileID:       "profile.alpha",
+		Key:             "workflow-discovery",
+		ConfigVersionID: "config-001",
+		PayloadJSON:     `{"workflows":[]}`,
+	})
+	if err != nil {
+		t.Fatalf("upsert read model through postgres store: %v", err)
+	}
+	exec = state.lastExec(t)
+	if !strings.Contains(exec.query, "insert into config_read_model") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6)") {
+		t.Fatalf("delegated read model did not use postgres sqlstore dialect:\n%s", exec.query)
+	}
 }
 
 const fakePostgresDriverName = "otsandbox_postgres_open_fake"

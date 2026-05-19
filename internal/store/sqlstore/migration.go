@@ -110,5 +110,38 @@ create table if not exists baseline_gates (
   updated_at %s not null,
   primary key (profile_id, subject_id)
 );`, text, text, text, boolType, jsonType, timeType, timeType),
+		fmt.Sprintf(`
+create table if not exists profile_indexes (
+  profile_id %s primary key,
+  bundle_path %s not null,
+  bundle_digest %s not null,
+  summary_json %s not null,
+  imported_at %s,
+  updated_at %s not null
+);`, text, text, text, jsonType, timeType, timeType),
+		fmt.Sprintf(`
+create table if not exists config_versions (
+  id %s primary key,
+  profile_id %s not null,
+  source_path %s not null,
+  bundle_digest %s not null,
+  summary_json %s not null,
+  active %s not null,
+  published_at %s not null,
+  created_at %s not null
+);`, text, text, text, text, jsonType, boolType, timeType, timeType),
+		`
+create index if not exists idx_config_versions_active_published
+  on config_versions(active, published_at, id);`,
+		fmt.Sprintf(`
+create table if not exists config_read_model (
+  profile_id %s not null,
+  model_key %s not null,
+  config_version_id %s not null,
+  payload_json %s not null,
+  generated_at %s not null,
+  updated_at %s not null,
+  primary key (profile_id, model_key)
+);`, text, text, text, jsonType, timeType, timeType),
 	}
 }

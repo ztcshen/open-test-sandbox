@@ -322,6 +322,139 @@ func TestStoreUpsertsAndReadsBaselineGateThroughDatabaseSQL(t *testing.T) {
 	}
 }
 
+func TestStoreUpsertsConfigIndexAndReadModelsThroughDatabaseSQL(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	s := sqlstore.New(db, sqlstore.PostgresDialect{})
+	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+
+	profileIndex, err := s.UpsertProfileIndex(ctx, store.ProfileIndex{
+		ProfileID:    "profile.alpha",
+		BundlePath:   "stores/profile.alpha",
+		BundleDigest: "sha256:profile",
+		SummaryJSON:  `{"services":2}`,
+		ImportedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("upsert profile index: %v", err)
+	}
+	exec := state.lastExec(t)
+	if !strings.Contains(exec.query, "insert into profile_indexes") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6)") {
+		t.Fatalf("profile index query did not use postgres bind vars:\n%s", exec.query)
+	}
+	if !strings.Contains(exec.query, "on conflict(profile_id) do update") || exec.args[0] != "profile.alpha" || exec.args[3] != `{"services":2}` {
+		t.Fatalf("profile index upsert = %#v args=%#v query=%s", profileIndex, exec.args, exec.query)
+	}
+	if profileIndex.UpdatedAt.IsZero() {
+		t.Fatalf("profile index updated timestamp = %#v", profileIndex)
+	}
+
+	state.queueRows(fakeRows{
+		columns: []string{"profile_id", "bundle_path", "bundle_digest", "summary_json", "imported_at", "updated_at"},
+		values: [][]driver.Value{{
+			"profile.alpha", "stores/profile.alpha", "sha256:profile", `{"services":2}`,
+			now.Format(time.RFC3339Nano), profileIndex.UpdatedAt.Format(time.RFC3339Nano),
+		}},
+	})
+	loadedIndex, err := s.GetProfileIndex(ctx, "profile.alpha")
+	if err != nil {
+		t.Fatalf("get profile index: %v", err)
+	}
+	if loadedIndex.ProfileID != "profile.alpha" || loadedIndex.BundleDigest != "sha256:profile" || !loadedIndex.ImportedAt.Equal(now) {
+		t.Fatalf("loaded profile index = %#v", loadedIndex)
+	}
+	query := state.lastQuery(t)
+	if !strings.Contains(query.query, "from profile_indexes where profile_id = $1") || query.args[0] != "profile.alpha" {
+		t.Fatalf("profile index get query = %#v", query)
+	}
+
+	configVersion, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
+		ID:           "config-001",
+		ProfileID:    "profile.alpha",
+		SourcePath:   "stores/profile.alpha/catalog.json",
+		BundleDigest: "sha256:config",
+		SummaryJSON:  `{"cases":5}`,
+		Active:       true,
+		PublishedAt:  now.Add(1 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("upsert config version: %v", err)
+	}
+	if configVersion.CreatedAt.IsZero() {
+		t.Fatalf("config version created timestamp = %#v", configVersion)
+	}
+	execs := state.lastExecs(t, 2)
+	if !strings.Contains(execs[0].query, "update config_versions set active = $1") || execs[0].args[0] != false {
+		t.Fatalf("active config reset query = %#v", execs[0])
+	}
+	if !strings.Contains(execs[1].query, "insert into config_versions") || !strings.Contains(execs[1].query, "values ($1, $2, $3, $4, $5, $6, $7, $8)") {
+		t.Fatalf("config version insert query did not use postgres bind vars:\n%s", execs[1].query)
+	}
+	if !strings.Contains(execs[1].query, "on conflict(id) do update") || execs[1].args[0] != "config-001" || execs[1].args[5] != true {
+		t.Fatalf("config version upsert args/query = %#v %s", execs[1].args, execs[1].query)
+	}
+
+	state.queueRows(fakeRows{
+		columns: []string{"id", "profile_id", "source_path", "bundle_digest", "summary_json", "active", "published_at", "created_at"},
+		values: [][]driver.Value{{
+			"config-001", "profile.alpha", "stores/profile.alpha/catalog.json", "sha256:config", `{"cases":5}`,
+			true, configVersion.PublishedAt.Format(time.RFC3339Nano), configVersion.CreatedAt.Format(time.RFC3339Nano),
+		}},
+	})
+	active, err := s.GetActiveConfigVersion(ctx)
+	if err != nil {
+		t.Fatalf("get active config version: %v", err)
+	}
+	if active.ID != "config-001" || !active.Active || active.BundleDigest != "sha256:config" {
+		t.Fatalf("active config version = %#v", active)
+	}
+	query = state.lastQuery(t)
+	if !strings.Contains(query.query, "from config_versions") || !strings.Contains(query.query, "where active = $1") || query.args[0] != true {
+		t.Fatalf("active config query = %#v", query)
+	}
+
+	readModel, err := s.UpsertReadModel(ctx, store.ReadModel{
+		ProfileID:       "profile.alpha",
+		Key:             "workflow-discovery",
+		ConfigVersionID: "config-001",
+		PayloadJSON:     `{"workflows":[{"id":"workflow.alpha"}]}`,
+		GeneratedAt:     now.Add(2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("upsert read model: %v", err)
+	}
+	exec = state.lastExec(t)
+	if !strings.Contains(exec.query, "insert into config_read_model") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6)") {
+		t.Fatalf("read model query did not use postgres bind vars:\n%s", exec.query)
+	}
+	if !strings.Contains(exec.query, "on conflict(profile_id, model_key) do update") || exec.args[1] != "workflow-discovery" {
+		t.Fatalf("read model upsert args/query = %#v %s", exec.args, exec.query)
+	}
+	if readModel.UpdatedAt.IsZero() {
+		t.Fatalf("read model updated timestamp = %#v", readModel)
+	}
+
+	state.queueRows(fakeRows{
+		columns: []string{"profile_id", "model_key", "config_version_id", "payload_json", "generated_at", "updated_at"},
+		values: [][]driver.Value{{
+			"profile.alpha", "workflow-discovery", "config-001", `{"workflows":[{"id":"workflow.alpha"}]}`,
+			readModel.GeneratedAt.Format(time.RFC3339Nano), readModel.UpdatedAt.Format(time.RFC3339Nano),
+		}},
+	})
+	loadedReadModel, err := s.GetReadModel(ctx, "profile.alpha", "workflow-discovery")
+	if err != nil {
+		t.Fatalf("get read model: %v", err)
+	}
+	if loadedReadModel.ProfileID != "profile.alpha" || loadedReadModel.Key != "workflow-discovery" || loadedReadModel.ConfigVersionID != "config-001" {
+		t.Fatalf("loaded read model = %#v", loadedReadModel)
+	}
+	query = state.lastQuery(t)
+	if !strings.Contains(query.query, "from config_read_model") || !strings.Contains(query.query, "where profile_id = $1 and model_key = $2") {
+		t.Fatalf("read model get query = %#v", query)
+	}
+}
+
 const fakeDriverName = "otsandbox_sqlstore_fake"
 
 var registerFakeDriverOnce sync.Once
@@ -371,6 +504,16 @@ func (s *fakeSQLState) lastExec(t *testing.T) fakeSQLCall {
 		t.Fatal("no exec calls recorded")
 	}
 	return s.execs[len(s.execs)-1]
+}
+
+func (s *fakeSQLState) lastExecs(t *testing.T, count int) []fakeSQLCall {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.execs) < count {
+		t.Fatalf("recorded exec calls = %d, want at least %d", len(s.execs), count)
+	}
+	return append([]fakeSQLCall(nil), s.execs[len(s.execs)-count:]...)
 }
 
 func (s *fakeSQLState) lastQuery(t *testing.T) fakeSQLCall {

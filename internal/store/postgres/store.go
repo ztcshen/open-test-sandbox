@@ -119,28 +119,28 @@ func (s *Store) GetBaselineGate(ctx context.Context, profileID string, subjectID
 	return s.core.GetBaselineGate(ctx, profileID, subjectID)
 }
 
-func (s *Store) UpsertProfileIndex(context.Context, store.ProfileIndex) (store.ProfileIndex, error) {
-	return store.ProfileIndex{}, errPostgresStoreNotImplemented()
+func (s *Store) UpsertProfileIndex(ctx context.Context, r store.ProfileIndex) (store.ProfileIndex, error) {
+	return s.core.UpsertProfileIndex(ctx, r)
 }
 
-func (s *Store) GetProfileIndex(context.Context, string) (store.ProfileIndex, error) {
-	return store.ProfileIndex{}, errPostgresStoreNotImplemented()
+func (s *Store) GetProfileIndex(ctx context.Context, profileID string) (store.ProfileIndex, error) {
+	return s.core.GetProfileIndex(ctx, profileID)
 }
 
-func (s *Store) UpsertConfigVersion(context.Context, store.ConfigVersion) (store.ConfigVersion, error) {
-	return store.ConfigVersion{}, errPostgresStoreNotImplemented()
+func (s *Store) UpsertConfigVersion(ctx context.Context, r store.ConfigVersion) (store.ConfigVersion, error) {
+	return s.core.UpsertConfigVersion(ctx, r)
 }
 
-func (s *Store) GetActiveConfigVersion(context.Context) (store.ConfigVersion, error) {
-	return store.ConfigVersion{}, errPostgresStoreNotImplemented()
+func (s *Store) GetActiveConfigVersion(ctx context.Context) (store.ConfigVersion, error) {
+	return s.core.GetActiveConfigVersion(ctx)
 }
 
-func (s *Store) UpsertReadModel(context.Context, store.ReadModel) (store.ReadModel, error) {
-	return store.ReadModel{}, errPostgresStoreNotImplemented()
+func (s *Store) UpsertReadModel(ctx context.Context, r store.ReadModel) (store.ReadModel, error) {
+	return s.core.UpsertReadModel(ctx, r)
 }
 
-func (s *Store) GetReadModel(context.Context, string, string) (store.ReadModel, error) {
-	return store.ReadModel{}, errPostgresStoreNotImplemented()
+func (s *Store) GetReadModel(ctx context.Context, profileID string, key string) (store.ReadModel, error) {
+	return s.core.GetReadModel(ctx, profileID, key)
 }
 
 func (s *Store) ReplaceProfileCatalog(context.Context, store.ProfileCatalog) error {
