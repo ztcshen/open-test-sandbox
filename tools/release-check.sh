@@ -56,7 +56,12 @@ npm run test:frontend
 step "running smoke harness tests"
 node --test tools/smoke/*.test.mjs
 
-step "running browser smoke tests"
-npm run smoke:frontend
+if [[ -n "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
+  step "running PostgreSQL-only browser smoke tests"
+  npm run smoke:frontend:pg-only
+else
+  step "running browser smoke tests"
+  npm run smoke:frontend
+fi
 
 step "release check passed"

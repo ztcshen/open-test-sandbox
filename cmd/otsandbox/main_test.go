@@ -88,6 +88,16 @@ func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 	}
 }
 
+func TestStoreStatusAndUpgradeRequireActiveStore(t *testing.T) {
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	for _, command := range []string{"status", "upgrade"} {
+		out := runCLIFailsWithEnv(t, env, "store", command)
+		if !strings.Contains(out, "no active store configured") || !strings.Contains(out, "store config set NAME --url postgres://") {
+			t.Fatalf("store %s should guide active PostgreSQL Store setup, got %q", command, out)
+		}
+	}
+}
+
 func TestStoreStatusSupportsPostgresURLs(t *testing.T) {
 	withPostgresSchemaStatus(t, func(_ context.Context, cfg postgres.Config) (postgres.SchemaStatusResult, error) {
 		return postgres.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil

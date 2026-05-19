@@ -10,6 +10,7 @@
     "demo:api-case": "node tools/examples/api-case-demo.mjs",
     "release-check": "bash tools/release-check.sh",
     "smoke:frontend": "node tools/smoke/control-plane-smoke.mjs",
+    "smoke:frontend:pg-only": "OTSANDBOX_DISABLE_SQLITE_STORE=1 node tools/smoke/control-plane-smoke.mjs",
     "test:frontend": "node --test control-plane/frontend/src/*.test.mjs",
     "test": "go test ./..."
   },

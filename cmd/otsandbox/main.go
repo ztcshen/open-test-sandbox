@@ -348,6 +348,9 @@ func runStore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(resolvedStoreURL) == "" {
+		return activeStoreRequiredError()
+	}
 	if backend, _ := storeBackendFromURL(resolvedStoreURL); backend == "postgres" {
 		cfg, err := postgres.ParseConfigFromURL(resolvedStoreURL)
 		if err != nil {

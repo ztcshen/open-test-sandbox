@@ -32,6 +32,10 @@ type currentStoreReport struct {
 
 var errNoActiveStoreConfigured = errors.New("no active store configured")
 
+func activeStoreRequiredError() error {
+	return fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...` then `otsandbox store use NAME`", errNoActiveStoreConfigured)
+}
+
 func runStoreConfig(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing store config command")
@@ -200,7 +204,7 @@ func activeStoreConfig() (storeConfigEntry, error) {
 		return storeConfigEntry{}, err
 	}
 	if strings.TrimSpace(cfg.Active) == "" {
-		return storeConfigEntry{}, fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...` then `otsandbox store use NAME`", errNoActiveStoreConfigured)
+		return storeConfigEntry{}, activeStoreRequiredError()
 	}
 	entry, ok := cfg.Stores[cfg.Active]
 	if !ok {
