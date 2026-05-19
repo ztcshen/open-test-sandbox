@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,69 @@ import (
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
 )
+
+type slowEvidenceStore struct {
+	store.Store
+	delay time.Duration
+}
+
+func (s slowEvidenceStore) ListEvidence(ctx context.Context, runID string) ([]store.EvidenceRecord, error) {
+	timer := time.NewTimer(s.delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return s.Store.ListEvidence(ctx, runID)
+	}
+}
+
+func TestWorkflowStepLogsUseCachedEvidenceWhenLookupIsSlow(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer sqliteStore.Close()
+
+	run := store.Run{
+		ID:           "run.cached",
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusPassed,
+		EvidenceRoot: filepath.Join(t.TempDir(), "evidence"),
+		SummaryJSON:  `{"steps":[{"stepId":"step.alpha"}]}`,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if _, err := sqliteStore.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "runtime-logs.json")
+	if err := os.WriteFile(logPath, []byte(`{"systems":[{"name":"worker","found":true,"coreLogs":["request.alpha handled"]}]}`), 0o644); err != nil {
+		t.Fatalf("write cached runtime logs: %v", err)
+	}
+	if _, err := sqliteStore.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        "runtime.logs.step.alpha",
+		RunID:     run.ID,
+		CaseRunID: "step.alpha",
+		Kind:      workflowStepRuntimeLogsKind,
+		URI:       logPath,
+		MediaType: "application/json",
+		Summary:   `{"stepId":"step.alpha"}`,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record cached runtime logs: %v", err)
+	}
+
+	step := map[string]any{"stepId": "step.alpha"}
+	runtime := slowEvidenceStore{Store: sqliteStore, delay: 150 * time.Millisecond}
+	enrichWorkflowStepLogs(ctx, runtime, run, step, nil)
+
+	systems := listFromAny(mapFromAny(step["trace"])["systems"])
+	if len(systems) != 1 || systems[0].(map[string]any)["name"] != "worker" {
+		t.Fatalf("workflow step should use cached runtime logs after slow lookup: %#v", step)
+	}
+}
 
 func TestWorkflowStepLogsReturnPendingAndPersistInBackground(t *testing.T) {
 	ctx := context.Background()

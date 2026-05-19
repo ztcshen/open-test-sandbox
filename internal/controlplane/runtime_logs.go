@@ -18,6 +18,7 @@ import (
 
 const runtimeLogLineLimit = 12
 const workflowStepRuntimeLogsKind = "runtime_logs"
+const workflowStepRuntimeLogCacheTimeout = time.Second
 
 func enrichWorkflowStepLogs(ctx context.Context, runtime store.Store, run store.Run, step map[string]any, topologies []map[string]any) {
 	trace := mapFromAny(step["trace"])
@@ -25,7 +26,7 @@ func enrichWorkflowStepLogs(ctx context.Context, runtime store.Store, run store.
 		return
 	}
 	stepID := strings.TrimSpace(valueString(step["stepId"]))
-	cacheCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	cacheCtx, cancel := context.WithTimeout(ctx, workflowStepRuntimeLogCacheTimeout)
 	defer cancel()
 	if cached, ok := cachedWorkflowStepRuntimeLogs(cacheCtx, runtime, run.ID, stepID); ok {
 		trace["systems"] = cached

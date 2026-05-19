@@ -650,7 +650,7 @@ func runEnvironmentPublishVerified(ctx context.Context, args []string) error {
 }
 
 func openRequiredCLIStore(ctx context.Context, storeRef string, legacyStoreURL string) (store.Store, func(), error) {
-	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(storeRef, legacyStoreURL)
 	if err != nil {
 		return nil, func() {}, err
 	}

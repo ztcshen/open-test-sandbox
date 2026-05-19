@@ -128,3 +128,30 @@ Risk:
   proof or explicit compatibility labeling.
 - The current percentage assumes this daily Store validation slice remains
   valid as later command families adopt the same rule.
+
+## 2026-05-19 Environment Catalog Daily Gate
+
+Estimated PostgreSQL mainline progress: 81%.
+
+Completed evidence:
+
+- Environment Catalog CLI commands now share the daily Store resolver through
+  `openRequiredCLIStore`, so active or named SQLite Store configs are rejected
+  before environment registration, discovery, inspection, bootstrap,
+  verification, or verified publication.
+- Explicit `--store sqlite://...` remains available for compatibility tests,
+  while active/named Store daily usage must resolve to PostgreSQL.
+- Targeted environment and sandbox CLI tests passed after the resolver change.
+- Release-check exposed a loaded-test timing issue in cached workflow runtime
+  log Evidence; the cache lookup now has a covered slower-read path so existing
+  runtime log Evidence is used instead of showing pending log collection.
+- The exact-word guardrail scan and `git diff --check` passed.
+- Full release gate passed with an isolated temporary PostgreSQL instance:
+  `OTSANDBOX_CONFIG_HOME=/tmp/... OTSANDBOX_SMOKE_STORE_DSN=postgres://zlh@127.0.0.1:55434/otsandbox_release_pg_smoke?sslmode=disable npm run release-check`.
+
+Incomplete work:
+
+- Several other daily CLI command families still use generic compatibility
+  Store resolution and need the same active/named SQLite rejection.
+- Daily-path tests still need broader migration from explicit SQLite stores to
+  named PostgreSQL stores.
