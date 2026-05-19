@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { prepareSmokeTraceProvider, smokeTraceID, writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { prepareSmokeTraceProvider, requireCompleteSmokeTraceIDs, smokeTraceID, writeSmokeProfile } from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -100,6 +100,37 @@ describe("control-plane smoke Store selection", () => {
 
   it("uses a configured real SkyWalking GraphQL URL without starting the synthetic provider", async () => {
     const provider = await prepareSmokeTraceProvider({ OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql" });
+    assert.equal(provider.graphQLURL, "http://skywalking.example/graphql");
+    assert.equal(provider.mode, "real");
+    assert.equal(provider.server, null);
+  });
+
+  it("rejects required real SkyWalking mode without a GraphQL URL", async () => {
+    await assert.rejects(
+      prepareSmokeTraceProvider({ OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1" }),
+      /requires OTS_TRACE_GRAPHQL_URL/,
+    );
+  });
+
+  it("rejects required real SkyWalking mode without trace ids for every step", async () => {
+    await assert.rejects(
+      prepareSmokeTraceProvider({
+        OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+        OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+        OTS_SMOKE_TRACE_IDS: "step-01=trace.real.01",
+      }),
+      /all 10 workflow steps.*step-02/,
+    );
+  });
+
+  it("accepts required real SkyWalking mode with all 10 trace ids", async () => {
+    const traceIDs = Array.from({ length: 10 }, (_, index) => `step-${String(index + 1).padStart(2, "0")}=trace.real.${String(index + 1).padStart(2, "0")}`).join(",");
+    requireCompleteSmokeTraceIDs({ OTS_SMOKE_TRACE_IDS: traceIDs });
+    const provider = await prepareSmokeTraceProvider({
+      OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+      OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+      OTS_SMOKE_TRACE_IDS: traceIDs,
+    });
     assert.equal(provider.graphQLURL, "http://skywalking.example/graphql");
     assert.equal(provider.mode, "real");
     assert.equal(provider.server, null);

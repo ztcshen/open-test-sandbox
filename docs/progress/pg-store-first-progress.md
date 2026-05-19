@@ -1185,3 +1185,24 @@ Incomplete work:
 - Store maintenance and migration/compatibility paths still intentionally allow
   SQLite. Final external sign-off remains the real PostgreSQL plus live
   SkyWalking 10-step run.
+
+## 2026-05-20 Smoke Harness Live Mode Enforcement
+
+Estimated PostgreSQL mainline progress: 99.99%.
+
+Completed evidence:
+
+- The control-plane smoke harness now enforces
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` directly, not only through
+  `tools/release-check.sh`.
+- Direct smoke runs now fail before starting synthetic topology validation if
+  the required real SkyWalking GraphQL URL is missing or if `OTS_SMOKE_TRACE_IDS`
+  does not cover every step from `step-01` through `step-10`.
+- Targeted smoke harness tests cover missing URL, partial trace ids, and the
+  complete 10-step real-mode configuration.
+
+Incomplete work:
+
+- This closes another bypass around real-topology sign-off, but completion
+  still requires the external PostgreSQL release gate plus a real SkyWalking
+  10-step proof run.

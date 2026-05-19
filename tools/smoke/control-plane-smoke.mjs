@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const smokeStepIDs = Array.from({ length: 10 }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
 
 function smokeTraceOverrides(env = process.env) {
   const raw = String(env.OTS_SMOKE_TRACE_IDS || "").trim();
@@ -15,7 +16,7 @@ function smokeTraceOverrides(env = process.env) {
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, String(value)]));
+      return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, String(value).trim()]));
     }
   } catch {
     // Accept comma-separated step=trace mappings when JSON is inconvenient in shell.
@@ -23,13 +24,28 @@ function smokeTraceOverrides(env = process.env) {
   return Object.fromEntries(raw.split(",").map((item) => item.split("=").map((part) => part.trim())).filter(([key, value]) => key && value));
 }
 
+function envFlag(value) {
+  return /^(1|true|yes|on)$/i.test(String(value || "").trim());
+}
+
+export function missingSmokeTraceIDSteps(env = process.env) {
+  const overrides = smokeTraceOverrides(env);
+  return smokeStepIDs.filter((stepID) => !overrides[stepID]);
+}
+
+export function requireCompleteSmokeTraceIDs(env = process.env) {
+  const missing = missingSmokeTraceIDSteps(env);
+  if (missing.length > 0) {
+    throw new Error(`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for all 10 workflow steps; missing: ${missing.join(" ")}`);
+  }
+}
+
 export function smokeTraceID(stepID, defaultTraceID, env = process.env) {
   return smokeTraceOverrides(env)[stepID] || defaultTraceID;
 }
 
-const coreSmokeSteps = Array.from({ length: 10 }, (_, index) => {
+const coreSmokeSteps = smokeStepIDs.map((id, index) => {
   const number = String(index + 1).padStart(2, "0");
-  const id = `step-${number}`;
   return {
     id,
     caseID: `case.step-${number}`,
@@ -187,6 +203,12 @@ async function startSmokeTraceProvider(port) {
 
 export async function prepareSmokeTraceProvider(env = process.env) {
   const configuredURL = String(env.OTS_TRACE_GRAPHQL_URL || "").trim();
+  if (envFlag(env.OTSANDBOX_REQUIRE_REAL_SKYWALKING)) {
+    if (!configuredURL) {
+      throw new Error("OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL");
+    }
+    requireCompleteSmokeTraceIDs(env);
+  }
   if (configuredURL) {
     return { graphQLURL: configuredURL, mode: "real", server: null };
   }
