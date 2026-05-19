@@ -523,3 +523,33 @@ Incomplete work:
 - Remaining product-like SQLite tests are now mostly broader case-suite,
   case-execution/interface-node report, Evidence import/list/tasks, profile
   import/verify, and serve/UI handler coverage.
+
+## 2026-05-19 Named PostgreSQL Case Suite Coverage
+
+Estimated PostgreSQL mainline progress: 97.5%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL coverage for the case-suite daily command
+  family behind `OTSANDBOX_TEST_PG_DSN`.
+- The new test configures an active named PostgreSQL Store, publishes maintained
+  case metadata, and runs daily case-suite commands without per-command
+  `--store` flags.
+- Covered commands now include `case suite report` for the selected positive
+  and derived negative cases, `case suite coverage`, `case suite priority`, and
+  `case suite brief`.
+- The coverage proves case-suite execution writes PostgreSQL-backed case runs
+  and reports, and that subsequent suite read/selection commands consume the
+  active PostgreSQL Store state with the same CLI shape.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(CaseSuiteCommandsUseNamedPostgreSQLActiveStore|EnvironmentCommandsUseNamedPostgreSQLActiveStore|DailyWorkflowCommandsUseNamedPostgreSQLActiveStore)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The case-suite PG coverage is env-gated and skipped without
+  `OTSANDBOX_TEST_PG_DSN`; it does not replace a full release-check.
+- Remaining PG-line gaps are now concentrated around live SkyWalking endpoint
+  validation, case execution and interface-node report coverage, Evidence
+  import/list/tasks, profile import/verify, and serve/UI handler coverage.
