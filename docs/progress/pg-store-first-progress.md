@@ -322,6 +322,8 @@ Completed evidence:
   summaries as real topology.
 - Evidence viewer smoke fixtures now use explicit SkyWalking complete topology
   payloads instead of providerless partial topology examples.
+- Frontend Evidence timeline model tests now use the same explicit SkyWalking
+  complete topology fixture shape.
 - Explicit `--store sqlite://...` compatibility coverage remains green for
   discovery reads, and offline template package review remains available only
   through `--offline-template-package`.

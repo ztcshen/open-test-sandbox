@@ -15,7 +15,7 @@ describe("buildEvidenceTimeline", () => {
           coreLogs: ["2026-05-18T01:00:00Z request_id=req-1 create item", "2026-05-18T01:00:01Z response 500"],
         },
       ],
-      topology: { status: "partial", requestId: "req-1", traceId: "trace-1" },
+      topology: { provider: "skywalking", status: "complete", requestId: "req-1", traceId: "trace-1", confirmedEdges: [{ source: "service.alpha", target: "service.worker" }] },
     },
     caseDiagnostics: {
       summary: { case_id: "case.create", operation: "POST /items" },
@@ -28,7 +28,7 @@ describe("buildEvidenceTimeline", () => {
         dependencies: [{ id: "dependency.alpha" }],
         summary: { applyCount: 1, dependencyCount: 1 },
       },
-      topology: { status: "partial", requestId: "req-1", traceId: "trace-1" },
+      topology: { provider: "skywalking", status: "complete", requestId: "req-1", traceId: "trace-1", confirmedEdges: [{ source: "service.alpha", target: "service.worker" }] },
     },
   };
 
