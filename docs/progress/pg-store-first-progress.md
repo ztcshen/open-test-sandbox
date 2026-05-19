@@ -631,3 +631,36 @@ Incomplete work:
   human-machine validation pass.
 - Full release-check remains deferred by user direction while the PG line is
   being advanced quickly.
+
+## 2026-05-19 Named PostgreSQL Evidence And Serve Coverage
+
+Estimated PostgreSQL mainline progress: 98.2%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL coverage for Evidence read and serve/UI API
+  paths behind `OTSANDBOX_TEST_PG_DSN`.
+- The new test configures an active named PostgreSQL Store and then runs
+  `evidence list` and `evidence tasks` without per-command `--store` flags,
+  proving both read paths consume active PostgreSQL run, Evidence, and
+  post-process task records.
+- The same test builds the `serve` handler without `--store`, then checks
+  `/api/store/current`, `/api/runs`, and `/api/interface-nodes` use the active
+  named PostgreSQL Store and published Store catalog rather than a local SQLite
+  runtime.
+- The post-process task fixture is now reusable across SQLite compatibility and
+  named PostgreSQL active Store tests, keeping the daily-path proof and
+  compatibility proof on the same data shape.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(ServeAndEvidenceTasksUseNamedPostgreSQLActiveStore|EvidenceTasksCommandListsPostProcessTasks|EvidenceListCommandCanEmitJSON)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The new coverage is env-gated and skipped without `OTSANDBOX_TEST_PG_DSN`; it
+  does not replace the later human-machine PostgreSQL validation pass.
+- Remaining PG-line gaps are now mostly `evidence import` as an explicit legacy
+  migration path, profile import/verify active PostgreSQL proof, serve API
+  profile import/verify through the running handler, CLI/API parity polish, and
+  live SkyWalking endpoint validation with real trace ids.

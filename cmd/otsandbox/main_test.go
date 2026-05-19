@@ -6247,6 +6247,118 @@ func TestServeHandlerPublishesInstalledProfileIDBeforeServing(t *testing.T) {
 	}
 }
 
+func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-serve-pg")
+	runID := "run.tasks.pg." + time.Now().UTC().Format("20060102150405.000000000")
+	ctx := context.Background()
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open PostgreSQL task store: %v", err)
+	}
+	seedPostProcessTaskFixture(t, ctx, runtime, runID, runID+".")
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close PostgreSQL task store: %v", err)
+	}
+
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", profileDir)
+
+	listOut := runCLI(t, "evidence", "list", "--run", runID, "--json")
+	var evidenceReport struct {
+		Runs []struct {
+			ID            string `json:"id"`
+			EvidenceCount int    `json:"evidenceCount"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &evidenceReport); err != nil {
+		t.Fatalf("decode PostgreSQL evidence list json: %v\n%s", err, listOut)
+	}
+	if len(evidenceReport.Runs) != 1 || evidenceReport.Runs[0].ID != runID || evidenceReport.Runs[0].EvidenceCount != 1 {
+		t.Fatalf("PostgreSQL evidence list report = %#v", evidenceReport.Runs)
+	}
+
+	tasksOut := runCLI(t,
+		"evidence", "tasks",
+		"--run", runID,
+		"--step", "step-a",
+		"--kind", "trace_topology_collect",
+		"--json",
+	)
+	var tasksReport struct {
+		RunID  string `json:"runId"`
+		Counts struct {
+			Total  int `json:"total"`
+			Passed int `json:"passed"`
+		} `json:"counts"`
+		Tasks []struct {
+			ID            string `json:"id"`
+			StepID        string `json:"stepId"`
+			DisplayStatus string `json:"displayStatus"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(tasksOut), &tasksReport); err != nil {
+		t.Fatalf("decode PostgreSQL evidence tasks json: %v\n%s", err, tasksOut)
+	}
+	if tasksReport.RunID != runID || tasksReport.Counts.Total != 1 || tasksReport.Counts.Passed != 1 || len(tasksReport.Tasks) != 1 {
+		t.Fatalf("PostgreSQL evidence tasks report = %#v", tasksReport)
+	}
+	if !strings.Contains(tasksReport.Tasks[0].ID, "task.trace") || tasksReport.Tasks[0].StepID != "step-a" || tasksReport.Tasks[0].DisplayStatus != "passed: completed" {
+		t.Fatalf("PostgreSQL evidence task = %#v", tasksReport.Tasks[0])
+	}
+
+	handler, cleanup, err := serveHandlerFromArgs(nil)
+	if err != nil {
+		t.Fatalf("build serve handler from active PostgreSQL Store: %v", err)
+	}
+	defer cleanup()
+
+	current := httptest.NewRecorder()
+	handler.ServeHTTP(current, httptest.NewRequest(http.MethodGet, "/api/store/current", nil))
+	if current.Code != http.StatusOK {
+		t.Fatalf("store current status = %d body=%s", current.Code, current.Body.String())
+	}
+	var storePayload struct {
+		OK         bool   `json:"ok"`
+		Configured bool   `json:"configured"`
+		Name       string `json:"name"`
+		Backend    string `json:"backend"`
+		Source     string `json:"source"`
+	}
+	if err := json.Unmarshal(current.Body.Bytes(), &storePayload); err != nil {
+		t.Fatalf("decode PostgreSQL store current payload: %v\n%s", err, current.Body.String())
+	}
+	if !storePayload.OK || !storePayload.Configured || storePayload.Name != "daily-serve-pg" || storePayload.Backend != "postgres" || storePayload.Source != "active-config" {
+		t.Fatalf("PostgreSQL store current payload = %#v", storePayload)
+	}
+
+	runs := httptest.NewRecorder()
+	handler.ServeHTTP(runs, httptest.NewRequest(http.MethodGet, "/api/runs", nil))
+	if runs.Code != http.StatusOK || !strings.Contains(runs.Body.String(), runID) {
+		t.Fatalf("serve runs via active PostgreSQL Store = %d %s", runs.Code, runs.Body.String())
+	}
+
+	nodes := httptest.NewRecorder()
+	handler.ServeHTTP(nodes, httptest.NewRequest(http.MethodGet, "/api/interface-nodes", nil))
+	if nodes.Code != http.StatusOK {
+		t.Fatalf("interface nodes status = %d body=%s", nodes.Code, nodes.Body.String())
+	}
+	var nodesPayload struct {
+		Source struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"source"`
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(nodes.Body.Bytes(), &nodesPayload); err != nil {
+		t.Fatalf("decode PostgreSQL interface nodes payload: %v\n%s", err, nodes.Body.String())
+	}
+	if nodesPayload.Source.ID != "sample" || nodesPayload.Source.Kind != "store" || len(nodesPayload.Items) != 1 || nodesPayload.Items[0].ID != "node.alpha" {
+		t.Fatalf("PostgreSQL serve catalog payload = %#v", nodesPayload)
+	}
+}
+
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
@@ -6501,9 +6613,15 @@ func createPostProcessTaskStore(t *testing.T) string {
 			t.Fatalf("close post process task store: %v", err)
 		}
 	})
+	seedPostProcessTaskFixture(t, ctx, s, "run.tasks", "")
+	return storePath
+}
+
+func seedPostProcessTaskFixture(t *testing.T, ctx context.Context, s store.Store, runID string, idPrefix string) {
+	t.Helper()
 	base := time.Date(2026, 5, 17, 1, 2, 3, 0, time.UTC)
 	if _, err := s.CreateRun(ctx, store.Run{
-		ID:         "run.tasks",
+		ID:         runID,
 		ProfileID:  "sample",
 		WorkflowID: "workflow.alpha",
 		Status:     store.StatusPassed,
@@ -6514,10 +6632,27 @@ func createPostProcessTaskStore(t *testing.T) string {
 	}); err != nil {
 		t.Fatalf("create task run: %v", err)
 	}
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:         idPrefix + "evidence.response",
+		RunID:      runID,
+		CaseRunID:  runID + ".case",
+		StepID:     "step-a",
+		Kind:       "response",
+		URI:        "store://evidence/" + runID + "/response.json",
+		MediaType:  "application/json",
+		SHA256:     "response-sha256",
+		SizeBytes:  2,
+		Summary:    `{"statusCode":200}`,
+		Category:   "http",
+		Visibility: "internal",
+		CreatedAt:  base.Add(5 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("record task Evidence: %v", err)
+	}
 	records := []store.PostProcessTask{
 		{
-			ID:         "task.trace",
-			RunID:      "run.tasks",
+			ID:         idPrefix + "task.trace",
+			RunID:      runID,
 			WorkflowID: "workflow.alpha",
 			StepID:     "step-a",
 			CaseID:     "case.alpha",
@@ -6528,8 +6663,8 @@ func createPostProcessTaskStore(t *testing.T) string {
 			CreatedAt:  base.Add(10 * time.Millisecond),
 		},
 		{
-			ID:          "task.logs",
-			RunID:       "run.tasks",
+			ID:          idPrefix + "task.logs",
+			RunID:       runID,
 			WorkflowID:  "workflow.alpha",
 			StepID:      "step-b",
 			CaseID:      "case.beta",
@@ -6542,8 +6677,8 @@ func createPostProcessTaskStore(t *testing.T) string {
 			CreatedAt:   base.Add(200 * time.Millisecond),
 		},
 		{
-			ID:          "task.trace.skip",
-			RunID:       "run.tasks",
+			ID:          idPrefix + "task.trace.skip",
+			RunID:       runID,
 			WorkflowID:  "workflow.alpha",
 			StepID:      "step-c",
 			CaseID:      "case.gamma",
@@ -6560,7 +6695,6 @@ func createPostProcessTaskStore(t *testing.T) string {
 			t.Fatalf("record post process task %s: %v", record.ID, err)
 		}
 	}
-	return storePath
 }
 
 func writeAPICaseFile(t *testing.T, path string) {
