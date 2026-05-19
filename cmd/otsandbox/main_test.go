@@ -1626,6 +1626,102 @@ func TestProfileVerifyCommandCanRequirePassedWorkflowRuns(t *testing.T) {
 	}
 }
 
+func TestProfileImportAndVerifyUseNamedPostgreSQLActiveStore(t *testing.T) {
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-profile-pg")
+
+	importDir := writeEmptyProfileBundle(t)
+	importOut := runCLI(t, "profile", "import", "--from", importDir, "--json")
+	var importReport struct {
+		ProfileID  string   `json:"profileId"`
+		BundlePath string   `json:"bundlePath"`
+		ReadModels []string `json:"readModels"`
+	}
+	if err := json.Unmarshal([]byte(importOut), &importReport); err != nil {
+		t.Fatalf("decode PostgreSQL profile import json: %v\n%s", err, importOut)
+	}
+	if importReport.ProfileID != "empty" || importReport.BundlePath != importDir || strings.Join(importReport.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
+		t.Fatalf("PostgreSQL profile import report = %#v", importReport)
+	}
+
+	ctx := context.Background()
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open PostgreSQL profile Store: %v", err)
+	}
+	index, err := runtime.GetProfileIndex(ctx, "empty")
+	if err != nil {
+		t.Fatalf("get PostgreSQL profile index: %v", err)
+	}
+	if index.BundlePath != importDir || !strings.HasPrefix(index.BundleDigest, "sha256:") {
+		t.Fatalf("PostgreSQL profile index = %#v", index)
+	}
+	catalogIndex, err := runtime.GetProfileCatalogIndex(ctx)
+	if err != nil {
+		t.Fatalf("get PostgreSQL profile catalog index: %v", err)
+	}
+	if catalogIndex.ProfileID != "empty" {
+		t.Fatalf("PostgreSQL profile catalog index = %#v", catalogIndex)
+	}
+
+	verifyDir := writeInterfaceNodeCaseProfile(t)
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	base := mustParseTime(t, "2026-05-18T03:00:00Z")
+	recordCaseRunForCoverage(t, ctx, runtime, "run.pg.alpha."+suffix, "case.alpha", store.StatusPassed, base)
+	recordCaseRunForCoverage(t, ctx, runtime, "run.pg.beta."+suffix, "case.beta", store.StatusPassed, base.Add(time.Minute))
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close PostgreSQL profile Store: %v", err)
+	}
+
+	verifyOut := runCLI(t, "profile", "verify", "--profile", verifyDir, "--require-case-runs", "--json")
+	var verifyReport struct {
+		OK      bool `json:"ok"`
+		Publish struct {
+			ProfileID  string   `json:"profileId"`
+			ReadModels []string `json:"readModels"`
+		} `json:"publish"`
+		Summary struct {
+			RequiredCaseRuns bool `json:"requiredCaseRuns"`
+			FailedChecks     int  `json:"failedChecks"`
+		} `json:"summary"`
+		Checks []struct {
+			Name string `json:"name"`
+			OK   bool   `json:"ok"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(verifyOut), &verifyReport); err != nil {
+		t.Fatalf("decode PostgreSQL profile verify json: %v\n%s", err, verifyOut)
+	}
+	if !verifyReport.OK || verifyReport.Publish.ProfileID != "sample" || strings.Join(verifyReport.Publish.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
+		t.Fatalf("PostgreSQL profile verify report = %#v", verifyReport)
+	}
+	if !verifyReport.Summary.RequiredCaseRuns || verifyReport.Summary.FailedChecks != 0 {
+		t.Fatalf("PostgreSQL profile verify summary = %#v", verifyReport.Summary)
+	}
+	if !hasProfileVerifyCheck(verifyReport.Checks, "api-case-run:case.alpha") || !hasProfileVerifyCheck(verifyReport.Checks, "api-case-run:case.beta") {
+		t.Fatalf("PostgreSQL profile verify checks = %#v", verifyReport.Checks)
+	}
+
+	runtime, err = openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen PostgreSQL profile Store: %v", err)
+	}
+	defer runtime.Close()
+	verifiedIndex, err := runtime.GetProfileIndex(ctx, "sample")
+	if err != nil {
+		t.Fatalf("get verified PostgreSQL profile index: %v", err)
+	}
+	if verifiedIndex.BundlePath != verifyDir || !strings.HasPrefix(verifiedIndex.BundleDigest, "sha256:") {
+		t.Fatalf("verified PostgreSQL profile index = %#v", verifiedIndex)
+	}
+	verifiedCatalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get verified PostgreSQL profile catalog: %v", err)
+	}
+	if verifiedCatalog.ProfileID != "sample" || len(verifiedCatalog.APICases) != 2 {
+		t.Fatalf("verified PostgreSQL profile catalog = %#v", verifiedCatalog)
+	}
+}
+
 func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeEmptyProfileBundle(t)

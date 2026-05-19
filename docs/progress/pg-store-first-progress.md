@@ -664,3 +664,34 @@ Incomplete work:
   migration path, profile import/verify active PostgreSQL proof, serve API
   profile import/verify through the running handler, CLI/API parity polish, and
   live SkyWalking endpoint validation with real trace ids.
+
+## 2026-05-19 Named PostgreSQL Profile Import Verify Coverage
+
+Estimated PostgreSQL mainline progress: 98.4%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL coverage for `profile import` and
+  `profile verify` behind `OTSANDBOX_TEST_PG_DSN`.
+- The new test configures an active named PostgreSQL Store and runs both
+  commands without per-command `--store` flags.
+- `profile import` now has daily-path proof that it writes profile index,
+  catalog index, and read models into the active named PostgreSQL Store.
+- `profile verify --require-case-runs` now has daily-path proof that it reads
+  existing passed API case run facts from the active PostgreSQL Store, publishes
+  the verified profile, and leaves a PostgreSQL-backed profile catalog with the
+  expected maintained API cases.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(ProfileImportAndVerifyUseNamedPostgreSQLActiveStore|ProfileVerifyCommandCanRequirePassedAPICaseRuns|ProfileImportCommandIndexesBundleInStore)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The profile import/verify coverage is env-gated and skipped without
+  `OTSANDBOX_TEST_PG_DSN`; it does not replace the later human-machine
+  PostgreSQL validation pass.
+- Remaining PG-line gaps are now mostly `evidence import` as an explicit
+  migration path, serve API profile import/verify through the running handler,
+  CLI/API parity polish, release preparation, and live SkyWalking endpoint
+  validation with real trace ids.
