@@ -3339,6 +3339,7 @@ func TestReplayEvidenceCommandEmitsShellPayload(t *testing.T) {
 
 func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 	ctx := context.Background()
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-workflow-audit-json-pg")
 	dir := t.TempDir()
 	profileDir := filepath.Join(dir, "profile")
 	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
@@ -3359,16 +3360,17 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
   ],
   "fixtures": []
 }`)
-	storePath := filepath.Join(dir, "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	runCLI(t, "config", "publish", "--from", profileDir)
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	started := mustParseTime(t, "2026-01-02T03:04:05Z")
+	firstRunID := uniqueTestID(t, "run.workflow.001")
+	secondRunID := uniqueTestID(t, "run.workflow.002")
+	started := time.Now().UTC().Add(-10 * time.Second)
 	finished := started.Add(2 * time.Second)
 	if _, err := s.CreateRun(ctx, store.Run{
-		ID:         "run.workflow.001",
+		ID:         firstRunID,
 		ProfileID:  "sample",
 		WorkflowID: "workflow.alpha",
 		Status:     store.StatusFailed,
@@ -3380,8 +3382,8 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 		t.Fatalf("create first workflow run: %v", err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
-		ID:         "run.workflow.001.case.alpha",
-		RunID:      "run.workflow.001",
+		ID:         firstRunID + ".case.alpha",
+		RunID:      firstRunID,
 		CaseID:     "case.alpha",
 		Status:     store.StatusFailed,
 		StartedAt:  started,
@@ -3393,7 +3395,7 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 	laterStarted := started.Add(10 * time.Second)
 	laterFinished := laterStarted.Add(3 * time.Second)
 	if _, err := s.CreateRun(ctx, store.Run{
-		ID:         "run.workflow.002",
+		ID:         secondRunID,
 		ProfileID:  "sample",
 		WorkflowID: "workflow.alpha",
 		Status:     store.StatusPassed,
@@ -3405,8 +3407,8 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 		t.Fatalf("create second workflow run: %v", err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
-		ID:         "run.workflow.002.case.alpha",
-		RunID:      "run.workflow.002",
+		ID:         secondRunID + ".case.alpha",
+		RunID:      secondRunID,
 		CaseID:     "case.alpha",
 		Status:     store.StatusPassed,
 		StartedAt:  laterStarted,
@@ -3419,7 +3421,7 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	out := runCLI(t, "workflow", "audit", "--workflow", "workflow.alpha", "--store", "sqlite://"+storePath, "--json")
+	out := runCLI(t, "workflow", "audit", "--workflow", "workflow.alpha", "--json")
 
 	var report struct {
 		OK         bool   `json:"ok"`
@@ -3452,7 +3454,7 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 	if len(report.Issues) != 2 || report.Issues[0].Code != "api-case-node-missing" || report.Issues[1].Code != "case-dependency-fixture-missing" {
 		t.Fatalf("workflow audit issues = %#v", report.Issues)
 	}
-	if report.Store == nil || report.Store.LatestRun == nil || report.Store.LatestRun.ID != "run.workflow.002" || report.Store.LatestRun.Status != store.StatusPassed {
+	if report.Store == nil || report.Store.LatestRun == nil || report.Store.LatestRun.ID != secondRunID || report.Store.LatestRun.Status != store.StatusPassed {
 		t.Fatalf("latest workflow run = %#v", report.Store)
 	}
 	caseState := map[string]struct {
@@ -3467,7 +3469,7 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 			LatestRunID  string
 		}{HasPassed: item.HasPassed, LatestStatus: item.LatestStatus, LatestRunID: item.LatestRunID}
 	}
-	if !caseState["case.alpha"].HasPassed || caseState["case.alpha"].LatestStatus != store.StatusPassed || caseState["case.alpha"].LatestRunID != "run.workflow.002" {
+	if !caseState["case.alpha"].HasPassed || caseState["case.alpha"].LatestStatus != store.StatusPassed || caseState["case.alpha"].LatestRunID != secondRunID {
 		t.Fatalf("case.alpha workflow state = %#v", caseState["case.alpha"])
 	}
 	if caseState["case.beta"].HasPassed || caseState["case.beta"].LatestStatus != "" || caseState["case.beta"].LatestRunID != "" {
@@ -3476,12 +3478,12 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 }
 
 func TestWorkflowAuditCommandPrintsTextSummary(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-workflow-audit-text-pg")
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
-	storePath := filepath.Join(t.TempDir(), "workflow-audit.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", dir)
 
-	out := runCLI(t, "workflow", "audit", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha")
+	out := runCLI(t, "workflow", "audit", "--workflow", "workflow.alpha")
 
 	for _, want := range []string{
 		"Workflow Audit: workflow.alpha",

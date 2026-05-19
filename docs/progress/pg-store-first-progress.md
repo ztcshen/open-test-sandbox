@@ -899,6 +899,34 @@ Incomplete work:
 - Final release readiness still requires the later real PostgreSQL plus real
   SkyWalking validation pass.
 
+## 2026-05-20 Named PostgreSQL Workflow Audit Coverage
+
+Estimated PostgreSQL mainline progress: 99.3%.
+
+Completed evidence:
+
+- Migrated workflow audit Store-state coverage from explicit SQLite Stores to
+  active named PostgreSQL Store coverage behind `OTSANDBOX_TEST_PG_DSN`.
+- The JSON test now publishes workflow config through the active Store, seeds
+  unique workflow and API case run facts into the same PostgreSQL Store, and
+  runs `workflow audit --json` without per-command `--store`.
+- The text summary test now publishes through the active named PostgreSQL Store
+  and runs `workflow audit` without per-command `--store`.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'TestWorkflowAuditCommand(EmitsJSONWithScopedStoreState|PrintsTextSummary)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- Remaining product-like SQLite pockets are now mostly sandbox start/register,
+  trace topology collect, and selected direct case-run/report compatibility
+  tests.
+- The PostgreSQL line is very close by command-surface migration, but final
+  release readiness still requires a real PostgreSQL DSN, real SkyWalking
+  endpoint, real trace ids, and 10-step UI smoke proof in the later
+  human-machine validation pass.
+
 ## 2026-05-20 Named PostgreSQL Serve Evidence Import API Coverage
 
 Estimated PostgreSQL mainline progress: 98.8%.
