@@ -310,6 +310,9 @@ Completed evidence:
   including bare local paths. PostgreSQL DSNs can still be resolved, while
   SQLite target Stores remain available only through compatibility/migration
   paths such as `evidence import`.
+- CLI flag help now labels `--store-url` as deprecated compatibility usage and
+  states that daily commands reject SQLite paths, while command examples
+  continue to use `--store NAME_OR_DSN`.
 - Evidence topology views now trust saved topology summaries only when they
   explicitly identify SkyWalking as provider/source; otherwise they return the
   unavailable SkyWalking view instead of exposing workflow order or legacy
@@ -333,8 +336,8 @@ Completed evidence:
 Incomplete work:
 
 - `--store-url` still exists as a deprecated compatibility flag on many command
-  surfaces; docs/help wording should continue steering users to `--store
-  NAME_OR_DSN`.
+  surfaces for migration and explicit compatibility; daily product examples
+  should continue steering users to `--store NAME_OR_DSN`.
 - Daily-path test data still needs migration from explicit SQLite stores to
   named PostgreSQL Stores.
 - The core 10-step smoke, per-interface Evidence completeness, and real

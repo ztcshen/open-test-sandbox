@@ -32,6 +32,8 @@ type currentStoreReport struct {
 
 var errNoActiveStoreConfigured = errors.New("no active store configured")
 
+const legacyStoreURLFlagHelp = "Deprecated compatibility Store URL or path; daily commands reject SQLite paths"
+
 func activeStoreRequiredError() error {
 	return fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...` then `otsandbox store use NAME`", errNoActiveStoreConfigured)
 }
