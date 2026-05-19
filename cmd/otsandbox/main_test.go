@@ -3631,6 +3631,29 @@ func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 	}
 }
 
+func TestCaseDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+
+	missingStore := runCLIFailsWithEnv(t, env, "case", "discover", "--profile", profileDir, "--json")
+	if !strings.Contains(missingStore, "--offline-template-package") || !strings.Contains(missingStore, "--store") {
+		t.Fatalf("case discover package-only output = %q", missingStore)
+	}
+
+	out := runCLIWithEnv(t, env, "case", "discover", "--profile", profileDir, "--offline-template-package", "--filter", "variant", "--json")
+	var report struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode offline case discover json: %v\n%s", err, out)
+	}
+	if len(report.Items) != 1 || report.Items[0].ID != "case.alpha.variant" {
+		t.Fatalf("offline case discover = %#v", report.Items)
+	}
+}
+
 func TestDiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
@@ -3677,6 +3700,52 @@ func TestDiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector(t *testi
 	}
 	if len(workflowReport.Items) != 1 || workflowReport.Items[0].ID != "workflow.alpha" {
 		t.Fatalf("workflow discover via --store = %#v", workflowReport.Items)
+	}
+}
+
+func TestInterfaceNodeDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+
+	missingStore := runCLIFailsWithEnv(t, env, "interface-node", "discover", "--profile", profileDir, "--json")
+	if !strings.Contains(missingStore, "--offline-template-package") || !strings.Contains(missingStore, "--store") {
+		t.Fatalf("interface-node discover package-only output = %q", missingStore)
+	}
+
+	out := runCLIWithEnv(t, env, "interface-node", "discover", "--profile", profileDir, "--offline-template-package", "--filter", "Result Lookup", "--json")
+	var report struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode offline interface-node discover json: %v\n%s", err, out)
+	}
+	if len(report.Items) != 1 || report.Items[0].ID != "node.alpha" {
+		t.Fatalf("offline interface-node discover = %#v", report.Items)
+	}
+}
+
+func TestWorkflowDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
+	profileDir := writeWorkflowBatchReportProfile(t)
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+
+	missingStore := runCLIFailsWithEnv(t, env, "workflow", "discover", "--profile", profileDir, "--json")
+	if !strings.Contains(missingStore, "--offline-template-package") || !strings.Contains(missingStore, "--store") {
+		t.Fatalf("workflow discover package-only output = %q", missingStore)
+	}
+
+	out := runCLIWithEnv(t, env, "workflow", "discover", "--profile", profileDir, "--offline-template-package", "--filter", "Workflow Alpha", "--json")
+	var report struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode offline workflow discover json: %v\n%s", err, out)
+	}
+	if len(report.Items) != 1 || report.Items[0].ID != "workflow.alpha" {
+		t.Fatalf("offline workflow discover = %#v", report.Items)
 	}
 }
 

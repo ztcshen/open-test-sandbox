@@ -276,7 +276,8 @@ Usage:
   otsandbox evidence tasks [--store NAME_OR_DSN] [--store-url PATH] --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
   otsandbox trace topology collect --run ID [--store NAME_OR_DSN] [--store-url PATH] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]
   otsandbox replay evidence --trace-id ID [--json]
-  otsandbox workflow discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--json]
+  otsandbox workflow discover [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--json]
+  otsandbox workflow discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
   otsandbox workflow plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] --workflow ID [--json]
   otsandbox workflow audit --profile PATH --workflow ID [--store NAME_OR_DSN] [--store-url PATH] [--json]
   otsandbox workflow runs [--store NAME_OR_DSN] [--store-url PATH] [--json]
@@ -287,14 +288,16 @@ Usage:
   otsandbox baseline get --profile ID --subject ID [--store NAME_OR_DSN] [--store-url PATH]
   otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN] [--store-url PATH]
   otsandbox template render [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] --template ID [--fixture ID]
-  otsandbox interface-node discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--json]
+  otsandbox interface-node discover [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--json]
+  otsandbox interface-node discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
   otsandbox interface-node coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--workflow ID] [--json]
   otsandbox interface-node coverage-gaps [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--workflow ID] [--json]
   otsandbox interface-node case audit --profile PATH --node ID [--json]
   otsandbox interface-node case draft --profile PATH --node ID --case-id ID [--title TEXT] [--case-path PATH] [--method METHOD] [--path PATH] [--tag TAG] [--priority PRIORITY] [--owner OWNER] [--output PATH] [--json]
   otsandbox interface-node case apply --profile PATH --file PATH [--json]
   otsandbox interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case discover [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
@@ -2962,16 +2965,17 @@ func runInterfaceNodeDiscover(ctx context.Context, args []string) error {
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
+	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
 	filter := flags.String("filter", "", "Filter by id, display name, or operation")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	discoveryProfileRef, resolvedStoreURL, err := resolveDiscoveryInputs(*profilePath, *storeRef, *storeURL, *offlineTemplatePackage)
 	if err != nil {
 		return err
 	}
-	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
+	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, discoveryProfileRef, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -3838,6 +3842,29 @@ func loadInterfaceNodeReportBundleFromStoreFlags(ctx context.Context, profileRef
 	return bundle, runtime, resolvedStoreURL, cleanup, nil
 }
 
+func resolveDiscoveryInputs(profileRef string, storeRef string, legacyStoreURL string, offlineTemplatePackage bool) (string, string, error) {
+	profileRef = strings.TrimSpace(profileRef)
+	storeRef = strings.TrimSpace(storeRef)
+	legacyStoreURL = strings.TrimSpace(legacyStoreURL)
+	if offlineTemplatePackage {
+		if profileRef == "" {
+			return "", "", errors.New("--offline-template-package requires --profile")
+		}
+		if storeRef != "" || legacyStoreURL != "" {
+			return "", "", errors.New("--offline-template-package cannot be combined with --store or --store-url")
+		}
+		return profileRef, "", nil
+	}
+	if profileRef != "" {
+		return "", "", errors.New("--profile is for offline template package review; add --offline-template-package or use --store NAME_OR_DSN")
+	}
+	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	if err != nil {
+		return "", "", err
+	}
+	return "", resolvedStoreURL, nil
+}
+
 func findInterfaceNodeByID(nodes []profile.InterfaceNode, id string) (profile.InterfaceNode, error) {
 	id = strings.TrimSpace(id)
 	for _, node := range nodes {
@@ -4580,15 +4607,16 @@ func runWorkflowDiscover(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, or description")
+	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	discoveryProfileRef, resolvedStoreURL, err := resolveDiscoveryInputs(*profilePath, *storeRef, *storeURL, *offlineTemplatePackage)
 	if err != nil {
 		return err
 	}
-	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
+	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, discoveryProfileRef, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -6028,17 +6056,18 @@ func runCaseDiscover(ctx context.Context, args []string) error {
 	status := flags.String("status", "", "Only include cases with this status")
 	owner := flags.String("owner", "", "Only include cases owned by this value")
 	priority := flags.String("priority", "", "Only include cases with this priority")
+	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	var tags stringListFlag
 	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	discoveryProfileRef, resolvedStoreURL, err := resolveDiscoveryInputs(*profilePath, *storeRef, *storeURL, *offlineTemplatePackage)
 	if err != nil {
 		return err
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, discoveryProfileRef, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
