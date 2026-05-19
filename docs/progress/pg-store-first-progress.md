@@ -815,3 +815,29 @@ Incomplete work:
   ids to prove the final 10-step topology chain.
 - Full release-check remains deferred by user direction while the PG line is
   being advanced quickly.
+
+## 2026-05-20 CLI/API Topology Absence Contract
+
+Estimated PostgreSQL mainline progress: 99.0%.
+
+Completed evidence:
+
+- Tightened the CLI/API parity matrix for `trace topology collect` and
+  `/api/trace-topology/collect`: both surfaces share the same SkyWalking
+  GraphQL path, require a real endpoint plus trace ids for real topology proof,
+  and must expose unavailable, failed, or skipped status when the provider or
+  trace is missing.
+- Tightened the release checklist so real topology sign-off requires the
+  configured SkyWalking endpoint, the trace ids used by the 10-step workflow,
+  and persisted topology rows with provider, trace id, status, nodes, and
+  edges.
+- This aligns the docs with trace-derived topology systems such as Apache
+  SkyWalking and OpenTelemetry service graph processing, where dependency
+  topology is derived from observed trace/span data rather than invented by the
+  test harness.
+
+Incomplete work:
+
+- This closes a contract/documentation gap. It does not replace the later live
+  validation pass against a real SkyWalking endpoint.
+- Full release-check remains deferred by user direction.

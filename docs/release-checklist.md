@@ -13,7 +13,12 @@ For real SkyWalking validation, add `OTS_TRACE_GRAPHQL_URL` and optional
 `OTS_SMOKE_TRACE_IDS` step-to-trace mappings. Without that URL the smoke uses a
 deterministic synthetic SkyWalking GraphQL provider, which verifies Store,
 Evidence, topology persistence, and UI wiring but is not proof of a live
-SkyWalking deployment.
+SkyWalking deployment. A release sign-off that claims real topology coverage
+must show the configured SkyWalking endpoint, the trace ids used by the 10-step
+workflow, and persisted topology rows with provider, trace id, status, nodes,
+and edges. If the endpoint is absent or a trace cannot be queried, the expected
+result is unavailable, failed, or skipped topology collection, not a generated
+topology.
 
 The gate verifies:
 
