@@ -1085,3 +1085,25 @@ Incomplete work:
 - The new coverage is env-gated behind `OTSANDBOX_TEST_PG_DSN`; final release
   proof still requires the external PostgreSQL release-check plus live
   SkyWalking trace validation.
+
+## 2026-05-20 Completion Audit Checklist
+
+Estimated PostgreSQL mainline progress: 99.95%.
+
+Completed evidence:
+
+- Added a release checklist completion audit section that preserves the full
+  objective rather than treating 99.x progress as done.
+- The audit requires proof for daily named PostgreSQL Store usage, daily
+  SQLite rejection, deprecated `--store-url` scoping, local execution paths,
+  the core 10-step workbench smoke, per-interface Evidence, live SkyWalking
+  topology, and PostgreSQL release-check.
+- The checklist explicitly requires live SkyWalking proof with
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and real
+  `OTS_SMOKE_TRACE_IDS` before topology coverage can be claimed.
+
+Incomplete work:
+
+- The checklist is contract documentation. The final missing evidence remains
+  executing the PostgreSQL release gate plus live SkyWalking 10-step validation
+  against an actual endpoint.
