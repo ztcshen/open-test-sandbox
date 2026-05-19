@@ -59,12 +59,13 @@ CLI、Control plane API、React 工作台、报告和验证工具读取同一份
 ```sh
 npm ci
 ./bin/otsandbox.sh version
-npm run demo:api-case
+OTSANDBOX_DEMO_STORE='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
 ```
 
 `demo:api-case` 会启动一个临时本地 HTTP 服务，执行
-`examples/api-cases/create-item.json`，并打印 Evidence 目录。`release-check`
+`examples/api-cases/create-item.json`，写入 active PostgreSQL Store 或
+`OTSANDBOX_DEMO_STORE=postgres://...`，并打印 Evidence 目录。`release-check`
 要求提供 PostgreSQL smoke Store DSN，会运行空白检查、生成态检查、核心守卫、
 Go 测试、demo、React build、active PostgreSQL CLI smoke 和 PostgreSQL-only
 无头浏览器冒烟。

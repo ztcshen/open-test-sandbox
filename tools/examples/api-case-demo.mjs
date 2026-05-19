@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -77,16 +77,42 @@ function isPostgreSQLStore(reference) {
   return /^postgres(?:ql)?:\/\//i.test(String(reference || ""));
 }
 
+function isSQLiteStore(reference) {
+  return /^(sqlite:\/\/|file:)/i.test(String(reference || "")) || /\.sqlite3?$/i.test(String(reference || ""));
+}
+
+function flagEnabled(value) {
+  return /^(1|true|yes|on)$/i.test(String(value || ""));
+}
+
+export function demoStore(tempDir, env = process.env) {
+  const explicitStore = env.OTSANDBOX_DEMO_STORE || env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
+  const sqliteCompat = flagEnabled(env.OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO);
+  if (explicitStore.trim()) {
+    if (isSQLiteStore(explicitStore) && !sqliteCompat) {
+      throw new Error("SQLite demo Store requires OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1; use OTSANDBOX_DEMO_STORE=postgres://... for the product path");
+    }
+    return { label: explicitStore, storeArgs: ["--store", explicitStore], upgradeArgs: ["--store", explicitStore] };
+  }
+  if (sqliteCompat) {
+    if (flagEnabled(env.OTSANDBOX_DISABLE_SQLITE_STORE)) {
+      throw new Error("OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO cannot be combined with OTSANDBOX_DISABLE_SQLITE_STORE");
+    }
+    const storeRef = `sqlite://${path.join(tempDir, "store.sqlite")}`;
+    return { label: storeRef, storeArgs: ["--store", storeRef], upgradeArgs: ["--store", storeRef], sqliteCompat: true };
+  }
+  return { label: "active Store", storeArgs: [], upgradeArgs: [] };
+}
+
 async function main() {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "otsandbox-api-case-demo-"));
   const { server, baseURL } = await freeServer();
 
   try {
     const evidenceDir = path.join(tempDir, "evidence");
-    const storePath = path.join(tempDir, "store.sqlite");
-    const storeRef = process.env.OTSANDBOX_DEMO_STORE || process.env.OTSANDBOX_SMOKE_STORE_DSN || `sqlite://${storePath}`;
-    if (isPostgreSQLStore(storeRef)) {
-      await run(["store", "upgrade", "--store", storeRef]);
+    const store = demoStore(tempDir);
+    if (!store.sqliteCompat) {
+      await run(["store", "upgrade", ...store.upgradeArgs]);
     }
     const output = await run([
       "case",
@@ -99,13 +125,13 @@ async function main() {
       "demo-create-item",
       "--evidence-dir",
       evidenceDir,
-      "--store",
-      storeRef,
+      ...store.storeArgs,
     ]);
 
     console.log(output);
     console.log(`Demo endpoint: ${baseURL}`);
     console.log(`Evidence bundle: ${path.join(evidenceDir, "demo-create-item")}`);
+    console.log(`Store: ${store.label}`);
   } finally {
     await closeServer(server);
     if (process.env.OTSANDBOX_CLEAN_DEMO_OUTPUT === "1") {
@@ -117,7 +143,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

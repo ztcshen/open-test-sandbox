@@ -49,13 +49,14 @@ plane API、React 工作台、JSON 报告和 HTML 报告共同使用。它适合
 git clone https://github.com/ztcshen/open-test-sandbox.git
 cd open-test-sandbox
 npm ci
-npm run demo:api-case
+OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
 ```
 
 What to point out:
 
-- `demo:api-case` starts a temporary local HTTP service and writes Evidence.
+- `demo:api-case` starts a temporary local HTTP service and writes Evidence
+  indexes to the active PostgreSQL Store or `OTSANDBOX_DEMO_STORE=postgres://...`.
 - `release-check` requires a PostgreSQL smoke Store DSN, then runs guardrails,
   Go tests, the demo, the React build, active PostgreSQL CLI smoke, and
   PostgreSQL-only headless browser smoke tests.
@@ -63,7 +64,8 @@ What to point out:
 
 讲解重点：
 
-- `demo:api-case` 会启动临时本地 HTTP 服务并写入 Evidence。
+- `demo:api-case` 会启动临时本地 HTTP 服务，并把 Evidence 索引写入 active
+  PostgreSQL Store 或 `OTSANDBOX_DEMO_STORE=postgres://...`。
 - `release-check` 要求提供 PostgreSQL smoke Store DSN，然后运行守卫、Go 测试、
   demo、React build、active PostgreSQL CLI smoke 和 PostgreSQL-only 无头浏览器冒烟。
 - import bundle 默认在核心仓库外维护，核心保持通用。

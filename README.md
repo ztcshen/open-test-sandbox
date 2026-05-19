@@ -70,12 +70,13 @@ Install dependencies and verify the checkout:
 ```sh
 npm ci
 ./bin/otsandbox.sh version
-npm run demo:api-case
+OTSANDBOX_DEMO_STORE='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
 ```
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
-`examples/api-cases/create-item.json` case, and prints the Evidence bundle path.
+`examples/api-cases/create-item.json` case against the active PostgreSQL Store
+or `OTSANDBOX_DEMO_STORE=postgres://...`, and prints the Evidence bundle path.
 The release gate requires a PostgreSQL smoke Store DSN. It runs whitespace
 checks, generated-state checks, source-domain guardrails, Go tests, the demo,
 the React build, active PostgreSQL CLI smoke tests, and PostgreSQL-only

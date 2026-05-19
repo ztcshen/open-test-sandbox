@@ -130,3 +130,8 @@ running the core workflow. When `OTSANDBOX_SMOKE_STORE_DSN` is present, the smok
 harness configures a temporary named Store, selects it as active, upgrades the
 schema, and serves the workbench through `--store smoke-postgres`. The smoke
 must still complete through that PostgreSQL Store.
+
+SQLite smoke or demo execution is available only for explicit compatibility
+checks with `OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE=1` or
+`OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1`. Do not combine those compatibility
+switches with `OTSANDBOX_DISABLE_SQLITE_STORE=1`.

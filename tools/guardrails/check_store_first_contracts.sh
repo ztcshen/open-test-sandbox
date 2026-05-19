@@ -40,6 +40,12 @@ check_pattern 'store-url[[:space:]][^`"$]*\.runtime/store\.sqlite|--store-url[[:
 check_pattern '^[[:space:]]*npm run release-check[[:space:]]*$' \
   "Release-check examples must show OTSANDBOX_SMOKE_STORE_DSN so the PostgreSQL gate runs."
 
+check_pattern '^[[:space:]]*npm run demo:api-case[[:space:]]*$' \
+  "API case demo examples must show OTSANDBOX_DEMO_STORE or active Store setup."
+
+check_pattern 'OTSANDBOX_CLEAN_DEMO_OUTPUT=1 npm run demo:api-case' \
+  "Release-check must pass OTSANDBOX_DEMO_STORE and disable SQLite Store for the demo."
+
 blocked_a="fall"
 blocked_b="back"
 blocked_word="${blocked_a}${blocked_b}"

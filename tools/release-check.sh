@@ -52,7 +52,7 @@ step "running Go tests"
 go test ./... -count=1
 
 step "running generic API case demo"
-OTSANDBOX_CLEAN_DEMO_OUTPUT=1 npm run demo:api-case
+OTSANDBOX_CLEAN_DEMO_OUTPUT=1 OTSANDBOX_DISABLE_SQLITE_STORE=1 OTSANDBOX_DEMO_STORE="${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" npm run demo:api-case
 
 step "building React workbench"
 npm run build:frontend
@@ -61,7 +61,7 @@ step "running frontend model tests"
 npm run test:frontend
 
 step "running smoke harness tests"
-node --test tools/smoke/*.test.mjs
+node --test tools/examples/*.test.mjs tools/smoke/*.test.mjs
 
 step "running PostgreSQL active Store CLI smoke tests"
 npm run smoke:cli:pg-active

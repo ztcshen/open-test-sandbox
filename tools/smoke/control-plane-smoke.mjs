@@ -260,11 +260,17 @@ export async function writeSmokeProfile(baseDir, targetPort) {
 
 export async function prepareSmokeStoreReference(tempDir, env = process.env, runCommand = run) {
   const smokeStoreDSN = env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
-  if (!smokeStoreDSN && /^(1|true|yes|on)$/i.test(env.OTSANDBOX_DISABLE_SQLITE_STORE || "")) {
-    throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE is enabled; set OTSANDBOX_SMOKE_STORE_DSN to a PostgreSQL Store DSN for smoke validation");
-  }
   if (!smokeStoreDSN) {
-    return { storeRef: `sqlite://${path.join(tempDir, "store.sqlite")}`, serverEnv: env };
+    if (/^(1|true|yes|on)$/i.test(env.OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE || "")) {
+      if (/^(1|true|yes|on)$/i.test(env.OTSANDBOX_DISABLE_SQLITE_STORE || "")) {
+        throw new Error("OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE cannot be combined with OTSANDBOX_DISABLE_SQLITE_STORE");
+      }
+      return { storeRef: `sqlite://${path.join(tempDir, "store.sqlite")}`, serverEnv: env };
+    }
+    throw new Error("set OTSANDBOX_SMOKE_STORE_DSN to a PostgreSQL Store DSN for smoke validation");
+  }
+  if (!/^postgres(?:ql)?:\/\//i.test(smokeStoreDSN)) {
+    throw new Error("OTSANDBOX_SMOKE_STORE_DSN must be a PostgreSQL Store DSN");
   }
   const configHome = path.join(tempDir, "store-config");
   await mkdir(configHome, { recursive: true });

@@ -34,13 +34,13 @@ describe("control-plane smoke Store selection", () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
   });
 
-  it("requires a PostgreSQL DSN when SQLite Store is disabled", () => {
+  it("requires a PostgreSQL DSN unless SQLite compatibility smoke is explicit", () => {
     const result = spawnSync(process.execPath, [
       "--input-type=module",
       "-e",
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
-        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_DISABLE_SQLITE_STORE: '1' }, () => {});",
+        "await prepareSmokeStoreReference('/tmp/ots-smoke', {}, () => {});",
       ].join("\n"),
     ], {
       cwd: rootDir,
@@ -48,6 +48,54 @@ describe("control-plane smoke Store selection", () => {
     });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN/);
+  });
+
+  it("keeps SQLite smoke behind an explicit compatibility switch", () => {
+    const result = spawnSync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
+        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE: '1' }, () => {});",
+        "if (ref.storeRef !== 'sqlite:///tmp/ots-smoke/store.sqlite') throw new Error(JSON.stringify(ref));",
+      ].join("\n"),
+    ], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
+  it("rejects non-PostgreSQL smoke Store references", () => {
+    const result = spawnSync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
+        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'sqlite:///tmp/ots-smoke/store.sqlite' }, () => {});",
+      ].join("\n"),
+    ], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /PostgreSQL Store DSN/);
+  });
+
+  it("rejects contradictory SQLite smoke flags", () => {
+    const result = spawnSync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
+        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE: '1', OTSANDBOX_DISABLE_SQLITE_STORE: '1' }, () => {});",
+      ].join("\n"),
+    ], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /cannot be combined/);
   });
 });
 

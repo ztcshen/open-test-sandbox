@@ -19,7 +19,7 @@ npm ci
 
 ```sh
 ./bin/otsandbox.sh version
-npm run demo:api-case
+OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
 ```
 
@@ -28,7 +28,8 @@ source-domain guardrail, the React build, active PostgreSQL CLI smoke, and a
 PostgreSQL-only headless browser smoke test against a generated generic import
 bundle.
 The demo command starts a temporary local HTTP endpoint, runs the generic
-`examples/api-cases/create-item.json` case, and prints the Evidence bundle path.
+`examples/api-cases/create-item.json` case against the active PostgreSQL Store
+or `OTSANDBOX_DEMO_STORE=postgres://...`, and prints the Evidence bundle path.
 Demo output is kept under the system temp directory so you can inspect it after
 the command exits. Set `OTSANDBOX_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.
