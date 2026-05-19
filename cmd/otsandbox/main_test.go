@@ -5325,18 +5325,21 @@ func TestCaseSuiteCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 
 func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.T) {
 	ctx := context.Background()
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-coverage-pg")
 	profileDir := writeCaseSuiteCoverageProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	base := mustParseTime(t, "2026-05-16T01:00:00Z")
-	recordCaseRunForCoverage(t, ctx, s, "run.default.old", "case.default", store.StatusFailed, base)
-	recordCaseRunForCoverage(t, ctx, s, "run.default.latest", "case.default", store.StatusPassed, base.Add(time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, "run.variant.latest", "case.variant", store.StatusFailed, base.Add(2*time.Minute))
+	base := time.Now().UTC()
+	oldDefaultRunID := uniqueTestID(t, "run.default.old")
+	latestDefaultRunID := uniqueTestID(t, "run.default.latest")
+	latestVariantRunID := uniqueTestID(t, "run.variant.latest")
+	recordCaseRunForCoverage(t, ctx, s, oldDefaultRunID, "case.default", store.StatusFailed, base.Add(-2*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, latestDefaultRunID, "case.default", store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, latestVariantRunID, "case.variant", store.StatusFailed, base)
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
@@ -5344,7 +5347,6 @@ func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.
 	out := runCLI(t,
 		"case", "suite", "coverage",
 		"--profile", profileDir,
-		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--json",
@@ -5394,18 +5396,18 @@ func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.
 			Reason       string
 		}{item.LatestStatus, item.LatestRunID, item.CaseRunID, item.DetailURL, item.HasPassed, item.Reason}
 	}
-	if byCase["case.default"].LatestStatus != store.StatusPassed || byCase["case.default"].LatestRunID != "run.default.latest" || !byCase["case.default"].HasPassed {
+	if byCase["case.default"].LatestStatus != store.StatusPassed || byCase["case.default"].LatestRunID != latestDefaultRunID || !byCase["case.default"].HasPassed {
 		t.Fatalf("default coverage = %#v", byCase["case.default"])
 	}
-	if byCase["case.variant"].LatestStatus != store.StatusFailed || byCase["case.variant"].CaseRunID != "run.variant.latest.case" || byCase["case.variant"].DetailURL == "" || byCase["case.variant"].HasPassed {
+	if byCase["case.variant"].LatestStatus != store.StatusFailed || byCase["case.variant"].CaseRunID != latestVariantRunID+".case" || byCase["case.variant"].DetailURL == "" || byCase["case.variant"].HasPassed {
 		t.Fatalf("variant coverage = %#v", byCase["case.variant"])
 	}
 	if byCase["case.unrun"].LatestStatus != "not-run" || byCase["case.unrun"].Reason != "no run recorded in Store" {
 		t.Fatalf("unrun coverage = %#v", byCase["case.unrun"])
 	}
 
-	textOut := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression")
-	for _, want := range []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", "case.variant", "run.variant.latest.case"} {
+	textOut := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--tag", "regression")
+	for _, want := range []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", "case.variant", latestVariantRunID + ".case"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("coverage text missing %q:\n%s", want, textOut)
 		}
