@@ -40,7 +40,7 @@ func dailyStoreRequiresPostgresError(name string, backend string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "active Store"
-	} else {
+	} else if !strings.HasPrefix(name, "--") {
 		name = fmt.Sprintf("Store config %q", name)
 	}
 	return fmt.Errorf("%s uses %s; daily commands require PostgreSQL Store. Use `otsandbox store config set NAME --url postgres://...` and `otsandbox store use NAME`, or use SQLite only through migration/compatibility commands", name, backend)
@@ -282,6 +282,16 @@ func resolveRequiredDailyStoreReference(storeRef string, legacyStoreURL string) 
 	resolved, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
 	if err != nil {
 		return "", err
+	}
+	if strings.TrimSpace(storeRef) == "" && strings.TrimSpace(legacyStoreURL) != "" {
+		backend, err := storeBackendFromURL(resolved)
+		if err != nil {
+			return "", err
+		}
+		if backend != "postgres" {
+			return "", dailyStoreRequiresPostgresError("--store-url", "SQLite")
+		}
+		return resolved, nil
 	}
 	configName, checkConfiguredStore := configuredStoreName(storeRef, legacyStoreURL)
 	if !checkConfiguredStore {

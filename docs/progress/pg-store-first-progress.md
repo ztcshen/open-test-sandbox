@@ -306,6 +306,10 @@ Completed evidence:
 - Remaining generic Store resolution in `cmd/otsandbox` is intentionally scoped
   to Store management commands, offline template package audit helpers, and
   `evidence import` as a legacy runtime migration path.
+- Daily commands now reject legacy `--store-url` values that resolve to SQLite,
+  including bare local paths. PostgreSQL DSNs can still be resolved, while
+  SQLite target Stores remain available only through compatibility/migration
+  paths such as `evidence import`.
 - Explicit `--store sqlite://...` compatibility coverage remains green for
   discovery reads, and offline template package review remains available only
   through `--offline-template-package`.
@@ -324,9 +328,9 @@ Completed evidence:
 
 Incomplete work:
 
-- `--store-url` still exists on compatibility surfaces and needs tighter
-  product wording or command-level scoping so bare paths cannot look like the
-  recommended daily path.
+- `--store-url` still exists as a deprecated compatibility flag on many command
+  surfaces; docs/help wording should continue steering users to `--store
+  NAME_OR_DSN`.
 - Daily-path test data still needs migration from explicit SQLite stores to
   named PostgreSQL Stores.
 - The core 10-step smoke, per-interface Evidence completeness, and real

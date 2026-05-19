@@ -180,6 +180,21 @@ func TestLegacyStoreURLPathIsExplicitSQLiteCompatibility(t *testing.T) {
 	}
 }
 
+func TestDailyStoreReferenceRejectsLegacySQLiteStoreURL(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	for _, legacyStoreURL := range []string{storePath, "sqlite://" + storePath} {
+		_, err := resolveRequiredDailyStoreReference("", legacyStoreURL)
+		if err == nil {
+			t.Fatalf("daily Store reference should reject legacy SQLite store URL %q", legacyStoreURL)
+		}
+		for _, want := range []string{"--store-url", "daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("daily Store reference error missing %q: %v", want, err)
+			}
+		}
+	}
+}
+
 func TestDailyStoreReferenceRejectsNamedSQLiteConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
