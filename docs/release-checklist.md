@@ -28,6 +28,10 @@ To make release-check fail unless it is using live topology evidence, set
 step from `step-01` through `step-10` and rejects synthetic or partial smoke
 before the expensive gate starts.
 
+For company MySQL final sign-off, use `npm run release-check:mysql-real` with a
+dedicated `mysql://` Store DSN. That wrapper requires the same real SkyWalking
+mode, GraphQL URL, and complete 10-step trace id mapping even in dry-run mode.
+
 The gate verifies:
 
 - no root `import bundles/` directory exists;

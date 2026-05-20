@@ -896,3 +896,33 @@ Current blocker:
   async workflow report, Evidence readback, service/interface registration,
   Environment Catalog register/inspect/bootstrap/acceptance, and
   publish-verified; remaining work is primarily live DSN validation.
+
+## 2026-05-21 MySQL Real Release SkyWalking Enforcement Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Tightened `npm run release-check:mysql-real` so it now requires
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps before dry-run or full release
+  execution can pass.
+- Kept the existing dedicated MySQL Store protections: `mysql://` only,
+  sandbox/smoke/test/CI-looking database names only, masked credentials, and
+  existing-database contract mode for company accounts.
+- Updated README, README.zh-CN, quickstart, Store backend docs, and release
+  checklist so company MySQL final sign-off cannot be mistaken for synthetic
+  topology smoke.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs`
+- `bash -n tools/smoke/mysql-real-store-release-check.sh tools/release-check.sh`
+- `tools/guardrails/check_store_first_contracts.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.

@@ -154,6 +154,9 @@ For a company MySQL validation pass, use a dedicated sandbox Store database and
 run the guarded MySQL release wrapper:
 
 ```sh
+OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
+OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
+OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
 OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
 npm run release-check:mysql-real
 ```
@@ -163,7 +166,9 @@ like a sandbox, smoke, test, or CI database. This keeps the sandbox control-plan
 Store separate from business schemas used by the services under test.
 It also runs the MySQL Store contract in existing-database mode, so the company
 account needs normal DDL/DML permissions on that dedicated database but does not
-need permission to create or drop databases.
+need permission to create or drop databases. This wrapper is final-signoff
+oriented: it also requires `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
+`OTS_TRACE_GRAPHQL_URL`, and `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps.
 
 When this flag is set, any accidental SQLite Store open fails immediately.
 This is the repeatable equivalent of taking the local SQLite path offline before

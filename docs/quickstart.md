@@ -72,6 +72,9 @@ target environment, while the sandbox Store remains independent.
 For the company MySQL path, validate against a dedicated sandbox Store database:
 
 ```sh
+OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
+OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
+OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
 OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
 npm run release-check:mysql-real
 ```
@@ -79,7 +82,9 @@ npm run release-check:mysql-real
 The wrapper rejects non-MySQL DSNs and database names that do not look dedicated
 to sandbox/smoke/test/CI validation. It uses existing-database contract mode, so
 the company account needs normal DDL/DML permissions on that dedicated Store
-database but does not need permission to create or drop databases.
+database but does not need permission to create or drop databases. It also
+requires the real SkyWalking release mode and trace ids for all 10 workflow
+steps; synthetic topology smoke is not accepted by this wrapper.
 
 Daily discovery commands do not change when you switch between a local
 PostgreSQL Store, a remote team PostgreSQL Store, and a team MySQL Store. Use

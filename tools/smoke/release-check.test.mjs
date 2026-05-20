@@ -151,9 +151,26 @@ test("real MySQL release wrapper refuses likely business databases", () => {
   assert.match(result.stderr, /business_prod/);
 });
 
+test("real MySQL release wrapper requires real SkyWalking sign-off inputs", () => {
+  const result = runRealMySQLWrapper({
+    OTSANDBOX_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+    OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires OTSANDBOX_REQUIRE_REAL_SKYWALKING=1/);
+  assert.doesNotMatch(result.stderr, /secret/);
+});
+
 test("real MySQL release wrapper dry-run masks credentials and accepts smoke database", () => {
   const result = runRealMySQLWrapper({
     OTSANDBOX_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
+      const step = `step-${String(index + 1).padStart(2, "0")}`;
+      return [step, `trace-${step}`];
+    }))),
     OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 
@@ -161,6 +178,7 @@ test("real MySQL release wrapper dry-run masks credentials and accepts smoke dat
   assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/otsandbox_smoke/);
   assert.doesNotMatch(result.stderr, /secret/);
   assert.match(result.stderr, /MySQL Store contract mode: existing/);
+  assert.match(result.stderr, /Real SkyWalking release mode: required/);
   assert.match(result.stderr, /Would run: npm run release-check/);
 });
 
@@ -169,6 +187,12 @@ test("real MySQL release wrapper accepts shared smoke Store env", () => {
     OTSANDBOX_REAL_MYSQL_STORE_DSN: "",
     OTSANDBOX_SMOKE_STORE_DSN: "",
     OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
+      const step = `step-${String(index + 1).padStart(2, "0")}`;
+      return [step, `trace-${step}`];
+    }))),
     OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 
