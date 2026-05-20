@@ -1410,3 +1410,30 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Case Execution Daily Path Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for API case execution and
+  interface report generation.
+- Shared the existing PostgreSQL scenario across PostgreSQL and MySQL:
+  file-backed `case run`, catalog-backed `case run`, `case runs`, `case
+  evidence`, `evidence list`, `interface-node discover`, and
+  `interface-node case report`.
+- Preserved the report assertions that sensitive response fields are redacted
+  and that the report uses the active SQL Store without creating
+  `runtime.sqlite`.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run 'TestCaseExecutionAndInterfaceReportUseNamed(PostgreSQL|MySQL)ActiveStore' -count=1`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

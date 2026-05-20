@@ -7363,6 +7363,16 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 
 func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "daily-case-exec-pg")
+	runCaseExecutionAndInterfaceReportUseNamedActiveStore(t, "pg", "PostgreSQL")
+}
+
+func TestCaseExecutionAndInterfaceReportUseNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-case-exec-mysql")
+	runCaseExecutionAndInterfaceReportUseNamedActiveStore(t, "mysql", "MySQL")
+}
+
+func runCaseExecutionAndInterfaceReportUseNamedActiveStore(t *testing.T, runLabel string, label string) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/items":
@@ -7387,7 +7397,7 @@ func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing
 	dir := t.TempDir()
 	casePath := filepath.Join(dir, "case.json")
 	writeAPICaseFile(t, casePath)
-	fileRunID := "pg-file-case-run-" + suffix
+	fileRunID := runLabel + "-file-case-run-" + suffix
 	fileEvidenceDir := filepath.Join(dir, "file-evidence")
 	fileOut := runCLI(t,
 		"case", "run",
@@ -7398,26 +7408,26 @@ func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing
 		"--profile", "sample",
 	)
 	if !strings.Contains(fileOut, "Case Run: "+fileRunID) || !strings.Contains(fileOut, "Status: passed") {
-		t.Fatalf("file case run via active SQL Store = %q", fileOut)
+		t.Fatalf("%s file case run via active SQL Store = %q", label, fileOut)
 	}
 	caseRunsOut := runCLI(t, "case", "runs", "--run", fileRunID, "--json")
 	if !strings.Contains(caseRunsOut, fileRunID) || !strings.Contains(caseRunsOut, "case.alpha") {
-		t.Fatalf("case runs via active SQL Store = %s", caseRunsOut)
+		t.Fatalf("%s case runs via active SQL Store = %s", label, caseRunsOut)
 	}
 	fileEvidenceOut := runCLI(t, "case", "evidence", "--run", fileRunID, "--case-id", "case.alpha", "--json")
 	for _, want := range []string{fileRunID, "case.alpha", "request", "response"} {
 		if !strings.Contains(fileEvidenceOut, want) {
-			t.Fatalf("file case evidence via active SQL Store missing %q:\n%s", want, fileEvidenceOut)
+			t.Fatalf("%s file case evidence via active SQL Store missing %q:\n%s", label, want, fileEvidenceOut)
 		}
 	}
 	evidenceListOut := runCLI(t, "evidence", "list", "--run", fileRunID, "--json")
 	if !strings.Contains(evidenceListOut, fileRunID) || !strings.Contains(evidenceListOut, "response") {
-		t.Fatalf("evidence list via active SQL Store = %s", evidenceListOut)
+		t.Fatalf("%s evidence list via active SQL Store = %s", label, evidenceListOut)
 	}
 
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	runCLI(t, "config", "publish", "--from", profileDir)
-	catalogRunID := "pg-catalog-case-run-" + suffix
+	catalogRunID := runLabel + "-catalog-case-run-" + suffix
 	catalogOut := runCLI(t,
 		"case", "run",
 		"--case-id", "case.alpha.default",
@@ -7433,15 +7443,15 @@ func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(catalogOut), &catalogRun); err != nil {
-		t.Fatalf("decode PostgreSQL catalog case run json: %v\n%s", err, catalogOut)
+		t.Fatalf("decode %s catalog case run json: %v\n%s", label, err, catalogOut)
 	}
 	if catalogRun.RunID != catalogRunID || catalogRun.CaseID != "case.alpha.default" || catalogRun.Status != "passed" {
-		t.Fatalf("PostgreSQL catalog case run = %#v", catalogRun)
+		t.Fatalf("%s catalog case run = %#v", label, catalogRun)
 	}
 	catalogEvidenceOut := runCLI(t, "case", "evidence", "--run", catalogRunID, "--case-id", "case.alpha.default", "--json")
 	for _, want := range []string{catalogRunID, "case.alpha.default", "request", "response"} {
 		if !strings.Contains(catalogEvidenceOut, want) {
-			t.Fatalf("catalog case evidence via active SQL Store missing %q:\n%s", want, catalogEvidenceOut)
+			t.Fatalf("%s catalog case evidence via active SQL Store missing %q:\n%s", label, want, catalogEvidenceOut)
 		}
 	}
 
@@ -7452,13 +7462,13 @@ func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
-		t.Fatalf("decode PostgreSQL interface-node discover json: %v\n%s", err, listOut)
+		t.Fatalf("decode %s interface-node discover json: %v\n%s", label, err, listOut)
 	}
 	if len(listReport.Items) != 1 || listReport.Items[0].ID != "node.alpha" {
-		t.Fatalf("PostgreSQL interface-node discover = %#v", listReport.Items)
+		t.Fatalf("%s interface-node discover = %#v", label, listReport.Items)
 	}
 
-	outputDir := filepath.Join(t.TempDir(), "pg-interface-report")
+	outputDir := filepath.Join(t.TempDir(), runLabel+"-interface-report")
 	reportOut := runCLI(t,
 		"interface-node", "case", "report",
 		"--node", listReport.Items[0].ID,
@@ -7484,24 +7494,24 @@ func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing
 		} `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
-		t.Fatalf("decode PostgreSQL interface-node report json: %v\n%s", err, reportOut)
+		t.Fatalf("decode %s interface-node report json: %v\n%s", label, err, reportOut)
 	}
 	if !report.OK || report.NodeID != "node.alpha" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 || report.Counts.DerivedConfigs != 1 {
-		t.Fatalf("PostgreSQL interface-node report = %#v", report)
+		t.Fatalf("%s interface-node report = %#v", label, report)
 	}
 	if len(report.Results) != 2 || report.Results[0].RunID == "" || report.Results[0].CaseRunID != report.Results[0].RunID+".case" || report.Results[0].DetailURL == "" {
-		t.Fatalf("PostgreSQL interface-node report handles = %#v", report.Results)
+		t.Fatalf("%s interface-node report handles = %#v", label, report.Results)
 	}
 	for _, item := range report.Results {
 		if strings.Contains(item.BodyPreview, "report-secret") || strings.Contains(item.BodyPreview, "variant-secret") {
-			t.Fatalf("PostgreSQL interface-node report body preview leaked sensitive value: %#v", item)
+			t.Fatalf("%s interface-node report body preview leaked sensitive value: %#v", label, item)
 		}
 		if !strings.Contains(item.BodyPreview, "[REDACTED]") {
-			t.Fatalf("PostgreSQL interface-node report body preview was not redacted: %#v", item)
+			t.Fatalf("%s interface-node report body preview was not redacted: %#v", label, item)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "runtime.sqlite")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("PostgreSQL interface-node report should use active Store without creating runtime.sqlite, stat err=%v", err)
+		t.Fatalf("%s interface-node report should use active Store without creating runtime.sqlite, stat err=%v", label, err)
 	}
 }
 
