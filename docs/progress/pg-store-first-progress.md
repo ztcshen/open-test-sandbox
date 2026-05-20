@@ -1910,3 +1910,23 @@ Remote source policy slice:
   The package itself now has local commit
   `ce4aedc2b4b9994e7c7bb4324d6f4fbcf6103b66`, but it still needs a remote Git
   URL before real one-click Docker restore can proceed.
+- 2026-05-20T08:45Z: audited the validation package before any remote push. The
+  tracked package is small enough for Git (`.git` about 5.4 MB, `compose` about
+  6.0 MB, 77 tracked files), while `.runtime` is about 250 MB and ignored.
+  However the tracked compose/scripts include deterministic local-test startup
+  secrets and credentials such as MySQL root password, LLT signing key, Grafana
+  admin password, encrypted DB password placeholders, and business initialization
+  SQL. These are acceptable as bounded startup metadata for a private validation
+  environment, but should not be published to a public GitHub repo as-is.
+  Recommended next step: create a private GitHub repo or company GitLab repo for
+  `open-test-sandbox-validation`, then update the PG package URL and rerun the
+  isolated `--prepare-repos-only` gate. A later cleanup can migrate small
+  cert/key/env material into PG redacted metadata while keeping Docker images,
+  code packages, logs, and Evidence out of PG.
+- 2026-05-20T09:05Z: created private GitHub repo
+  `ztcshen/open-test-sandbox-validation` through the browser UI and configured
+  the local validation package repo with remote
+  `git@github-personal:ztcshen/open-test-sandbox-validation.git`. No package
+  content has been pushed yet; pushing it is the next explicit external
+  transmission decision because the package contains deterministic local-test
+  keys, passwords, SQL, and mappings.
