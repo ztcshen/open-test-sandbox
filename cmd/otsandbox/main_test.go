@@ -1575,6 +1575,118 @@ func TestEnvironmentRestoreOrdersComponentAssetsByBlockingDependencyOrder(t *tes
 	}
 }
 
+func TestEnvironmentComponentsReplaceRejectsBlockingDependencyCycle(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.component.replace-cycle",
+		"--start-command", "true",
+		"--verification-workflow", "workflow.core-10",
+	)
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "app.a", Kind: "app", Role: "business-service", ComposeService: "app-a", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app.b", Kind: "app", Role: "business-service", ComposeService: "app-b", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app.a", ProviderComponentID: "app.b", Phase: "startup", Capability: "http", Required: true, ProfileJSON: `{}`},
+			{ConsumerComponentID: "app.b", ProviderComponentID: "app.a", Phase: "startup", Capability: "http", Required: true, ProfileJSON: `{}`},
+		},
+	}))
+	out := runCLIFails(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.component.replace-cycle")
+	if !strings.Contains(out, "component graph restore readiness failed") || !strings.Contains(out, "cycle") || !strings.Contains(out, "app.a") || !strings.Contains(out, "app.b") {
+		t.Fatalf("replace cycle failure output = %q", out)
+	}
+}
+
+func TestEnvironmentComponentsReplaceRejectsInvalidComponentHealthCheck(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.component.replace-health",
+		"--start-command", "true",
+		"--verification-workflow", "workflow.core-10",
+	)
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "app", Kind: "app", Role: "business-service", Required: true, HealthCheckJSON: `{"kind":"url"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+	}))
+	out := runCLIFails(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.component.replace-health")
+	if !strings.Contains(out, "component graph restore readiness failed") || !strings.Contains(out, "url health check requires url") {
+		t.Fatalf("replace invalid health failure output = %q", out)
+	}
+}
+
+func TestEnvironmentComponentsReplaceRejectsRemoteComponentAssetWithoutURLPath(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.component.replace-remote-asset",
+		"--start-command", "true",
+		"--verification-workflow", "workflow.core-10",
+	)
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "app.remote-ddl", AssetKind: "mysql-ddl", TargetPath: "compose/mysql/init/app.sql", RemoteRefJSON: `{"path":"compose/mysql/init/app.sql"}`, SizeBytes: 48 * 1024, SummaryJSON: `{}`},
+		},
+	}))
+	out := runCLIFails(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.component.replace-remote-asset")
+	if !strings.Contains(out, "component graph restore readiness failed") || !strings.Contains(out, "remote Git URL/path") {
+		t.Fatalf("replace invalid remote asset output = %q", out)
+	}
+}
+
+func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.component.inspect-readiness",
+		"--start-command", "true",
+		"--verification-workflow", "workflow.core-10",
+	)
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "app.schema", AssetKind: "mysql-ddl", TargetComponentID: "db", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app;\n", ApplyOrder: 10, SummaryJSON: `{}`},
+		},
+	}))
+	replaceOut := runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "--json", "env.component.inspect-readiness")
+	inspectOut := runCLI(t, "environment", "components", "inspect", "--store", "sqlite://"+storePath, "--json", "env.component.inspect-readiness")
+	for _, out := range []string{replaceOut, inspectOut} {
+		var payload struct {
+			ComponentGraph struct {
+				RestoreReadiness struct {
+					OK                   bool     `json:"ok"`
+					BlockingDependencies int      `json:"blockingDependencies"`
+					Assets               int      `json:"assets"`
+					BlockingOrder        []string `json:"blockingOrder"`
+				} `json:"restoreReadiness"`
+			} `json:"componentGraph"`
+		}
+		if err := json.Unmarshal([]byte(out), &payload); err != nil {
+			t.Fatalf("decode components readiness json: %v\n%s", err, out)
+		}
+		readiness := payload.ComponentGraph.RestoreReadiness
+		if !readiness.OK || readiness.BlockingDependencies != 1 || readiness.Assets != 1 || strings.Join(readiness.BlockingOrder, ",") != "db,app" {
+			t.Fatalf("components readiness payload = %#v\n%s", readiness, out)
+		}
+	}
+}
+
 func TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeBin := t.TempDir()

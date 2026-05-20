@@ -2216,3 +2216,17 @@ Remote source policy slice:
   in materialization order. The remaining failed readiness items are still
   only `docker-container-conflicts` and `docker-start-plan` on this
   already-running machine.
+- 2026-05-20T09:01Z implementation slice: `environment components replace`
+  now runs the same restore-readiness component graph report before writing to
+  Store. Graphs with blocking dependency cycles, invalid required component
+  health checks, or remote component assets without Git URL/path metadata are
+  rejected before they can become the active environment graph. `environment
+  components inspect` and successful replace JSON output now include
+  `restoreReadiness` so operators can see the dependency order, cycle status,
+  health gate count, and remote asset readiness without running Docker.
+- Verified the active `local-pg` component graph through CLI inspect, not
+  direct SQL. The restore readiness summary reports 24 components,
+  47 dependencies, 41 blocking edges, 6 runtime edges, 27 assets,
+  24 ordered blocking components, zero blocking cycles, 20 required health
+  checks, zero missing health checks, four remote assets, and zero missing
+  remote asset refs.

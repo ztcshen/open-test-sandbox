@@ -770,6 +770,10 @@ func runEnvironmentComponentsReplace(ctx context.Context, args []string) error {
 	if _, err := runtime.GetEnvironment(ctx, id); err != nil {
 		return err
 	}
+	readiness := environmentRestoreComponentGraphReport(id, graph)
+	if readiness.Configured && !readiness.OK {
+		return fmt.Errorf("component graph restore readiness failed: %s", readiness.Error)
+	}
 	if err := runtime.ReplaceEnvironmentComponentGraph(ctx, id, graph); err != nil {
 		return err
 	}
@@ -781,13 +785,15 @@ func runEnvironmentComponentsReplace(ctx context.Context, args []string) error {
 }
 
 func printEnvironmentComponentGraph(envID string, graph store.EnvironmentComponentGraph, jsonOutput bool) error {
+	readiness := environmentRestoreComponentGraphReport(envID, graph)
 	payload := map[string]any{
 		"ok":            true,
 		"environmentId": envID,
 		"componentGraph": map[string]any{
-			"components":   graph.Components,
-			"dependencies": graph.Dependencies,
-			"assets":       graph.Assets,
+			"components":       graph.Components,
+			"dependencies":     graph.Dependencies,
+			"assets":           graph.Assets,
+			"restoreReadiness": readiness,
 			"counts": map[string]int{
 				"components":   len(graph.Components),
 				"dependencies": len(graph.Dependencies),
@@ -802,6 +808,13 @@ func printEnvironmentComponentGraph(envID string, graph store.EnvironmentCompone
 	fmt.Printf("Components: %d\n", len(graph.Components))
 	fmt.Printf("Dependencies: %d\n", len(graph.Dependencies))
 	fmt.Printf("Assets: %d\n", len(graph.Assets))
+	fmt.Printf("Restore-ready: %t\n", readiness.OK)
+	if len(readiness.BlockingOrder) > 0 {
+		fmt.Printf("Blocking order: %s\n", strings.Join(readiness.BlockingOrder, " -> "))
+	}
+	if strings.TrimSpace(readiness.Error) != "" {
+		fmt.Printf("Readiness error: %s\n", readiness.Error)
+	}
 	for _, component := range graph.Components {
 		label := strings.TrimSpace(component.DisplayName)
 		if label == "" {
