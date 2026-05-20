@@ -74,17 +74,17 @@ if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING' tools/release-check.sh docs/relea
   violations=1
 fi
 
-if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL' tools/release-check.sh; then
+if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1' tools/release-check.sh || ! rg -q 'requires OTS_TRACE_GRAPHQL_URL' tools/smoke/skywalking-release-guard.mjs; then
   echo "release-check real SkyWalking mode must require OTS_TRACE_GRAPHQL_URL before expensive gates run." >&2
   violations=1
 fi
 
-if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS' tools/release-check.sh; then
+if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1' tools/release-check.sh || ! rg -q 'requires OTS_SMOKE_TRACE_IDS' tools/smoke/skywalking-release-guard.mjs; then
   echo "release-check real SkyWalking mode must require OTS_SMOKE_TRACE_IDS for the 10-step workflow." >&2
   violations=1
 fi
 
-if ! rg -q 'all 10 workflow steps' tools/release-check.sh docs/release-checklist.md; then
+if ! rg -q 'all 10 workflow steps' tools/release-check.sh tools/smoke/skywalking-release-guard.mjs docs/release-checklist.md; then
   echo "release-check real SkyWalking mode must require trace ids for all 10 workflow steps." >&2
   violations=1
 fi

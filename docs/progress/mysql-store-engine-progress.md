@@ -927,6 +927,36 @@ Current blocker:
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
 
+## 2026-05-21 Shared SkyWalking Release Guard Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added a shared SkyWalking release guard for release tooling so real
+  SkyWalking GraphQL URL validation, JSON or comma-separated trace-id parsing,
+  and complete 10-step trace-id checks use one rule.
+- Rewired generic `npm run release-check` and guarded
+  `npm run release-check:mysql-real` to call the shared guard instead of
+  carrying separate inline URL and trace-id parsers.
+- Added focused unit coverage for `http`/`https` GraphQL URLs, non-HTTP
+  rejection, JSON and shell trace-id parsing, missing workflow step detection,
+  and complete 10-step acceptance.
+
+Validated:
+
+- `node --test tools/smoke/skywalking-release-guard.test.mjs tools/smoke/release-check.test.mjs`
+- `node --check tools/smoke/skywalking-release-guard.mjs`
+- `bash -n tools/release-check.sh tools/smoke/mysql-real-store-release-check.sh`
+- `tools/guardrails/check_store_first_contracts.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.
+
 ## 2026-05-21 Generic Release Real SkyWalking URL Guard Slice
 
 Progress: `[###################-] 98%`

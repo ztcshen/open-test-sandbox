@@ -52,49 +52,7 @@ fi
 
 step "checking SkyWalking smoke provider mode"
 if [[ "${OTSANDBOX_REQUIRE_REAL_SKYWALKING:-}" == "1" ]]; then
-  if [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
-    echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL." >&2
-    exit 1
-  fi
-  trace_graphql_url_ok=$(OTS_TRACE_GRAPHQL_URL="$OTS_TRACE_GRAPHQL_URL" node <<'NODE'
-const raw = String(process.env.OTS_TRACE_GRAPHQL_URL || "").trim();
-try {
-  const parsed = new URL(raw);
-  process.stdout.write(parsed.protocol === "http:" || parsed.protocol === "https:" ? "true" : "false");
-} catch {
-  process.stdout.write("false");
-}
-NODE
-)
-  if [[ "$trace_graphql_url_ok" != "true" ]]; then
-    echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL to be an http/https URL." >&2
-    exit 1
-  fi
-  if [[ -z "${OTS_SMOKE_TRACE_IDS:-}" ]]; then
-    echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for the 10-step workflow." >&2
-    exit 1
-  fi
-  node <<'NODE'
-const raw = String(process.env.OTS_SMOKE_TRACE_IDS || "").trim();
-const parseTraceIDs = (value) => {
-  try {
-    const parsed = JSON.parse(value);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return Object.fromEntries(Object.entries(parsed).map(([key, traceID]) => [key, String(traceID).trim()]));
-    }
-  } catch {
-    // Accept comma-separated step=trace mappings when JSON is inconvenient in shell.
-  }
-  return Object.fromEntries(value.split(",").map((item) => item.split("=").map((part) => part.trim())).filter(([key, traceID]) => key && traceID));
-};
-const traceIDs = parseTraceIDs(raw);
-const missing = Array.from({ length: 10 }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`)
-  .filter((stepID) => !traceIDs[stepID]);
-if (missing.length > 0) {
-  console.error(`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for all 10 workflow steps; missing: ${missing.join(" ")}.`);
-  process.exit(1);
-}
-NODE
+  node tools/smoke/skywalking-release-guard.mjs "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1"
   echo "Real SkyWalking validation required; using configured GraphQL endpoint and smoke trace ids." >&2
 elif [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
   echo "OTS_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
