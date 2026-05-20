@@ -7936,7 +7936,16 @@ func TestDiscoverCommandsRejectActiveSQLiteStore(t *testing.T) {
 
 func TestDiscoverCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "daily-pg")
+	runDiscoverCommandsUseNamedActiveStore(t, "PostgreSQL")
+}
 
+func TestDiscoverCommandsUseNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-mysql")
+	runDiscoverCommandsUseNamedActiveStore(t, "MySQL")
+}
+
+func runDiscoverCommandsUseNamedActiveStore(t *testing.T, label string) {
+	t.Helper()
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	runCLI(t, "config", "publish", "--from", profileDir)
 
@@ -7947,10 +7956,10 @@ func TestDiscoverCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(caseOut), &caseReport); err != nil {
-		t.Fatalf("decode case discover json: %v\n%s", err, caseOut)
+		t.Fatalf("decode %s case discover json: %v\n%s", label, err, caseOut)
 	}
 	if len(caseReport.Items) != 1 || caseReport.Items[0].ID != "case.alpha.variant" {
-		t.Fatalf("case discover via active SQL Store = %#v", caseReport.Items)
+		t.Fatalf("%s case discover via active SQL Store = %#v", label, caseReport.Items)
 	}
 
 	nodeOut := runCLI(t, "interface-node", "discover", "--filter", "Result Lookup", "--json")
@@ -7960,10 +7969,10 @@ func TestDiscoverCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(nodeOut), &nodeReport); err != nil {
-		t.Fatalf("decode interface-node discover json: %v\n%s", err, nodeOut)
+		t.Fatalf("decode %s interface-node discover json: %v\n%s", label, err, nodeOut)
 	}
 	if len(nodeReport.Items) != 1 || nodeReport.Items[0].ID != "node.alpha" {
-		t.Fatalf("interface-node discover via active SQL Store = %#v", nodeReport.Items)
+		t.Fatalf("%s interface-node discover via active SQL Store = %#v", label, nodeReport.Items)
 	}
 }
 
