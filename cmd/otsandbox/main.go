@@ -783,10 +783,11 @@ type environmentRestoreRepoSpec struct {
 }
 
 type environmentRestorePreflight struct {
-	OK         bool                              `json:"ok"`
-	Tools      []environmentRestorePreflightTool `json:"tools"`
-	HeavySteps []string                          `json:"heavySteps,omitempty"`
-	Notes      []string                          `json:"notes,omitempty"`
+	OK                 bool                              `json:"ok"`
+	Tools              []environmentRestorePreflightTool `json:"tools"`
+	HeavySteps         []string                          `json:"heavySteps,omitempty"`
+	ContainerConflicts []string                          `json:"containerConflicts,omitempty"`
+	Notes              []string                          `json:"notes,omitempty"`
 }
 
 type environmentRestorePreflightTool struct {
@@ -1095,7 +1096,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Workspace:            workspace,
 		Compose:              compose,
 		HealthChecks:         healthChecks,
-		Preflight:            environmentRestorePreflightReport(packageSpec, specs, compose, workspace, cleanupOptions),
+		Preflight:            environmentRestorePreflightReport(packageSpec, specs, compose, workspace, cleanupOptions, prepareReposOnly),
 		SourcePolicy:         environmentRestoreSourcePolicyReport(packageSpec, specs, remoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
@@ -1143,6 +1144,13 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		report.Docker = environmentRestoreDocker(ctx, compose, healthChecks, workspace, execute, healthTimeout, cleanupOptions)
 		if !report.Docker.OK {
 			report.OK = false
+		}
+	} else if !report.Preflight.OK {
+		report.Docker = environmentRestoreDockerReport{
+			OK:      false,
+			Action:  "skipped-due-to-preflight",
+			Workdir: workspace,
+			Error:   "restore preflight did not pass",
 		}
 	} else if !report.SourcePolicy.OK {
 		report.Docker = environmentRestoreDockerReport{
@@ -1226,9 +1234,10 @@ func environmentRestoreSummaryJSON(existing string, report environmentRestoreRep
 		"verificationWorkflow": report.VerificationWorkflow,
 		"workspace":            report.Workspace,
 		"preflight": map[string]any{
-			"ok":         report.Preflight.OK,
-			"tools":      environmentRestoreSummaryTools(report.Preflight.Tools),
-			"heavySteps": report.Preflight.HeavySteps,
+			"ok":                 report.Preflight.OK,
+			"tools":              environmentRestoreSummaryTools(report.Preflight.Tools),
+			"heavySteps":         report.Preflight.HeavySteps,
+			"containerConflicts": report.Preflight.ContainerConflicts,
 		},
 		"package":      environmentRestoreSummaryPackage(report.Package),
 		"sourcePolicy": report.SourcePolicy,
@@ -1609,7 +1618,72 @@ func environmentRestoreIsRemoteGitURL(rawURL string) bool {
 	return at > 0 && colon > at+1
 }
 
-func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestorePreflight {
+func environmentRestoreContainerNameConflicts(compose map[string]any, workspace string) []string {
+	wanted := environmentRestoreContainerNames(compose, workspace)
+	if len(wanted) == 0 {
+		return nil
+	}
+	path, err := exec.LookPath("docker")
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "ps", "-a", "--format", "{{.Names}}").CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	existing := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" {
+			existing[name] = true
+		}
+	}
+	conflicts := []string{}
+	for _, name := range wanted {
+		if existing[name] {
+			conflicts = append(conflicts, name)
+		}
+	}
+	sort.Strings(conflicts)
+	return conflicts
+}
+
+func environmentRestoreContainerNames(compose map[string]any, workspace string) []string {
+	seen := map[string]bool{}
+	addContent := func(content string) {
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "container_name:") {
+				continue
+			}
+			name := strings.TrimSpace(strings.TrimPrefix(line, "container_name:"))
+			name = strings.Trim(name, `"'`)
+			if name != "" {
+				seen[name] = true
+			}
+		}
+	}
+	for _, content := range stringMapFromAny(compose["generatedFiles"]) {
+		addContent(content)
+	}
+	for _, file := range environmentRestoreComposeFiles(compose) {
+		path := restoreWorkspacePath(workspace, file)
+		raw, err := os.ReadFile(path)
+		if err == nil {
+			addContent(string(raw))
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestorePreflight {
 	report := environmentRestorePreflight{
 		OK: true,
 		Notes: []string{
@@ -1648,6 +1722,12 @@ func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec
 			if cleanupOptions.IncludeImages {
 				report.HeavySteps = append(report.HeavySteps, "docker compose down --rmi all may remove local images")
 			}
+		} else if !prepareReposOnly {
+			conflicts := environmentRestoreContainerNameConflicts(compose, workspace)
+			if len(conflicts) > 0 {
+				report.ContainerConflicts = conflicts
+				report.OK = false
+			}
 		}
 		for _, file := range composeFiles {
 			if resolved := restoreWorkspacePath(workspace, file); strings.TrimSpace(resolved) != "" {
@@ -1685,6 +1765,11 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 
 	addItem("store-boundary", true, true, "sandbox PostgreSQL Store must stay outside the restored Docker target environment")
 	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
+	if len(report.Preflight.ContainerConflicts) > 0 {
+		addItem("docker-container-conflicts", true, false, "existing Docker containers would be reused or replaced by fixed container_name values: "+strings.Join(report.Preflight.ContainerConflicts, ", "))
+	} else if strings.TrimSpace(valueString(report.Compose["composeFile"])) != "" {
+		addItem("docker-container-conflicts", true, true, "no existing Docker container_name conflicts detected for non-destructive restore")
+	}
 	if report.SourcePolicy.RemoteOnly {
 		detail := "all service source repositories must be remote Git URLs for PostgreSQL-backed one-click environments; environment startup files come from compact Store metadata"
 		if len(report.SourcePolicy.Violations) > 0 {
@@ -1785,6 +1870,8 @@ func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) st
 		return "recorded start command will run from workspace"
 	case "skipped-due-to-repository-error":
 		return "Docker startup is blocked until repository preparation succeeds"
+	case "skipped-due-to-preflight":
+		return "Docker startup is blocked until restore preflight succeeds"
 	case "skipped-after-repository-preparation":
 		return "repository preparation completed; Docker startup intentionally skipped"
 	case "skipped-due-to-source-policy":

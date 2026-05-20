@@ -1964,3 +1964,17 @@ Remote source policy slice:
   `/tmp/ots-restore-isolated` reports `ok=true`, cloned seven service repos
   from GitLab/GitHub, wrote both compose files, and stopped before Docker with
   `docker.action=skipped-after-repository-preparation`.
+- 2026-05-20T10:15Z: added a non-destructive Docker startup guard. Restore
+  preflight now extracts fixed Compose `container_name` values from Store-backed
+  compose files and compares them with `docker ps -a`; if existing containers
+  would be reused or replaced, full Docker startup is blocked with a
+  `docker-container-conflicts` readiness failure. `--execute
+  --prepare-repos-only` bypasses this check because it does not start Docker.
+- Current host state: 17 existing `sandbox-*` containers are running, so a full
+  `local-pg` restore dry-run now correctly fails before Docker with
+  `docker.action=skipped-due-to-preflight` and lists the conflicting container
+  names. The isolated prepare-only verification still passes, writes both
+  Store-backed compose files, clones the seven service repos, and stops before
+  Docker. This means real Docker up on this machine now requires an operator
+  choice: reuse the existing running environment for acceptance, or approve a
+  backup/down/clean-machine simulation step first.
