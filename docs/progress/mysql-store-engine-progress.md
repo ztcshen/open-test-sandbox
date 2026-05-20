@@ -451,3 +451,27 @@ Current blocker:
 
 - Final completion still requires a dedicated company MySQL Store DSN for
   `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Common Param Canonicalization Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Canonicalized common MySQL driver query keys copied from company config
+  systems: `tls`, `charset`, `collation`, and `maxAllowedPacket`.
+- Preserved the configured values while ensuring the generated driver DSN uses
+  key names that `go-sql-driver/mysql` recognizes instead of passing mixed-case
+  keys through as unknown session params.
+- Added a focused TDD regression test that first showed mixed-case
+  `TLS/CHARSET/COLLATION/MAXALLOWEDPACKET` leaking into the DSN, then now
+  verifies canonical keys.
+
+Validated:
+
+- `go test ./internal/store/mysql -run 'TestParseConfigFromURLAcceptsMySQLURL|TestParseConfigFromURLKeepsStoreTimeParsingAuthoritative|TestParseConfigFromURLAddsBoundedNetworkTimeouts|TestParseConfigFromURLKeepsExplicitNetworkTimeouts|TestParseConfigFromURLCanonicalizesExplicitNetworkTimeoutKeys|TestParseConfigFromURLCanonicalizesCommonDriverParamKeys|TestParseConfigFromURLRejectsNonMySQLDSN|TestParseConfigFromURLRequiresDatabaseName' -count=1`
+
+Current blocker:
+
+- Still blocked on a dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.

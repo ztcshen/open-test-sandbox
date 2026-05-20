@@ -183,6 +183,14 @@ func canonicalMySQLParamKey(key string) string {
 		return "readTimeout"
 	case "writetimeout":
 		return "writeTimeout"
+	case "tls":
+		return "tls"
+	case "charset":
+		return "charset"
+	case "collation":
+		return "collation"
+	case "maxallowedpacket":
+		return "maxAllowedPacket"
 	default:
 		return key
 	}

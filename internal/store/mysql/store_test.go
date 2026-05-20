@@ -90,6 +90,23 @@ func TestParseConfigFromURLCanonicalizesExplicitNetworkTimeoutKeys(t *testing.T)
 	}
 }
 
+func TestParseConfigFromURLCanonicalizesCommonDriverParamKeys(t *testing.T) {
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?TLS=false&CHARSET=utf8mb4&COLLATION=utf8mb4_unicode_ci&MAXALLOWEDPACKET=1048576")
+	if err != nil {
+		t.Fatalf("parse mysql url: %v", err)
+	}
+	for _, want := range []string{"tls=false", "charset=utf8mb4", "collation=utf8mb4_unicode_ci", "maxAllowedPacket=1048576"} {
+		if !strings.Contains(cfg.DSN, want) {
+			t.Fatalf("mysql driver dsn should canonicalize common driver param key %q: %q", want, cfg.DSN)
+		}
+	}
+	for _, reject := range []string{"TLS=false", "CHARSET=utf8mb4", "COLLATION=utf8mb4_unicode_ci", "MAXALLOWEDPACKET=1048576"} {
+		if strings.Contains(cfg.DSN, reject) {
+			t.Fatalf("mysql driver dsn should not keep mixed-case driver param key %q: %q", reject, cfg.DSN)
+		}
+	}
+}
+
 func TestParseConfigFromURLRejectsNonMySQLDSN(t *testing.T) {
 	_, err := mysql.ParseConfigFromURL("postgres://localhost/otsandbox")
 	if err == nil {
