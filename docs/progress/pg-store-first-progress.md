@@ -1585,7 +1585,7 @@ Incomplete work:
 
 ## 2026-05-20 Environment Restore Goal Ledger
 
-Estimated overall new-machine environment restore progress: 98%.
+Estimated overall new-machine environment restore progress: 98.5%.
 
 Completed evidence:
 
@@ -1651,6 +1651,17 @@ Completed evidence:
   business service repositories must clone/fetch/ref-prepare before Docker
   pull/build/up starts, so missing or mismatched code stops before target Docker
   startup.
+- Restore reports a Store-persisted `readiness` gate before true
+  colleague-machine validation: it checks the sandbox PostgreSQL Store boundary,
+  verified workflow anchor, service repository readiness, Compose
+  services/middleware plan, health probes, cleanup review, workflow run gate,
+  and the required operator pause before deleting containers/images or waiting
+  on large image downloads.
+- The readiness gate directly covers the "5 business services before Docker"
+  scenario: all recorded service repositories must pass clone/checkout/ref
+  preparation before Docker startup; middleware such as Apollo or MySQL is
+  represented through the recorded Compose service/image plan and the same
+  health probe gate.
 
 Latest light validation:
 
@@ -1669,6 +1680,7 @@ Latest light validation:
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(StopsBeforeDockerWhenRepositoryPrecheckFails|RunsMixedHealthProbes|FailsWhenHealthProbeFails)' -count=1`
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore' -count=1`
 - `go test ./internal/controlplane -run 'TestServerManagesVerifiedEnvironmentCatalogFromStore' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(ClonesRemoteReposForVerifiedWorkflow|StopsBeforeDockerWhenRepositoryPrecheckFails|PlansDockerCleanupWithoutExecuting)' -count=1`
 - `rg -n -i 'fall''back' . --glob '!node_modules/**'`
 - `git diff --check`
 
@@ -1677,6 +1689,9 @@ Incomplete work:
 - True new-machine proof remains intentionally paused until the user approves a
   heavy validation pass that backs up/deletes current Docker containers/images
   or otherwise simulates a clean colleague machine.
+- Before that proof, keep the current environment running for manual basic
+  verification at `http://127.0.0.1:58663/`; do not delete or rebuild the
+  current Docker services until the user finishes that self-test.
 - Restore still needs richer provider hardening for GitHub/GitLab tokens,
   submodules, and auth prompts.
 - Docker restore still needs a real operator-approved clean-machine proof;

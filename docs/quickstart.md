@@ -130,16 +130,31 @@ you want a fixed local report directory. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
 
+The restore report also includes `readiness`, the final pre-Docker review gate
+for a colleague-machine simulation. It checks that the sandbox PostgreSQL Store
+is outside the target Docker environment, the restore is anchored to a
+verification workflow, all recorded service repositories can be cloned or
+validated before Docker, a Compose/start plan exists, recorded Compose services
+cover the business services and middleware images, at least one health probe is
+recorded, cleanup commands are reviewable when requested, and the operator pause
+is preserved before container/image deletion or long downloads. If a workflow
+needs five business services, those five services should appear as repository
+items or existing checkout items and must pass before Docker pull/build/up can
+start. Middleware such as Apollo or MySQL normally appears through the recorded
+Compose service plan and image pull/build plan, then is checked through the
+same health probe gate.
+
 Every restore attempt writes a compact diagnostic back to the selected Store's
 Environment Catalog entry. `summary.lastRestore` is the quick pointer, and
 `summary.restoreAttempts` keeps the most recent 20 attempts. The summary
-includes restore id, phase, preflight status, repository actions, Docker
-action/cleanup status, health check counts, workflow action, and next actions.
-It is intentionally not full Evidence: full command output, workflow reports,
-and runtime logs stay in the existing local report/Evidence paths, and the
-summary must not contain credentials, raw DSNs, or full logs. This keeps
-dry-runs, blocked cleanup attempts, and successful executions visible through
-`environment inspect` and the control-plane API.
+includes restore id, phase, preflight status, repository actions, readiness
+status, Docker action/cleanup status, health check counts, workflow action, and
+next actions. It is intentionally not full Evidence: full command output,
+workflow reports, and runtime logs stay in the existing local report/Evidence
+paths, and the summary must not contain credentials, raw DSNs, or full logs.
+This keeps dry-runs, blocked cleanup attempts, readiness failures, and
+successful executions visible through `environment inspect` and the
+control-plane API.
 
 Health checks are Store-backed probes, not only HTTP pings. Use `--health-url`
 for GET 2xx checks, `--health-tcp HOST:PORT` for port readiness,

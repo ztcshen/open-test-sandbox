@@ -609,6 +609,7 @@ type environmentRestoreReport struct {
 	Compose              map[string]any                 `json:"compose"`
 	HealthChecks         []any                          `json:"healthChecks"`
 	Preflight            environmentRestorePreflight    `json:"preflight"`
+	Readiness            environmentRestoreReadiness    `json:"readiness"`
 	Docker               environmentRestoreDockerReport `json:"docker"`
 	Workflow             environmentRestoreWorkflowRun  `json:"workflow"`
 	NextActions          []string                       `json:"nextActions"`
@@ -649,6 +650,21 @@ type environmentRestorePreflightTool struct {
 	OK       bool   `json:"ok"`
 	Path     string `json:"path,omitempty"`
 	Error    string `json:"error,omitempty"`
+}
+
+type environmentRestoreReadiness struct {
+	OK                         bool                              `json:"ok"`
+	Action                     string                            `json:"action"`
+	PauseBeforeHeavyValidation bool                              `json:"pauseBeforeHeavyValidation"`
+	NextStep                   string                            `json:"nextStep"`
+	Items                      []environmentRestoreReadinessItem `json:"items"`
+}
+
+type environmentRestoreReadinessItem struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	OK       bool   `json:"ok"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 type environmentRestoreDockerReport struct {
@@ -856,6 +872,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	if !execute {
 		report.NextActions = append([]string{"review the Docker Compose plan, then rerun with --execute"}, report.NextActions...)
 	}
+	report.Readiness = environmentRestoreReadinessReport(report, specs, cleanupOptions)
 	if strings.TrimSpace(workflowOptions.StoreURL) != "" {
 		persisted, err := environmentRestorePersistEnvironment(ctx, workflowOptions.StoreURL, env, report, attemptedAt)
 		if err != nil {
@@ -865,6 +882,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 				report.Workflow.OK = false
 				report.Workflow.Error = err.Error()
 			}
+			report.Readiness = environmentRestoreReadinessReport(report, specs, cleanupOptions)
 		} else {
 			report.Environment = environmentPayload(persisted)
 		}
@@ -903,6 +921,7 @@ func environmentRestoreSummaryJSON(existing string, report environmentRestoreRep
 			"heavySteps": report.Preflight.HeavySteps,
 		},
 		"repositories": environmentRestoreSummaryRepos(report.Repos),
+		"readiness":    environmentRestoreSummaryReadiness(report.Readiness),
 		"docker":       environmentRestoreSummaryDocker(report.Docker),
 		"workflow": map[string]any{
 			"action":     report.Workflow.Action,
@@ -999,6 +1018,27 @@ func environmentRestoreSummaryRepos(repos []environmentRestoreRepoReport) []map[
 		})
 	}
 	return out
+}
+
+func environmentRestoreSummaryReadiness(readiness environmentRestoreReadiness) map[string]any {
+	failed := []map[string]any{}
+	for _, item := range readiness.Items {
+		if item.OK {
+			continue
+		}
+		failed = append(failed, map[string]any{
+			"name":     item.Name,
+			"required": item.Required,
+			"detail":   item.Detail,
+		})
+	}
+	return map[string]any{
+		"ok":                         readiness.OK,
+		"action":                     readiness.Action,
+		"pauseBeforeHeavyValidation": readiness.PauseBeforeHeavyValidation,
+		"nextStep":                   readiness.NextStep,
+		"failedItems":                failed,
+	}
 }
 
 func environmentRestoreSummaryDocker(report environmentRestoreDockerReport) map[string]any {
@@ -1163,6 +1203,118 @@ func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compo
 		}
 	}
 	return report
+}
+
+func environmentRestoreReadinessReport(report environmentRestoreReport, specs []environmentRestoreRepoSpec, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreReadiness {
+	readiness := environmentRestoreReadiness{
+		OK:                         true,
+		Action:                     "ready-for-operator-review",
+		PauseBeforeHeavyValidation: true,
+	}
+	addItem := func(name string, required bool, ok bool, detail string) {
+		readiness.Items = append(readiness.Items, environmentRestoreReadinessItem{
+			Name:     name,
+			Required: required,
+			OK:       ok,
+			Detail:   detail,
+		})
+		if required && !ok {
+			readiness.OK = false
+		}
+	}
+
+	addItem("store-boundary", true, true, "sandbox PostgreSQL Store must stay outside the restored Docker target environment")
+	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
+
+	repoOK := true
+	for _, item := range report.Repos {
+		if !item.OK {
+			repoOK = false
+			break
+		}
+	}
+	switch {
+	case len(specs) == 0:
+		addItem("service-repositories", true, true, "no service repositories recorded; Docker uses the recorded compose/start plan and existing local context")
+	case report.Executed:
+		addItem("service-repositories", true, repoOK, fmt.Sprintf("%d service repository checkout(s) prepared before Docker startup", len(specs)))
+	default:
+		addItem("service-repositories", true, repoOK, fmt.Sprintf("%d service repository checkout(s) will be cloned or validated before Docker startup", len(specs)))
+	}
+
+	dockerPlanOK := report.Docker.OK && (report.Docker.Action == "plan-docker-compose" || report.Docker.Action == "run-docker-compose" || report.Docker.Action == "plan-start-command" || report.Docker.Action == "run-start-command")
+	addItem("docker-start-plan", true, dockerPlanOK, environmentRestoreReadinessDockerDetail(report))
+
+	composeServices := stringSliceFromAny(report.Compose["services"])
+	if strings.TrimSpace(valueString(report.Compose["composeFile"])) != "" {
+		detail := "Docker Compose will start all services in the recorded file, including middleware images such as Apollo or MySQL when present"
+		if len(composeServices) > 0 {
+			detail = "Docker Compose service allow-list: " + strings.Join(composeServices, ", ")
+		}
+		addItem("compose-services-and-middleware", true, true, detail)
+	}
+
+	healthProbeCount := len(report.HealthChecks)
+	addItem("health-probes", true, healthProbeCount > 0, fmt.Sprintf("%d Store-backed health probe(s) recorded for post-start readiness", healthProbeCount))
+
+	cleanupOK := true
+	cleanupDetail := "Docker cleanup not requested"
+	if cleanupOptions.Requested || report.Docker.Cleanup.Requested {
+		cleanupOK = report.Docker.Cleanup.Requested && len(report.Docker.Cleanup.BackupCommands) > 0 && len(report.Docker.Cleanup.Commands) > 0
+		if report.Executed && !report.Docker.Cleanup.Allowed {
+			cleanupOK = false
+		}
+		cleanupDetail = "Compose-scoped cleanup must be reviewed before simulating a clean colleague machine"
+	}
+	addItem("docker-cleanup-review", true, cleanupOK, cleanupDetail)
+
+	workflowReady := strings.TrimSpace(report.VerificationWorkflow) != ""
+	workflowDetail := "rerun with --execute --run-workflow after Docker health passes"
+	if report.Workflow.Action == "run-verification-workflow" {
+		workflowReady = report.Workflow.OK
+		workflowDetail = "verification workflow run status: " + statusText(report.Workflow.OK)
+	}
+	addItem("workflow-run-gate", true, workflowReady, workflowDetail)
+	addItem("operator-pause", true, true, "pause before deleting containers/images or running long image downloads for clean-machine validation")
+
+	if !readiness.OK {
+		readiness.Action = "fix-readiness-items-before-docker"
+		readiness.NextStep = "fix failed readiness items before real clean-machine validation"
+		return readiness
+	}
+	if report.Executed && report.Workflow.Action == "run-verification-workflow" && report.Workflow.OK {
+		readiness.Action = "restore-executed-and-workflow-verified"
+		readiness.NextStep = "collect real SkyWalking topology, then publish only after verification gates pass"
+		return readiness
+	}
+	if report.Executed {
+		readiness.Action = "ready-for-workflow-verification"
+		readiness.NextStep = "run the anchored verification workflow and collect Evidence/topology"
+		return readiness
+	}
+	readiness.NextStep = "review the plan, then ask for operator approval before destructive Docker cleanup or image removal"
+	return readiness
+}
+
+func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) string {
+	switch report.Docker.Action {
+	case "plan-docker-compose", "run-docker-compose":
+		if report.Docker.ComposeFile != "" {
+			return "Docker Compose plan uses " + report.Docker.ComposeFile
+		}
+		return "Docker Compose plan is recorded"
+	case "plan-start-command", "run-start-command":
+		return "recorded start command will run from workspace"
+	case "skipped-due-to-repository-error":
+		return "Docker startup is blocked until repository preparation succeeds"
+	case "missing-docker-plan":
+		return "composeFile or startCommand is required"
+	default:
+		if strings.TrimSpace(report.Docker.Error) != "" {
+			return report.Docker.Error
+		}
+		return "Docker startup plan is not ready"
+	}
 }
 
 func environmentRestoreTool(name string, required bool) environmentRestorePreflightTool {
@@ -1836,6 +1988,22 @@ func printEnvironmentRestoreReport(report environmentRestoreReport) {
 	}
 	if report.Error != "" {
 		fmt.Printf("Error: %s\n", report.Error)
+	}
+	if report.Readiness.Action != "" {
+		fmt.Printf("Readiness: %s (ok=%t)\n", report.Readiness.Action, report.Readiness.OK)
+		for _, item := range report.Readiness.Items {
+			state := "ok"
+			if !item.OK {
+				state = "failed"
+			}
+			fmt.Printf("  %s: %s\n", item.Name, state)
+			if item.Detail != "" {
+				fmt.Printf("    %s\n", item.Detail)
+			}
+		}
+		if report.Readiness.NextStep != "" {
+			fmt.Printf("  next: %s\n", report.Readiness.NextStep)
+		}
 	}
 	for _, repo := range report.Repos {
 		state := repo.Action

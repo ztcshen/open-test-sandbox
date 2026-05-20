@@ -649,6 +649,15 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 			} `json:"tools"`
 			HeavySteps []string `json:"heavySteps"`
 		} `json:"preflight"`
+		Readiness struct {
+			OK                         bool `json:"ok"`
+			PauseBeforeHeavyValidation bool `json:"pauseBeforeHeavyValidation"`
+			Items                      []struct {
+				Name   string `json:"name"`
+				OK     bool   `json:"ok"`
+				Detail string `json:"detail"`
+			} `json:"items"`
+		} `json:"readiness"`
 		NextActions []string `json:"nextActions"`
 	}
 	if err := json.Unmarshal([]byte(dryRunOut), &dryRun); err != nil {
@@ -666,6 +675,9 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	}
 	if !dryRun.Preflight.OK || !restorePreflightHasTool(dryRun.Preflight.Tools, "git", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker compose", true) || len(dryRun.Preflight.HeavySteps) == 0 {
 		t.Fatalf("restore dry-run preflight = %#v", dryRun.Preflight)
+	}
+	if !dryRun.Readiness.OK || !dryRun.Readiness.PauseBeforeHeavyValidation || !restoreReadinessHasItem(dryRun.Readiness.Items, "service-repositories", true, "will be cloned") || !restoreReadinessHasItem(dryRun.Readiness.Items, "compose-services-and-middleware", true, "including middleware") || !restoreReadinessHasItem(dryRun.Readiness.Items, "health-probes", true, "1 Store-backed") || !restoreReadinessHasItem(dryRun.Readiness.Items, "operator-pause", true, "pause before") {
+		t.Fatalf("restore dry-run readiness = %#v", dryRun.Readiness)
 	}
 	if len(dryRun.NextActions) == 0 || !strings.Contains(strings.Join(dryRun.NextActions, "\n"), "workflow.core-10") {
 		t.Fatalf("restore dry-run should anchor next actions to verification workflow: %#v", dryRun.NextActions)
@@ -738,6 +750,12 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 						Action    string `json:"action"`
 						OK        bool   `json:"ok"`
 					} `json:"repositories"`
+					Readiness struct {
+						OK          bool `json:"ok"`
+						FailedItems []struct {
+							Name string `json:"name"`
+						} `json:"failedItems"`
+					} `json:"readiness"`
 				} `json:"lastRestore"`
 				RestoreAttempts []struct {
 					ID    string `json:"id"`
@@ -752,6 +770,9 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	lastRestore := inspected.Environment.Summary.LastRestore
 	if lastRestore.ID != executed.RestoreID || !lastRestore.OK || !lastRestore.Executed || lastRestore.Phase != "completed" || lastRestore.VerificationWorkflow != "workflow.core-10" || lastRestore.Docker.Action != "run-docker-compose" || !lastRestore.Docker.OK || lastRestore.Docker.HealthChecks != 1 || lastRestore.Docker.HealthPassed != 1 || len(lastRestore.Repositories) != 1 || lastRestore.Repositories[0].Action != "clone" || !lastRestore.Repositories[0].OK {
 		t.Fatalf("persisted restore summary = %#v; executed restore id=%s", lastRestore, executed.RestoreID)
+	}
+	if !lastRestore.Readiness.OK || len(lastRestore.Readiness.FailedItems) != 0 {
+		t.Fatalf("persisted readiness summary = %#v", lastRestore.Readiness)
 	}
 	attempts := inspected.Environment.Summary.RestoreAttempts
 	if len(attempts) != 2 || attempts[0].ID == attempts[1].ID || attempts[1].ID != executed.RestoreID || attempts[1].Phase != "completed" {
@@ -825,6 +846,22 @@ func restorePreflightHasTool(tools []struct {
 func restoreTypedPreflightHasTool(tools []environmentRestorePreflightTool, name string, ok bool) bool {
 	for _, tool := range tools {
 		if tool.Name == name && tool.Required && tool.OK == ok {
+			return true
+		}
+	}
+	return false
+}
+
+func restoreReadinessHasItem(items []struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}, name string, ok bool, detailContains string) bool {
+	for _, item := range items {
+		if item.Name != name || item.OK != ok {
+			continue
+		}
+		if detailContains == "" || strings.Contains(item.Detail, detailContains) {
 			return true
 		}
 	}
