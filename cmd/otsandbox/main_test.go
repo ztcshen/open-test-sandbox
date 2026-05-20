@@ -7052,21 +7052,43 @@ func runEvidenceImportUsesNamedActiveStore(t *testing.T, storeRef string, runLab
 }
 
 func TestEvidenceListCommandPrintsStoreRecords(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-evidence-list-pg")
+	runEvidenceListCommandPrintsStoreRecords(t, "PostgreSQL")
+}
+
+func TestEvidenceListCommandPrintsStoreRecordsUsesNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-evidence-list-mysql")
+	runEvidenceListCommandPrintsStoreRecords(t, "MySQL")
+}
+
+func runEvidenceListCommandPrintsStoreRecords(t *testing.T, label string) {
+	t.Helper()
 	runID := uniqueTestID(t, "case-run-004")
-	createStoredCaseRun(t, runID)
+	createStoredCaseRun(t, runID, label)
 
 	out := runCLI(t, "evidence", "list", "--run", runID)
 
 	for _, want := range []string{"Run: " + runID, "Case Run: " + runID + ".case", "Case: case.alpha", "Evidence: response"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("evidence list output missing %q: %q", want, out)
+			t.Fatalf("%s evidence list output missing %q: %q", label, want, out)
 		}
 	}
 }
 
 func TestEvidenceListCommandCanEmitJSON(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-evidence-list-json-pg")
+	runEvidenceListCommandCanEmitJSON(t, "PostgreSQL")
+}
+
+func TestEvidenceListCommandCanEmitJSONUsesNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-evidence-list-json-mysql")
+	runEvidenceListCommandCanEmitJSON(t, "MySQL")
+}
+
+func runEvidenceListCommandCanEmitJSON(t *testing.T, label string) {
+	t.Helper()
 	runID := uniqueTestID(t, "case-run-005")
-	createStoredCaseRun(t, runID)
+	createStoredCaseRun(t, runID, label)
 
 	out := runCLI(t, "evidence", "list", "--run", runID, "--json")
 
@@ -7078,23 +7100,34 @@ func TestEvidenceListCommandCanEmitJSON(t *testing.T) {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode evidence list json: %v\n%s", err, out)
+		t.Fatalf("decode %s evidence list json: %v\n%s", label, err, out)
 	}
 	if len(report.Runs) != 1 || report.Runs[0].ID != runID {
-		t.Fatalf("json runs = %#v", report.Runs)
+		t.Fatalf("%s json runs = %#v", label, report.Runs)
 	}
 	if report.Runs[0].APICaseRunCount != 1 || report.Runs[0].EvidenceCount != 5 {
-		t.Fatalf("json run counts = %#v", report.Runs[0])
+		t.Fatalf("%s json run counts = %#v", label, report.Runs[0])
 	}
 }
 
 func TestEvidenceListCommandRejectsMissingRun(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-evidence-list-missing-pg")
+	runEvidenceListCommandRejectsMissingRun(t, "PostgreSQL")
+}
+
+func TestEvidenceListCommandRejectsMissingRunUsesNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-evidence-list-missing-mysql")
+	runEvidenceListCommandRejectsMissingRun(t, "MySQL")
+}
+
+func runEvidenceListCommandRejectsMissingRun(t *testing.T, label string) {
+	t.Helper()
 	runID := uniqueTestID(t, "case-run-006")
-	createStoredCaseRun(t, runID)
+	createStoredCaseRun(t, runID, label)
 
 	out := runCLIFails(t, "evidence", "list", "--run", "case-run-missing")
 	if !strings.Contains(out, "run not found") || !strings.Contains(out, "case-run-missing") {
-		t.Fatalf("missing run output = %q", out)
+		t.Fatalf("%s missing run output = %q", label, out)
 	}
 }
 
@@ -10761,9 +10794,8 @@ func containsString(items []string, want string) bool {
 	return false
 }
 
-func createStoredCaseRun(t *testing.T, runID string) {
+func createStoredCaseRun(t *testing.T, runID string, label string) {
 	t.Helper()
-	configureNamedPostgreSQLActiveStore(t, "daily-evidence-list-pg")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{"status":"created"}`)
@@ -10776,6 +10808,7 @@ func createStoredCaseRun(t *testing.T, runID string) {
 	evidenceDir := filepath.Join(dir, "evidence")
 
 	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", runID, "--evidence-dir", evidenceDir, "--profile", "sample")
+	t.Logf("created %s stored case run %s", label, runID)
 }
 
 func createPostProcessTaskStore(t *testing.T) string {
