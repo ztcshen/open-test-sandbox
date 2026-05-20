@@ -458,13 +458,19 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	status := flags.String("status", "draft", "Environment status")
 	verificationWorkflowID := flags.String("verification-workflow", "", "Verification workflow id")
 	composeFile := flags.String("compose-file", "", "Local compose file path")
+	composeProjectName := flags.String("compose-project-name", "", "Docker Compose project name")
+	composeSkipPull := flags.Bool("compose-skip-pull", false, "Skip Docker Compose image pull during restore")
+	composeSkipBuild := flags.Bool("compose-skip-build", false, "Skip Docker Compose build during restore")
 	startCommand := flags.String("start-command", "", "Local startup command")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	var services, repos, branches, checkouts, healthURLs stringListFlag
+	var services, repos, branches, checkouts, healthURLs, composeEnvFiles, composeProfiles, composeServices stringListFlag
 	flags.Var(&services, "service", "Service id; repeat for multiple services")
 	flags.Var(&repos, "repo", "Service repo as SERVICE=PATH_OR_URL; repeat for multiple services")
 	flags.Var(&branches, "branch", "Service branch as SERVICE=BRANCH; repeat for multiple services")
 	flags.Var(&checkouts, "checkout", "Service checkout path as SERVICE=PATH; repeat for multiple services")
+	flags.Var(&composeEnvFiles, "compose-env-file", "Docker Compose env file path; repeat for multiple files")
+	flags.Var(&composeProfiles, "compose-profile", "Docker Compose profile; repeat for multiple profiles")
+	flags.Var(&composeServices, "compose-service", "Docker Compose service to start; repeat for multiple services")
 	flags.Var(&healthURLs, "health-url", "Health check URL; repeat for multiple checks")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -484,7 +490,7 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		Status:                 stringDefault(strings.TrimSpace(*status), "draft"),
 		ServicesJSON:           mustCompactJSON(environmentServices(services, repos, branches, checkouts)),
 		ReposJSON:              mustCompactJSON(environmentRepoMap(repos, branches, checkouts)),
-		ComposeJSON:            mustCompactJSON(map[string]any{"composeFile": strings.TrimSpace(*composeFile), "startCommand": strings.TrimSpace(*startCommand)}),
+		ComposeJSON:            mustCompactJSON(environmentComposeConfig(*composeFile, *startCommand, *composeProjectName, composeEnvFiles, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild)),
 		HealthChecksJSON:       mustCompactJSON(environmentHealthChecks(healthURLs)),
 		VerificationWorkflowID: strings.TrimSpace(*verificationWorkflowID),
 		SummaryJSON:            mustCompactJSON(map[string]any{"source": "cli"}),
@@ -905,11 +911,13 @@ func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compo
 	if composeFile != "" {
 		report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
 		report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", "version"))
-		report.HeavySteps = append(report.HeavySteps,
-			"docker compose pull may download images",
-			"docker compose build may build images from local checkouts",
-			"docker compose up -d may create or replace containers",
-		)
+		if !boolFromReportAny(compose["skipPull"]) {
+			report.HeavySteps = append(report.HeavySteps, "docker compose pull may download images")
+		}
+		if !boolFromReportAny(compose["skipBuild"]) {
+			report.HeavySteps = append(report.HeavySteps, "docker compose build may build images from local checkouts")
+		}
+		report.HeavySteps = append(report.HeavySteps, "docker compose up -d may create or replace containers")
 		if resolved := restoreWorkspacePath(workspace, composeFile); strings.TrimSpace(resolved) != "" {
 			report.Notes = append(report.Notes, "compose file must exist before Docker execution: "+resolved)
 		}
@@ -1021,11 +1029,15 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 	case composeFile != "":
 		report.Action = "plan-docker-compose"
 		report.ComposeFile = restoreWorkspacePath(workspace, composeFile)
-		report.Commands = [][]string{
-			{"docker", "compose", "-f", report.ComposeFile, "pull"},
-			{"docker", "compose", "-f", report.ComposeFile, "build"},
-			{"docker", "compose", "-f", report.ComposeFile, "up", "-d"},
+		baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, report.ComposeFile)
+		services := stringSliceFromAny(compose["services"])
+		if !boolFromReportAny(compose["skipPull"]) {
+			report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, services...)...))
 		}
+		if !boolFromReportAny(compose["skipBuild"]) {
+			report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"build"}, services...)...))
+		}
+		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
 	case startCommand != "":
 		report.Action = "plan-start-command"
 		report.Commands = [][]string{{"/bin/sh", "-c", startCommand}}
@@ -1132,6 +1144,43 @@ func restoreWorkspacePath(workspace string, value string) string {
 		return value
 	}
 	return filepath.Join(workspace, value)
+}
+
+func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string, composeFile string) []string {
+	args := []string{"-f", composeFile}
+	if projectName := strings.TrimSpace(valueString(compose["projectName"])); projectName != "" {
+		args = append(args, "-p", projectName)
+	}
+	for _, envFile := range stringSliceFromAny(compose["envFiles"]) {
+		args = append(args, "--env-file", restoreWorkspacePath(workspace, envFile))
+	}
+	for _, profile := range stringSliceFromAny(compose["profiles"]) {
+		args = append(args, "--profile", profile)
+	}
+	return args
+}
+
+func stringSliceFromAny(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		if typed, ok := value.([]string); ok {
+			out := make([]string, 0, len(typed))
+			for _, item := range typed {
+				if strings.TrimSpace(item) != "" {
+					out = append(out, strings.TrimSpace(item))
+				}
+			}
+			return out
+		}
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, item := range values {
+		if value := strings.TrimSpace(valueString(item)); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func runRestoreGitCommand(ctx context.Context, args ...string) (string, string) {
@@ -1510,6 +1559,32 @@ func environmentRepoMap(repos stringListFlag, branches stringListFlag, checkouts
 			item["checkout"] = checkout
 		}
 		out[id] = item
+	}
+	return out
+}
+
+func environmentComposeConfig(composeFile string, startCommand string, projectName string, envFiles stringListFlag, profiles stringListFlag, services stringListFlag, skipPull bool, skipBuild bool) map[string]any {
+	out := map[string]any{
+		"composeFile":  strings.TrimSpace(composeFile),
+		"startCommand": strings.TrimSpace(startCommand),
+	}
+	if strings.TrimSpace(projectName) != "" {
+		out["projectName"] = strings.TrimSpace(projectName)
+	}
+	if len(envFiles.Values()) > 0 {
+		out["envFiles"] = envFiles.Values()
+	}
+	if len(profiles.Values()) > 0 {
+		out["profiles"] = profiles.Values()
+	}
+	if len(services.Values()) > 0 {
+		out["services"] = services.Values()
+	}
+	if skipPull {
+		out["skipPull"] = true
+	}
+	if skipBuild {
+		out["skipBuild"] = true
 	}
 	return out
 }

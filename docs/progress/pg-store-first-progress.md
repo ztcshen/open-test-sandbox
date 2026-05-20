@@ -1585,7 +1585,7 @@ Incomplete work:
 
 ## 2026-05-20 Environment Restore Goal Ledger
 
-Estimated overall new-machine environment restore progress: 88%.
+Estimated overall new-machine environment restore progress: 91%.
 
 Completed evidence:
 
@@ -1609,10 +1609,14 @@ Completed evidence:
 - Restore preflight now reports required `git`, `docker`, and Docker Compose
   plugin capability through `docker compose version`, and labels heavy Docker
   pull/build/up steps before execution.
+- Environment Catalog compose facts now support project name, env files,
+  profiles, service selection, and `skipPull`/`skipBuild`; CLI restore and API
+  bootstrap both reflect those options in generated Docker Compose commands.
 
 Latest light validation:
 
-- `go test ./cmd/otsandbox -run 'TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin|TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(HonorsComposeOptionsFromStore|ClonesRemoteReposForVerifiedWorkflow)' -count=1`
+- `go test ./internal/controlplane -run 'TestServerManagesVerifiedEnvironmentCatalogFromStore' -count=1`
 
 Incomplete work:
 
@@ -1622,9 +1626,9 @@ Incomplete work:
 - Restore still needs richer provider/checkout hardening for GitHub/GitLab
   tokens, commit/tag pinning, dirty checkout detection, submodules, and remote
   URL mismatch diagnostics.
-- Docker restore still needs optional controls for project name, env files,
-  profiles, service selection, and a safer way to skip image pulls when a user
-  wants a lighter local start.
+- Docker restore still needs policy guardrails for destructive cleanup,
+  container/image backup plans, and explicit approval before clean-machine
+  simulation.
 - Health checks are still HTTP GET 2xx only; future work should add Compose
   service health, port probes, command probes, dependency ordering, and more
   durable restore-run records.

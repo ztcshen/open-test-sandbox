@@ -325,12 +325,14 @@ func environmentBootstrapDockerPlan(compose map[string]any, workspace string) ma
 		return map[string]any{
 			"action":      "docker-compose",
 			"composeFile": composeFile,
-			"commands": [][]string{
-				{"docker", "compose", "-f", composeFile, "pull"},
-				{"docker", "compose", "-f", composeFile, "build"},
-				{"docker", "compose", "-f", composeFile, "up", "-d"},
-			},
-			"heavy": true,
+			"projectName": valueString(compose["projectName"]),
+			"envFiles":    stringSliceValue(compose["envFiles"]),
+			"profiles":    stringSliceValue(compose["profiles"]),
+			"services":    stringSliceValue(compose["services"]),
+			"skipPull":    boolValue(compose["skipPull"]),
+			"skipBuild":   boolValue(compose["skipBuild"]),
+			"commands":    environmentBootstrapComposeCommands(compose, workspace, composeFile),
+			"heavy":       true,
 		}
 	}
 	if startCommand != "" {
@@ -341,6 +343,55 @@ func environmentBootstrapDockerPlan(compose map[string]any, workspace string) ma
 		}
 	}
 	return map[string]any{"action": "missing-docker-plan", "commands": [][]string{}, "heavy": false}
+}
+
+func environmentBootstrapComposeCommands(compose map[string]any, workspace string, composeFile string) [][]string {
+	baseArgs := []string{"-f", composeFile}
+	if projectName := strings.TrimSpace(valueString(compose["projectName"])); projectName != "" {
+		baseArgs = append(baseArgs, "-p", projectName)
+	}
+	for _, envFile := range stringSliceValue(compose["envFiles"]) {
+		if !filepath.IsAbs(envFile) && !strings.HasPrefix(envFile, "$") {
+			envFile = filepath.Join(workspace, envFile)
+		}
+		baseArgs = append(baseArgs, "--env-file", envFile)
+	}
+	for _, profile := range stringSliceValue(compose["profiles"]) {
+		baseArgs = append(baseArgs, "--profile", profile)
+	}
+	services := stringSliceValue(compose["services"])
+	out := [][]string{}
+	if !boolValue(compose["skipPull"]) {
+		out = append(out, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, services...)...))
+	}
+	if !boolValue(compose["skipBuild"]) {
+		out = append(out, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"build"}, services...)...))
+	}
+	out = append(out, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
+	return out
+}
+
+func stringSliceValue(value any) []string {
+	if typed, ok := value.([]string); ok {
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if strings.TrimSpace(item) != "" {
+				out = append(out, strings.TrimSpace(item))
+			}
+		}
+		return out
+	}
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, item := range values {
+		if value := strings.TrimSpace(valueString(item)); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func environmentBootstrapHealthPlan(checks []any) []map[string]any {

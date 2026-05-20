@@ -1136,6 +1136,20 @@ func TestServerManagesVerifiedEnvironmentCatalogFromStore(t *testing.T) {
 	if len(steps) != 4 || steps[0].(map[string]any)["kind"] != "repository" || steps[1].(map[string]any)["kind"] != "docker" || steps[3].(map[string]any)["workflowId"] != "workflow.core-10" {
 		t.Fatalf("bootstrap executable steps = %#v", steps)
 	}
+
+	registeredOptions := postJSONResponse(t, server.URL+"/api/environments", `{
+  "id": "env.compose.options.api",
+  "compose": {"composeFile":"compose.yml","projectName":"demo","envFiles":[".env.local"],"profiles":["api"],"services":["web"],"skipPull":true,"skipBuild":true},
+  "verificationWorkflowId": "workflow.core-10"
+}`, http.StatusOK)
+	if registeredOptions["ok"] != true {
+		t.Fatalf("register compose options environment = %#v", registeredOptions)
+	}
+	optionsBootstrap := decodeJSONResponse(t, server.URL+"/api/environments/env.compose.options.api/bootstrap", http.StatusOK)
+	optionsDocker := optionsBootstrap["plan"].(map[string]any)["restore"].(map[string]any)["docker"].(map[string]any)
+	if optionsDocker["projectName"] != "demo" || optionsDocker["skipPull"] != true || optionsDocker["skipBuild"] != true || len(optionsDocker["commands"].([]any)) != 1 {
+		t.Fatalf("compose options bootstrap docker plan = %#v", optionsDocker)
+	}
 }
 
 func TestServerListsInstalledProfilesFromProfileHome(t *testing.T) {

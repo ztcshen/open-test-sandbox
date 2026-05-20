@@ -818,6 +818,59 @@ func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) 
 	}
 }
 
+func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	writeFile(t, filepath.Join(workspace, ".env.local"), "MODE=local\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.compose.options",
+		"--compose-file", "compose.yml",
+		"--compose-project-name", "demo",
+		"--compose-env-file", ".env.local",
+		"--compose-profile", "api",
+		"--compose-service", "web",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.compose.options")
+	var report struct {
+		OK      bool `json:"ok"`
+		Compose struct {
+			ProjectName string   `json:"projectName"`
+			EnvFiles    []string `json:"envFiles"`
+			Profiles    []string `json:"profiles"`
+			Services    []string `json:"services"`
+			SkipPull    bool     `json:"skipPull"`
+			SkipBuild   bool     `json:"skipBuild"`
+		} `json:"compose"`
+		Docker struct {
+			Commands [][]string `json:"commands"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode compose options restore json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Compose.ProjectName != "demo" || len(report.Compose.EnvFiles) != 1 || len(report.Compose.Profiles) != 1 || len(report.Compose.Services) != 1 || !report.Compose.SkipPull || !report.Compose.SkipBuild {
+		t.Fatalf("compose options report = %#v", report)
+	}
+	if len(report.Docker.Commands) != 1 {
+		t.Fatalf("compose options should only run up command, got %#v", report.Docker.Commands)
+	}
+	want := "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo --env-file " + filepath.Join(workspace, ".env.local") + " --profile api up -d web"
+	dockerCalls, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " pull") || strings.Contains(string(dockerCalls), " build") || !strings.Contains(string(dockerCalls), want) {
+		t.Fatalf("compose option docker calls want %q:\n%s", want, dockerCalls)
+	}
+}
+
 func TestEnvironmentRestoreFailsBeforeDockerWhenComposeFileIsMissing(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")

@@ -105,18 +105,20 @@ cloned, then checks both `docker` and `docker compose version` when a compose
 plan is recorded; it also labels heavy Docker steps so an operator can review
 them before destructive local validation. Add
 `--execute` to clone missing remote repositories, run Docker Compose, and wait
-for recorded health checks. Add `--pull` with `--execute` to update existing
-checkouts using `git pull --ff-only`. Add `--run-workflow` with `--execute` to
-run the recorded verification workflow after Docker health checks pass; the run,
-case runs, Evidence indexes, and Environment Catalog verification run status are
-written to the selected Store. Restore records Evidence completeness from the
-workflow result but does not mark SkyWalking topology complete or publish the
-environment as verified; real topology collection and `publish-verified` remain
-separate gates. Use `--base-url` for the restored target endpoint and
-`--workflow-output-dir` when you want a fixed local report directory. When
-`composeFile` is recorded, the file must exist under `--workspace` after
-optional repository preparation; restore fails before invoking Docker if it is
-missing.
+for recorded health checks. Store-backed compose facts may include a project
+name, env files, profiles, a service allow-list, and `skipPull`/`skipBuild`
+when an environment should start from existing local images. Add `--pull` with
+`--execute` to update existing checkouts using `git pull --ff-only`. Add
+`--run-workflow` with `--execute` to run the recorded verification workflow
+after Docker health checks pass; the run, case runs, Evidence indexes, and
+Environment Catalog verification run status are written to the selected Store.
+Restore records Evidence completeness from the workflow result but does not
+mark SkyWalking topology complete or publish the environment as verified; real
+topology collection and `publish-verified` remain separate gates. Use
+`--base-url` for the restored target endpoint and `--workflow-output-dir` when
+you want a fixed local report directory. When `composeFile` is recorded, the
+file must exist under `--workspace` after optional repository preparation;
+restore fails before invoking Docker if it is missing.
 
 The control-plane API exposes the same recovery shape through
 `GET /api/environments/{environmentId}/bootstrap`: repository steps, Docker
