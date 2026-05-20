@@ -2120,3 +2120,34 @@ Remote source policy slice:
   implementation slice should materialize those component-owned assets into
   Store-generated startup files rather than treating the component graph as a
   complete clean-machine restore by itself.
+- 2026-05-20T08:19Z implementation slice: `environment restore` now projects
+  component config assets with bounded `contentInline` into the restore
+  `generatedFiles` map before preflight. This lets component-owned startup
+  text, such as run scripts, Redis Sentinel config, Apollo/XXL mock mappings,
+  Grafana/Loki/Promtail config, and small MySQL bootstrap SQL, satisfy Compose
+  bind-source and `/sandbox/compose/...` command checks without requiring a
+  separate local validation folder.
+- Rewrote the real `scf-chain-core10-local-docker` component graph through the
+  CLI to include the actual Docker Compose service set: 24 components,
+  47 dependency edges, and 27 component assets. This fixed the earlier gap
+  where Loki, Promtail, Grafana, and demo services existed in compose but were
+  not represented as components. Inline asset payload is 27,150 bytes total;
+  the largest inline asset is `retail-gateway.run-script` at 7,487 bytes.
+- Large business DDL files remain out of PostgreSQL. Four large MySQL DDL
+  assets are recorded as remote refs only, with no inline body. This preserves
+  the storage boundary: PostgreSQL carries compact deterministic startup text
+  and references, not code repositories, Docker images, runtime databases,
+  Evidence payloads, logs, caches, jars, or large SQL dumps.
+- Non-destructive restore verification against `local-pg` now reports
+  `componentGraph.configured=true`, `components=24`, `dependencies=47`,
+  `assets=27`, `inlineAssetBytes=27150`, `requiredHealthChecks=20`, and
+  `missingHealthChecks=0`. The `component-graph` readiness item is green, and
+  `startup-assets` is now green with 15 Compose startup assets available. The
+  generated file map visible in the restore report contains 25 entries,
+  including the two compose files plus component-projected files under
+  `compose/scripts`, `compose/mysql/init`, `compose/redis-sentinel`,
+  `compose/platform`, `compose/loki`, `compose/promtail`, `compose/grafana`,
+  and `compose/wiremock`.
+- Restore still does not proceed by default on this live machine because
+  fixed-name Docker containers already exist. That remaining block is the
+  intended non-destructive Docker conflict gate, not a component asset gap.

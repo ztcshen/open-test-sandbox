@@ -1252,12 +1252,13 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	}
 	specs := environmentRestoreRepoSpecs(env, workspace)
 	compose := jsonObjectString(env.ComposeJSON)
-	packageSpec := environmentRestorePackageSpecFromCompose(compose, workspace)
-	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose)
 	componentGraph := store.EnvironmentComponentGraph{}
 	if len(componentGraphs) > 0 {
 		componentGraph = componentGraphs[0]
 	}
+	compose = environmentRestoreComposeWithComponentAssets(compose, componentGraph)
+	packageSpec := environmentRestorePackageSpecFromCompose(compose, workspace)
+	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose)
 	componentGraphReport := environmentRestoreComponentGraphReport(env.ID, componentGraph)
 	attemptedAt := time.Now().UTC()
 	remoteOnly := environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL)
@@ -1849,6 +1850,34 @@ func environmentRestoreComponentGraphReport(envID string, graph store.Environmen
 		report.Error = fmt.Sprintf("%d required component(s) are missing Store-backed health checks", report.MissingHealthChecks)
 	}
 	return report
+}
+
+func environmentRestoreComposeWithComponentAssets(compose map[string]any, graph store.EnvironmentComponentGraph) map[string]any {
+	if len(graph.Assets) == 0 {
+		return compose
+	}
+	out := map[string]any{}
+	for key, value := range compose {
+		out[key] = value
+	}
+	generated := stringMapFromAny(out["generatedFiles"])
+	for _, asset := range graph.Assets {
+		target := filepath.Clean(strings.TrimSpace(asset.TargetPath))
+		if target == "." || target == "" || strings.HasPrefix(target, ".."+string(os.PathSeparator)) || filepath.IsAbs(target) {
+			continue
+		}
+		if strings.TrimSpace(asset.ContentInline) == "" {
+			continue
+		}
+		if _, exists := generated[target]; exists {
+			continue
+		}
+		generated[target] = asset.ContentInline
+	}
+	if len(generated) > 0 {
+		out["generatedFiles"] = generated
+	}
+	return out
 }
 
 func environmentRestoreIsRemoteGitURL(rawURL string) bool {
