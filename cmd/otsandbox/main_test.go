@@ -1687,6 +1687,42 @@ func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
 	}
 }
 
+func TestEnvironmentInspectReportsComponentGraphReadiness(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.inspect.component-readiness",
+		"--start-command", "true",
+		"--verification-workflow", "workflow.core-10",
+	)
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
+		},
+	}))
+	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.inspect.component-readiness")
+	out := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.inspect.component-readiness")
+	var payload struct {
+		ComponentGraph struct {
+			OK                   bool     `json:"ok"`
+			Components           int      `json:"components"`
+			BlockingDependencies int      `json:"blockingDependencies"`
+			BlockingOrder        []string `json:"blockingOrder"`
+		} `json:"componentGraph"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode environment inspect component readiness json: %v\n%s", err, out)
+	}
+	if !payload.ComponentGraph.OK || payload.ComponentGraph.Components != 2 || payload.ComponentGraph.BlockingDependencies != 1 || strings.Join(payload.ComponentGraph.BlockingOrder, ",") != "db,app" {
+		t.Fatalf("environment inspect component readiness = %#v", payload.ComponentGraph)
+	}
+}
+
 func TestEnvironmentBootstrapReportsComponentGraphReadiness(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	graphPath := filepath.Join(t.TempDir(), "graph.json")

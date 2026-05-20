@@ -587,11 +587,11 @@ func runEnvironmentInspect(ctx context.Context, args []string) error {
 	if id == "" {
 		return errors.New("environment id is required")
 	}
-	env, err := loadEnvironmentForCLI(ctx, *storeRef, *storeURL, id)
+	env, componentGraph, err := loadEnvironmentAndComponentGraphForCLI(ctx, *storeRef, *storeURL, id)
 	if err != nil {
 		return err
 	}
-	return printEnvironmentCommandResult(env, *jsonOutput)
+	return printEnvironmentCommandResult(env, *jsonOutput, componentGraph)
 }
 
 func runEnvironmentBootstrap(ctx context.Context, args []string) error {
@@ -4187,8 +4187,11 @@ func loadEnvironmentAndComponentGraphForCLI(ctx context.Context, storeRef string
 	return env, graph, nil
 }
 
-func printEnvironmentCommandResult(env store.Environment, jsonOutput bool) error {
+func printEnvironmentCommandResult(env store.Environment, jsonOutput bool, componentGraphs ...store.EnvironmentComponentGraph) error {
 	payload := map[string]any{"ok": true, "environment": environmentPayload(env)}
+	if len(componentGraphs) > 0 {
+		payload["componentGraph"] = environmentRestoreComponentGraphReport(env.ID, componentGraphs[0])
+	}
 	if jsonOutput {
 		return writeIndentedJSON(payload)
 	}
@@ -4203,6 +4206,16 @@ func printEnvironmentCommandResult(env store.Environment, jsonOutput bool) error
 	}
 	fmt.Printf("Evidence Complete: %t\n", env.EvidenceComplete)
 	fmt.Printf("SkyWalking Topology Complete: %t\n", env.TopologyComplete)
+	if len(componentGraphs) > 0 {
+		readiness := environmentRestoreComponentGraphReport(env.ID, componentGraphs[0])
+		fmt.Printf("Component Restore-ready: %t\n", readiness.OK)
+		if len(readiness.BlockingOrder) > 0 {
+			fmt.Printf("Component Blocking Order: %s\n", strings.Join(readiness.BlockingOrder, " -> "))
+		}
+		if strings.TrimSpace(readiness.Error) != "" {
+			fmt.Printf("Component Readiness Error: %s\n", readiness.Error)
+		}
+	}
 	return nil
 }
 

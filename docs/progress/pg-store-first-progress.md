@@ -2241,3 +2241,15 @@ Remote source policy slice:
   47 dependencies, 41 blocking edges, 6 runtime edges, a 24-component blocking
   order, zero blocking cycles, 20 required health checks, zero missing health
   checks, four remote assets, and zero missing remote asset refs.
+- 2026-05-20T09:10Z implementation slice: daily `environment inspect` now
+  includes the component graph restore-readiness summary directly. Operators no
+  longer need to know the `environment components inspect` subcommand before
+  they can see whether the environment graph is restore-ready; the normal
+  inspect JSON reports component counts, dependency order, cycle status,
+  health gate counts, and remote asset readiness.
+- Verified the active `local-pg` environment through CLI inspect, not direct
+  SQL. The inspect payload reports component readiness `ok=true`,
+  24 components, 47 dependencies, 41 blocking edges, 6 runtime edges,
+  24 ordered blocking components, zero blocking cycles, 20 required health
+  checks, zero missing health checks, four remote assets, and zero missing
+  remote asset refs.
