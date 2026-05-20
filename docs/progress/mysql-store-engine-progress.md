@@ -742,3 +742,35 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Daily CLI/API named active Store parity still has deeper DSN-gated coverage
   to add beyond Store guidance.
+
+## 2026-05-21 MySQL API Workflow Report Smoke Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Extended the MySQL Store API smoke so a real MySQL DSN run now starts a local
+  target HTTP service and triggers `/api/cases/batch-runs` for
+  `workflow.alpha`.
+- The smoke now waits for the asynchronous 10-step workflow batch report,
+  requires all 10 steps to pass, and verifies that the report is persisted as a
+  Store-backed workflow run.
+- The smoke now reads every case Evidence payload by `caseRunId` and checks the
+  stored request, response, assertion, run, case, and step fields.
+- Added focused unit coverage for the new workflow report and case Evidence
+  assertion helpers without requiring a live MySQL DSN.
+
+Validated:
+
+- `node --test tools/smoke/mysql-store-api-smoke.test.mjs`
+- `node --check tools/smoke/mysql-store-api-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Real SkyWalking release proof still requires
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
+  for all 10 workflow steps.
+- MySQL daily parity still has deeper DSN-gated coverage to add for environment
+  lifecycle and interface registration APIs.

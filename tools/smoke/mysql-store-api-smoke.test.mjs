@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
+import { assertCaseEvidencePayload, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
 
 test("MySQL API smoke accepts the shared SQL smoke Store env", () => {
   assert.equal(
@@ -30,4 +30,56 @@ test("MySQL API smoke rejects non-MySQL shared Store env", () => {
     }),
     /requires a mysql:\/\/ Store DSN/,
   );
+});
+
+test("MySQL API smoke validates the async 10-step workflow batch report", () => {
+  assertWorkflowBatchReport({
+    ok: true,
+    status: "passed",
+    workflowId: "workflow.alpha",
+    total: 10,
+    completed: 10,
+    passed: 10,
+    failed: 0,
+    cases: Array.from({ length: 10 }, (_, index) => ({
+      caseId: `case.step-${String(index + 1).padStart(2, "0")}`,
+      stepId: `step-${String(index + 1).padStart(2, "0")}`,
+      status: "passed",
+      runId: `run-${index + 1}`,
+      caseRunId: `run-${index + 1}.case`,
+      elapsedMs: 12,
+    })),
+  });
+});
+
+test("MySQL API smoke validates workflow case Evidence payloads", () => {
+  assertCaseEvidencePayload({
+    ok: true,
+    evidence: {
+      summary: {
+        run_id: "run-1",
+        case_id: "case.step-01",
+        step_id: "step-01",
+        status: "passed",
+      },
+      request: {
+        method: "GET",
+        path: "/v1/items/step-01",
+        evidence_uri: "/tmp/request.json",
+      },
+      response: {
+        http_code: 200,
+        evidence_uri: "/tmp/response.json",
+      },
+      assertions: {
+        status: "passed",
+        passed: true,
+      },
+    },
+  }, {
+    runID: "run-1",
+    caseID: "case.step-01",
+    stepID: "step-01",
+    path: "/v1/items/step-01",
+  });
 });
