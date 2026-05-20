@@ -1088,6 +1088,73 @@ func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreUsesComponentHealthChecksForReadiness(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.component.health",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "app",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "app",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service"}`,
+				SummaryJSON:     `{}`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build component health restore report: %v", err)
+	}
+	if !report.OK || len(report.HealthChecks) != 1 {
+		t.Fatalf("component health checks should be restore probes: report=%#v health=%#v", report, report.HealthChecks)
+	}
+	check, ok := report.HealthChecks[0].(map[string]any)
+	if !ok || valueString(check["kind"]) != "compose-service" || valueString(check["service"]) != "app" || valueString(check["componentId"]) != "app" {
+		t.Fatalf("component health check was not normalized: %#v", report.HealthChecks)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "health-probes", true, "1 Store-backed health probe") {
+		t.Fatalf("readiness should count component health probes: %#v", report.Readiness.Items)
+	}
+}
+
+func TestEnvironmentRestoreRejectsInvalidComponentHealthCheck(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.component.invalid-health",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "app",
+				Kind:            "app",
+				Role:            "business-service",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"kind":"url"}`,
+				SummaryJSON:     `{}`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build invalid component health restore report: %v", err)
+	}
+	if report.OK || report.ComponentGraph.OK || report.ComponentGraph.MissingHealthChecks != 1 {
+		t.Fatalf("component graph should reject invalid health check: %#v", report.ComponentGraph)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-graph", false, "url health check requires url") {
+		t.Fatalf("readiness should include invalid component health detail: %#v", report.Readiness.Items)
+	}
+}
+
 func TestEnvironmentRestoreRejectsComponentRemoteAssetWithoutRemoteURL(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{

@@ -2176,3 +2176,17 @@ Remote source policy slice:
   targeted under `compose/mysql/init`. The only remaining restore blockers are
   existing fixed-name Docker container conflicts and the derived Docker start
   plan block on this already-running machine.
+- 2026-05-20T08:40Z implementation slice: component-level
+  `HealthCheckJSON` now feeds the restore health probe list instead of only
+  being counted for presence. Restore normalizes component checks from `kind`
+  or `type`, supports URL, TCP, command, Compose service, and container probes,
+  fills missing Compose service names from the owning component, de-duplicates
+  probes, and rejects required components whose health check JSON is invalid
+  or missing required fields. Health-check failures now keep the persisted
+  restore phase at `health-check` instead of being masked as readiness.
+- Verified the active `local-pg` environment with a non-destructive restore
+  plan after the health-gate change. It reports 24 components, 20 required
+  component health checks, zero missing component health checks, and
+  26 Store-backed post-start health probes. The remaining failed readiness
+  items are still only `docker-container-conflicts` and `docker-start-plan` on
+  this already-running machine.

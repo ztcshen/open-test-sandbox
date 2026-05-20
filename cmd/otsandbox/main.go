@@ -1277,7 +1277,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	}
 	compose = environmentRestoreComposeWithComponentAssets(compose, componentGraph)
 	packageSpec := environmentRestorePackageSpecFromCompose(compose, workspace)
-	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose)
+	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose, componentGraph)
 	componentGraphReport := environmentRestoreComponentGraphReport(env.ID, componentGraph)
 	attemptedAt := time.Now().UTC()
 	remoteOnly := environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL)
@@ -1504,9 +1504,6 @@ func environmentRestorePhase(report environmentRestoreReport) string {
 	if report.Package.Configured && !report.Package.OK {
 		return "package"
 	}
-	if !report.Readiness.OK {
-		return "readiness"
-	}
 	for _, item := range report.Repos {
 		if !item.OK {
 			return "repository"
@@ -1519,6 +1516,9 @@ func environmentRestorePhase(report environmentRestoreReport) string {
 			}
 		}
 		return "docker"
+	}
+	if !report.Readiness.OK {
+		return "readiness"
 	}
 	if report.Workflow.Action == "run-verification-workflow" && !report.Workflow.OK {
 		return "workflow"
@@ -1776,19 +1776,38 @@ func environmentRestorePackage(ctx context.Context, spec environmentRestorePacka
 	return report
 }
 
-func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]any) []any {
-	out := append([]any{}, checks...)
+func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]any, graph store.EnvironmentComponentGraph) []any {
+	out := []any{}
 	covered := map[string]bool{}
-	for _, raw := range checks {
+	seen := map[string]bool{}
+	addCheck := func(raw any) {
 		item, ok := raw.(map[string]any)
 		if !ok {
-			continue
+			out = append(out, raw)
+			return
 		}
-		if strings.TrimSpace(valueString(item["kind"])) == "compose-service" {
+		if signature := environmentRestoreHealthCheckSignature(item); signature != "" {
+			if seen[signature] {
+				return
+			}
+			seen[signature] = true
+		}
+		if strings.TrimSpace(valueString(item["kind"])) == "compose-service" || strings.TrimSpace(valueString(item["type"])) == "compose-service" {
 			if service := strings.TrimSpace(valueString(item["service"])); service != "" {
 				covered[service] = true
 			}
 		}
+		out = append(out, raw)
+	}
+	for _, raw := range checks {
+		addCheck(raw)
+	}
+	for _, component := range graph.Components {
+		item, errText := environmentRestoreNormalizeComponentHealthCheck(component)
+		if errText != "" {
+			continue
+		}
+		addCheck(item)
 	}
 	for _, service := range stringSliceFromAny(compose["services"]) {
 		if covered[service] {
@@ -1802,6 +1821,91 @@ func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]an
 		covered[service] = true
 	}
 	return out
+}
+
+func environmentRestoreNormalizeComponentHealthCheck(component store.EnvironmentComponent) (map[string]any, string) {
+	raw := strings.TrimSpace(component.HealthCheckJSON)
+	if raw == "" || raw == "{}" {
+		return nil, "missing health check"
+	}
+	var item map[string]any
+	if err := json.Unmarshal([]byte(raw), &item); err != nil || len(item) == 0 {
+		if err != nil {
+			return nil, "invalid health check JSON: " + err.Error()
+		}
+		return nil, "missing health check"
+	}
+	normalized := map[string]any{}
+	for key, value := range item {
+		normalized[key] = value
+	}
+	componentID := strings.TrimSpace(component.ComponentID)
+	if strings.TrimSpace(valueString(normalized["id"])) == "" && componentID != "" {
+		normalized["id"] = "component-" + safeReportID(componentID)
+	}
+	if componentID != "" {
+		normalized["componentId"] = componentID
+	}
+	kind := strings.TrimSpace(valueString(normalized["kind"]))
+	if kind == "" {
+		kind = strings.TrimSpace(valueString(normalized["type"]))
+	}
+	if kind == "" && strings.TrimSpace(valueString(normalized["url"])) != "" {
+		kind = "url"
+	}
+	normalized["kind"] = kind
+	switch kind {
+	case "url":
+		if strings.TrimSpace(valueString(normalized["url"])) == "" {
+			return nil, "url health check requires url"
+		}
+	case "tcp":
+		if strings.TrimSpace(valueString(normalized["address"])) == "" {
+			return nil, "tcp health check requires address"
+		}
+	case "command":
+		if strings.TrimSpace(valueString(normalized["command"])) == "" {
+			return nil, "command health check requires command"
+		}
+	case "compose-service":
+		if strings.TrimSpace(valueString(normalized["service"])) == "" {
+			normalized["service"] = strings.TrimSpace(component.ComposeService)
+		}
+		if strings.TrimSpace(valueString(normalized["service"])) == "" {
+			return nil, "compose-service health check requires service"
+		}
+	case "container":
+		if strings.TrimSpace(valueString(normalized["container"])) == "" {
+			return nil, "container health check requires container"
+		}
+	default:
+		if kind == "" {
+			return nil, "health check requires kind"
+		}
+		return nil, "unsupported health check kind: " + kind
+	}
+	return normalized, ""
+}
+
+func environmentRestoreHealthCheckSignature(item map[string]any) string {
+	kind := strings.TrimSpace(valueString(item["kind"]))
+	if kind == "" {
+		kind = strings.TrimSpace(valueString(item["type"]))
+	}
+	switch kind {
+	case "url":
+		return "url:" + strings.TrimSpace(valueString(item["url"]))
+	case "tcp":
+		return "tcp:" + strings.TrimSpace(valueString(item["address"]))
+	case "command":
+		return "command:" + strings.TrimSpace(valueString(item["command"]))
+	case "compose-service":
+		return "compose-service:" + strings.TrimSpace(valueString(item["service"]))
+	case "container":
+		return "container:" + strings.TrimSpace(valueString(item["container"]))
+	default:
+		return ""
+	}
 }
 
 func environmentRestoreRequiresRemoteSources(storeURL string) bool {
@@ -1847,11 +1951,13 @@ func environmentRestoreComponentGraphReport(envID string, graph store.Environmen
 		report.Error = err.Error()
 		return report
 	}
+	componentHealthErrors := []string{}
 	for _, component := range graph.Components {
 		if component.Required {
 			report.RequiredHealthChecks++
-			if strings.TrimSpace(component.HealthCheckJSON) == "" || strings.TrimSpace(component.HealthCheckJSON) == "{}" {
+			if _, errText := environmentRestoreNormalizeComponentHealthCheck(component); errText != "" {
 				report.MissingHealthChecks++
+				componentHealthErrors = append(componentHealthErrors, strings.TrimSpace(component.ComponentID)+": "+errText)
 			}
 		}
 	}
@@ -1879,7 +1985,10 @@ func environmentRestoreComponentGraphReport(envID string, graph store.Environmen
 	}
 	if report.MissingHealthChecks > 0 {
 		report.OK = false
-		report.Error = fmt.Sprintf("%d required component(s) are missing Store-backed health checks", report.MissingHealthChecks)
+		report.Error = fmt.Sprintf("%d required component(s) are missing valid Store-backed health checks", report.MissingHealthChecks)
+		if len(componentHealthErrors) > 0 {
+			report.Error += ": " + strings.Join(componentHealthErrors, "; ")
+		}
 	}
 	if report.MissingRemoteAssetRefs > 0 {
 		report.OK = false
