@@ -11,16 +11,16 @@ OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmod
 OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
 ```
 
-For real SkyWalking validation, add `OTS_TRACE_GRAPHQL_URL` and
-`OTS_SMOKE_TRACE_IDS` step-to-trace mappings. Without that URL the smoke uses a
-deterministic synthetic SkyWalking GraphQL provider, which verifies Store,
-Evidence, topology persistence, and UI wiring but is not proof of a live
-SkyWalking deployment. A release sign-off that claims real topology coverage
-must show the configured SkyWalking endpoint, trace ids for all 10 workflow
-steps, and persisted topology rows with provider, trace id, status, nodes, and
-edges. If the endpoint is absent or a trace cannot be queried, the expected
-result is unavailable, failed, or skipped topology collection, not a generated
-topology.
+For real SkyWalking validation, add an `http` or `https`
+`OTS_TRACE_GRAPHQL_URL` and `OTS_SMOKE_TRACE_IDS` step-to-trace mappings.
+Without that URL the smoke uses a deterministic synthetic SkyWalking GraphQL
+provider, which verifies Store, Evidence, topology persistence, and UI wiring
+but is not proof of a live SkyWalking deployment. A release sign-off that
+claims real topology coverage must show the configured SkyWalking endpoint,
+trace ids for all 10 workflow steps, and persisted topology rows with provider,
+trace id, status, nodes, and edges. If the endpoint is absent or a trace cannot
+be queried, the expected result is unavailable, failed, or skipped topology
+collection, not a generated topology.
 
 To make release-check fail unless it is using live topology evidence, set
 `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` together with `OTS_TRACE_GRAPHQL_URL` and

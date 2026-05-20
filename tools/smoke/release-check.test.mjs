@@ -69,6 +69,23 @@ test("release-check real SkyWalking mode requires a GraphQL URL before expensive
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
 
+test("release-check real SkyWalking mode rejects invalid GraphQL URLs before expensive gates", () => {
+  for (const graphQLURL of ["not-a-url", "ftp://skywalking.example/graphql"]) {
+    const result = runReleaseCheck(releaseCheckEnv({
+      OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+      OTS_TRACE_GRAPHQL_URL: graphQLURL,
+      OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
+        const step = `step-${String(index + 1).padStart(2, "0")}`;
+        return [step, `trace-${step}`];
+      }))),
+    }));
+
+    assert.equal(result.status, 1, graphQLURL);
+    assert.match(result.stderr, /requires OTS_TRACE_GRAPHQL_URL to be an http\/https URL/);
+    assert.doesNotMatch(result.stdout, /running Go tests/);
+  }
+});
+
 test("release-check accepts uppercase SQL Store schemes before expensive gates", () => {
   const mysql = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_SMOKE_STORE_DSN: "MYSQL://user:pass@127.0.0.1:3306/otsandbox_smoke?tls=false",

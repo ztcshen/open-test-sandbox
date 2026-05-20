@@ -927,6 +927,34 @@ Current blocker:
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
 
+## 2026-05-21 Generic Release Real SkyWalking URL Guard Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Tightened generic `npm run release-check` so
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` requires `OTS_TRACE_GRAPHQL_URL` to be
+  an `http` or `https` URL before Go tests, Store smoke, API smoke, or browser
+  smoke can run.
+- Added regression coverage proving invalid or non-HTTP SkyWalking GraphQL URLs
+  fail early and do not enter expensive gates.
+- Updated the release checklist so real SkyWalking validation documents the
+  `http`/`https` URL requirement for the generic release gate, not only the
+  MySQL-specific wrapper.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs`
+- `bash -n tools/release-check.sh tools/smoke/mysql-real-store-release-check.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.
+
 ## 2026-05-21 Shared MySQL Smoke DSN Guard Slice
 
 Progress: `[###################-] 98%`

@@ -56,6 +56,20 @@ if [[ "${OTSANDBOX_REQUIRE_REAL_SKYWALKING:-}" == "1" ]]; then
     echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL." >&2
     exit 1
   fi
+  trace_graphql_url_ok=$(OTS_TRACE_GRAPHQL_URL="$OTS_TRACE_GRAPHQL_URL" node <<'NODE'
+const raw = String(process.env.OTS_TRACE_GRAPHQL_URL || "").trim();
+try {
+  const parsed = new URL(raw);
+  process.stdout.write(parsed.protocol === "http:" || parsed.protocol === "https:" ? "true" : "false");
+} catch {
+  process.stdout.write("false");
+}
+NODE
+)
+  if [[ "$trace_graphql_url_ok" != "true" ]]; then
+    echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL to be an http/https URL." >&2
+    exit 1
+  fi
   if [[ -z "${OTS_SMOKE_TRACE_IDS:-}" ]]; then
     echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for the 10-step workflow." >&2
     exit 1
