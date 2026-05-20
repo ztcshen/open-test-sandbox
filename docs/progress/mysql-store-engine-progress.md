@@ -717,3 +717,28 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Daily CLI/API named active Store parity still has deeper DSN-gated coverage
   to add beyond Store guidance.
+
+## 2026-05-21 Store-First Guardrail SQL Store Wording Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Updated Store-first guardrail release-check wording from PostgreSQL-only gate
+  terminology to SQL Store gate terminology.
+- Added focused regression coverage so the guardrail script itself cannot
+  regress to PostgreSQL-only release gate wording.
+- Kept guardrail behavior unchanged; it still requires release-check examples
+  to name `OTSANDBOX_SMOKE_STORE_DSN`.
+
+Validated:
+
+- `node --test tools/guardrails/check_store_first_contracts.test.mjs`
+- `tools/guardrails/check_store_first_contracts.sh`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Daily CLI/API named active Store parity still has deeper DSN-gated coverage
+  to add beyond Store guidance.

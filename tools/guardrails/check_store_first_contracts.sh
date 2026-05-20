@@ -40,7 +40,7 @@ check_pattern 'store-url[[:space:]][^`"$]*\.runtime/store\.sqlite|--store-url[[:
   "Daily workflow examples must use --store NAME_OR_DSN instead of --store-url .runtime/store.sqlite."
 
 check_pattern '^[[:space:]]*npm run release-check[[:space:]]*$' \
-  "Release-check examples must show OTSANDBOX_SMOKE_STORE_DSN so the PostgreSQL gate runs."
+  "Release-check examples must show OTSANDBOX_SMOKE_STORE_DSN so the SQL Store gate runs."
 
 check_pattern 'release gate:[[:space:]]*`npm run release-check`|发布门禁：`npm run release-check`' \
   "Release gate shorthand must mention OTSANDBOX_SMOKE_STORE_DSN."
