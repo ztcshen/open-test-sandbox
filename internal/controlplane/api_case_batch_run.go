@@ -1073,11 +1073,12 @@ func apiCaseBatchNodePlans(ctx context.Context, bundle profile.Bundle, runtime s
 			continue
 		}
 		casePath := strings.TrimSpace(item.CasePath)
-		if casePath == "" {
+		payload := map[string]any{"caseId": item.ID}
+		execution := findCaseExecutionConfig(ctx, runtime, item.ID, payload)
+		if casePath == "" && execution == nil {
 			continue
 		}
 		node := nodesByID[item.NodeID]
-		payload := map[string]any{"caseId": item.ID}
 		out = append(out, apiCaseBatchCasePlan{
 			ID:              item.ID,
 			DisplayName:     item.DisplayName,
@@ -1092,7 +1093,7 @@ func apiCaseBatchNodePlans(ctx context.Context, bundle profile.Bundle, runtime s
 			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
-			Execution:       findCaseExecutionConfig(ctx, runtime, item.ID, payload),
+			Execution:       execution,
 		})
 	}
 	return out
@@ -1133,11 +1134,12 @@ func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runt
 	out := make([]apiCaseBatchCasePlan, 0, len(cases))
 	for _, item := range cases {
 		casePath := strings.TrimSpace(item.CasePath)
-		if casePath == "" {
+		payload := map[string]any{"caseId": item.ID}
+		execution := findCaseExecutionConfig(ctx, runtime, item.ID, payload)
+		if casePath == "" && execution == nil {
 			continue
 		}
 		node := nodesByID[item.NodeID]
-		payload := map[string]any{"caseId": item.ID}
 		out = append(out, apiCaseBatchCasePlan{
 			ID:              item.ID,
 			DisplayName:     item.DisplayName,
@@ -1152,7 +1154,7 @@ func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runt
 			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
-			Execution:       findCaseExecutionConfig(ctx, runtime, item.ID, payload),
+			Execution:       execution,
 		})
 	}
 	return out
@@ -1183,12 +1185,13 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 			continue
 		}
 		casePath := strings.TrimSpace(item.CasePath)
-		if casePath == "" {
-			continue
-		}
 		nodeID := firstNonEmpty(binding.NodeID, item.NodeID)
 		node := nodesByID[nodeID]
 		payload := map[string]any{"caseId": item.ID, "workflowId": request.WorkflowID, "stepId": binding.StepID}
+		execution := findCaseExecutionConfig(ctx, runtime, item.ID, payload)
+		if casePath == "" && execution == nil {
+			continue
+		}
 		out = append(out, apiCaseBatchCasePlan{
 			ID:              item.ID,
 			DisplayName:     item.DisplayName,
@@ -1204,7 +1207,7 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
-			Execution:       findCaseExecutionConfig(ctx, runtime, item.ID, payload),
+			Execution:       execution,
 		})
 	}
 	return out

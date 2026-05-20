@@ -2505,3 +2505,34 @@ Remote source policy slice:
   the remaining proof gap is still the anchored 10-step async workflow
   acceptance, including 10/10 passed steps, complete Evidence, and real
   SkyWalking topology, followed by a final fresh two-step clean-machine replay.
+- 2026-05-20T12:06Z workflow acceptance recovery slice: fixed the Store-first
+  workflow planner so API cases without a file-backed `casePath` are still
+  runnable when the Store catalog has a `caseExecution` config. This restores
+  the two LLT callback steps that had been filtered out of the bound workflow
+  after interface registration. The acceptance start response for
+  `scf-chain-core10-local-docker` now plans all 10 workflow steps instead of
+  eight.
+- Verification: focused control-plane coverage passed for workflow cases that
+  run from Store execution config without a case file. A live environment
+  acceptance run with the control plane started using
+  `--trace-graphql-url http://127.0.0.1:12800/graphql` produced batch
+  `batch.env-accept-agent-20260520200458.20260520T120459.539236000Z` with
+  `status=passed`, `total=10`, `completed=10`, `passed=10`, `failed=0`, and
+  `acceptance.ok=true`. All five acceptance requirements passed:
+  workflow steps, passed steps, node health, Evidence, and real SkyWalking
+  topology. Each of the 10 steps has `evidenceComplete=true` and
+  `topologyComplete=true`. The environment Store row is now
+  `status=verified-ready`, `lastVerificationStatus=passed`,
+  `evidenceComplete=true`, and `topologyComplete=true`.
+- Runtime note: the failed topology run before this checkpoint proved OAP/UI
+  were reachable but the Java agent was not mounted into business containers.
+  The Store-backed compose startup file was updated through
+  `environment startup-file put` to enable
+  `-javaagent:/skywalking/agent/skywalking-agent.jar` and mount the local
+  SkyWalking agent directory; after a Store-driven Docker restore, the agent
+  jar was present in `scf-loan` and the topology gate passed. Progress bar for
+  the current clean-machine objective is now about 98%: the current Docker
+  restore plus bound workflow acceptance are green, but the final proof still
+  needs a fresh two-step clean-machine replay from an empty disposable
+  workspace/Docker scope using the recorded prepare command and execute
+  command.

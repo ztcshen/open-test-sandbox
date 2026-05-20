@@ -8382,6 +8382,81 @@ func TestServerAsyncWorkflowAcceptancePassesWithSkyWalkingTopology(t *testing.T)
 	}
 }
 
+func TestServerRunsWorkflowCaseWithStoreExecutionConfigWithoutCaseFile(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/store-execution" {
+			t.Fatalf("unexpected execution path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer target.Close()
+
+	now := time.Now().UTC()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: now,
+		Workflows: []store.CatalogWorkflow{{ID: "workflow.store-execution", DisplayName: "Store Execution Workflow"}},
+		APICases:  []store.CatalogAPICase{{ID: "case.store-execution", DisplayName: "Store Execution Case", NodeID: "node.store-execution", Status: "active"}},
+		Services:  []store.CatalogService{{ID: "service.store-execution", Kind: "app", ServicePort: 18080, Status: "active"}},
+		InterfaceNodes: []store.CatalogInterfaceNode{{
+			ID: "node.store-execution", ServiceID: "service.store-execution", Method: "POST", Path: "/store-execution", Status: "active",
+		}},
+		WorkflowBindings: []store.CatalogWorkflowBinding{{
+			WorkflowID: "workflow.store-execution", StepID: "store-step", NodeID: "node.store-execution", CaseID: "case.store-execution", Required: true, SortOrder: 1,
+		}},
+		TemplateConfigs: []store.CatalogTemplateConfig{{
+			ID: "cfg.case.store-execution", TemplateID: "TPL-CASE-EXECUTION-V1", ScopeType: "api-case", ScopeID: "case.store-execution", Status: "active",
+			ConfigJSON: `{"caseId":"case.store-execution","caseExecution":{"method":"POST","nodeId":"node.store-execution","path":"/store-execution","body":{"hello":"store"},"expectedHttpCodes":[200],"headers":{"Content-Type":"application/json"}}}`,
+		}},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	bundle := profile.Bundle{
+		ID:             "sample",
+		Workflows:      []profile.Workflow{{ID: "workflow.store-execution"}},
+		InterfaceNodes: []profile.InterfaceNode{{ID: "node.store-execution", Method: "POST", Path: "/store-execution"}},
+		APICases:       []profile.APICase{{ID: "case.store-execution", NodeID: "node.store-execution"}},
+		WorkflowBindings: []profile.WorkflowBinding{{
+			WorkflowID: "workflow.store-execution", StepID: "store-step", NodeID: "node.store-execution", CaseID: "case.store-execution", Required: true, SortOrder: 1,
+		}},
+	}
+	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(fmt.Sprintf(`{"requestId":"store-execution-001","workflowId":"workflow.store-execution","baseUrl":%q}`, target.URL)))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		ReportURL string `json:"reportUrl"`
+		Total     int    `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if created.Total != 1 {
+		t.Fatalf("store execution workflow should plan one case, got %d", created.Total)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if report.Total != 1 || report.Passed != 1 {
+		t.Fatalf("store execution workflow report = %#v", report)
+	}
+}
+
 func TestServerStartsEnvironmentAcceptanceRunWithHealthSummary(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
@@ -8519,6 +8594,7 @@ type apiCaseBatchReportForTest struct {
 	ArtifactManifestPath string `json:"artifactManifestPath"`
 	ArtifactManifestURL  string `json:"artifactManifestUrl"`
 	Completed            int    `json:"completed"`
+	Total                int    `json:"total"`
 	Passed               int    `json:"passed"`
 	Failed               int    `json:"failed"`
 	Acceptance           struct {
