@@ -630,6 +630,15 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 			Action   string     `json:"action"`
 			Commands [][]string `json:"commands"`
 		} `json:"docker"`
+		Preflight struct {
+			OK    bool `json:"ok"`
+			Tools []struct {
+				Name     string `json:"name"`
+				Required bool   `json:"required"`
+				OK       bool   `json:"ok"`
+			} `json:"tools"`
+			HeavySteps []string `json:"heavySteps"`
+		} `json:"preflight"`
 		NextActions []string `json:"nextActions"`
 	}
 	if err := json.Unmarshal([]byte(dryRunOut), &dryRun); err != nil {
@@ -644,6 +653,9 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	}
 	if !dryRun.Docker.OK || dryRun.Docker.Action != "plan-docker-compose" || len(dryRun.Docker.Commands) != 3 {
 		t.Fatalf("restore dry-run docker plan = %#v", dryRun.Docker)
+	}
+	if !dryRun.Preflight.OK || !restorePreflightHasTool(dryRun.Preflight.Tools, "git", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker", true) || len(dryRun.Preflight.HeavySteps) == 0 {
+		t.Fatalf("restore dry-run preflight = %#v", dryRun.Preflight)
 	}
 	if len(dryRun.NextActions) == 0 || !strings.Contains(strings.Join(dryRun.NextActions, "\n"), "workflow.core-10") {
 		t.Fatalf("restore dry-run should anchor next actions to verification workflow: %#v", dryRun.NextActions)
@@ -694,6 +706,51 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	if raw, err := os.ReadFile(filepath.Join(expectedCheckout, "README.md")); err != nil || !strings.Contains(string(raw), "restore fixture") {
 		t.Fatalf("restored checkout missing fixture file raw=%q err=%v", raw, err)
 	}
+}
+
+func TestEnvironmentRestorePreflightReportsMissingGitForMissingCheckout(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeBin := t.TempDir()
+	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.preflight",
+		ReposJSON:              `{"entry-gateway":{"url":"https://example.com/team/entry-gateway.git","checkout":"entry-gateway"}}`,
+		ComposeJSON:            `{"composeFile":"docker-compose.yml"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, time.Second, environmentRestoreWorkflowOptions{})
+	if err != nil {
+		t.Fatalf("build restore preflight report: %v", err)
+	}
+	if report.OK || report.Preflight.OK || !restoreTypedPreflightHasTool(report.Preflight.Tools, "git", false) || !restoreTypedPreflightHasTool(report.Preflight.Tools, "docker", true) {
+		t.Fatalf("missing git preflight report = %#v", report.Preflight)
+	}
+}
+
+func restorePreflightHasTool(tools []struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	OK       bool   `json:"ok"`
+}, name string, ok bool) bool {
+	for _, tool := range tools {
+		if tool.Name == name && tool.Required && tool.OK == ok {
+			return true
+		}
+	}
+	return false
+}
+
+func restoreTypedPreflightHasTool(tools []environmentRestorePreflightTool, name string, ok bool) bool {
+	for _, tool := range tools {
+		if tool.Name == name && tool.Required && tool.OK == ok {
+			return true
+		}
+	}
+	return false
 }
 
 func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) {

@@ -99,7 +99,10 @@ for example the team core 10-step workflow. It prepares the local machine from
 the Store-backed environment facts instead of acting as a generic Docker
 launcher. By default it is a dry run: it resolves optional repository checkouts
 under `--workspace`, shows Git clone commands when repos are recorded, and
-prints the Docker Compose pull/build/up plan plus recorded health checks. Add
+prints preflight tool checks, Docker Compose pull/build/up commands, and
+recorded health checks. Preflight checks `git` when a missing checkout must be
+cloned and `docker` when a compose plan is recorded; it also labels heavy Docker
+steps so an operator can review them before destructive local validation. Add
 `--execute` to clone missing remote repositories, run Docker Compose, and wait
 for recorded health checks. Add `--pull` with `--execute` to update existing
 checkouts using `git pull --ff-only`. Add `--run-workflow` with `--execute` to

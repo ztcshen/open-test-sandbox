@@ -594,6 +594,7 @@ type environmentRestoreReport struct {
 	Repos                []environmentRestoreRepoReport `json:"repos"`
 	Compose              map[string]any                 `json:"compose"`
 	HealthChecks         []any                          `json:"healthChecks"`
+	Preflight            environmentRestorePreflight    `json:"preflight"`
 	Docker               environmentRestoreDockerReport `json:"docker"`
 	Workflow             environmentRestoreWorkflowRun  `json:"workflow"`
 	NextActions          []string                       `json:"nextActions"`
@@ -617,6 +618,21 @@ type environmentRestoreRepoSpec struct {
 	URL       string
 	Branch    string
 	Checkout  string
+}
+
+type environmentRestorePreflight struct {
+	OK         bool                              `json:"ok"`
+	Tools      []environmentRestorePreflightTool `json:"tools"`
+	HeavySteps []string                          `json:"heavySteps,omitempty"`
+	Notes      []string                          `json:"notes,omitempty"`
+}
+
+type environmentRestorePreflightTool struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	OK       bool   `json:"ok"`
+	Path     string `json:"path,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 type environmentRestoreDockerReport struct {
@@ -739,6 +755,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Workspace:            workspace,
 		Compose:              compose,
 		HealthChecks:         healthChecks,
+		Preflight:            environmentRestorePreflightReport(specs, compose, workspace),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
 			Action:     "not-requested",
@@ -747,6 +764,9 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		NextActions: []string{
 			"run verification workflow " + workflowID,
 		},
+	}
+	if !report.Preflight.OK {
+		report.OK = false
 	}
 	for _, spec := range specs {
 		item := environmentRestoreRepo(ctx, spec, execute, pull)
@@ -858,6 +878,62 @@ func environmentRestoreRepoSpecs(env store.Environment, workspace string) []envi
 		out = append(out, spec)
 	}
 	return out
+}
+
+func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compose map[string]any, workspace string) environmentRestorePreflight {
+	report := environmentRestorePreflight{
+		OK: true,
+		Notes: []string{
+			"Sandbox control-plane Store must already be reachable outside restored Docker target services.",
+			"Heavy Docker image and container validation should be reviewed before deleting or rebuilding existing local Docker state.",
+		},
+	}
+	requiresGit := false
+	for _, spec := range specs {
+		if strings.TrimSpace(spec.URL) != "" {
+			if stat, err := os.Stat(spec.Checkout); err != nil || !stat.IsDir() {
+				requiresGit = true
+				break
+			}
+		}
+	}
+	if requiresGit {
+		report.Tools = append(report.Tools, environmentRestoreTool("git", true))
+	}
+	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
+	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
+	if composeFile != "" {
+		report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
+		report.HeavySteps = append(report.HeavySteps,
+			"docker compose pull may download images",
+			"docker compose build may build images from local checkouts",
+			"docker compose up -d may create or replace containers",
+		)
+		if resolved := restoreWorkspacePath(workspace, composeFile); strings.TrimSpace(resolved) != "" {
+			report.Notes = append(report.Notes, "compose file must exist before Docker execution: "+resolved)
+		}
+	} else if startCommand != "" {
+		report.HeavySteps = append(report.HeavySteps, "start command may create local runtime processes or containers")
+	}
+	for _, tool := range report.Tools {
+		if tool.Required && !tool.OK {
+			report.OK = false
+		}
+	}
+	return report
+}
+
+func environmentRestoreTool(name string, required bool) environmentRestorePreflightTool {
+	tool := environmentRestorePreflightTool{Name: name, Required: required}
+	path, err := exec.LookPath(name)
+	if err != nil {
+		tool.OK = false
+		tool.Error = err.Error()
+		return tool
+	}
+	tool.OK = true
+	tool.Path = path
+	return tool
 }
 
 func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec, execute bool, pull bool) environmentRestoreRepoReport {
