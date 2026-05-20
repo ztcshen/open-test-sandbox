@@ -2075,3 +2075,48 @@ Remote source policy slice:
   check before Docker restore proceeds. Runtime cycles are allowed only when
   every involved component has explicit health probes, bounded waits, and
   reportable readiness gates.
+- 2026-05-20T08:07Z implementation slice: Docker runtime units now have a
+  first real component-graph Store path. Shared SQL Store schema target is
+  version 4, and SQLite compatibility schema target is version 17. The new
+  generic tables are `component_dependencies` and `component_config_assets`,
+  while existing `environment_components` remains the component registry and
+  the earlier `service_*` tables remain compatibility-only structure.
+- Added Store API methods to replace and read an environment component graph
+  without direct database-client SQL. The graph model covers components,
+  consumer -> provider dependency edges with phase/capability, and compact
+  component-owned config assets. Inline asset content is bounded at 16 KB per
+  asset and 64 KB per graph so images, code, runtime databases, logs, caches,
+  and Evidence payloads cannot be smuggled into PostgreSQL.
+- Added CLI surfaces:
+  `environment components replace ENV_ID --file COMPONENT_GRAPH_JSON` and
+  `environment components inspect ENV_ID`, both backed by the active Store.
+  `environment restore` now loads the Store component graph and reports a
+  `component-graph` readiness item. Required components without Store-backed
+  health checks fail this readiness gate.
+- Applied the new shared SQL Store migration to `local-pg` through CLI only:
+  `store status --store local-pg` showed version 3 -> target 4, then
+  `store upgrade --store local-pg` applied one migration, and final status is
+  version 4, target 4, pending 0. No direct database-client SQL was used.
+- Temporary CLI verification wrote a two-component graph (`mysql` plus
+  `service.alpha`) into an isolated SQLite Store via
+  `environment components replace`, read it back via
+  `environment components inspect`, and confirmed `environment restore --json`
+  reports `componentGraph.configured=true`, two components, one blocking edge,
+  one asset, 49 inline asset bytes, and a green `component-graph` readiness
+  item.
+- The real `scf-chain-core10-local-docker` environment on `local-pg` currently
+  now has first-pass component graph rows written through CLI:
+  17 components, 42 dependency edges, and 19 compact config-asset placeholders.
+  Components include middleware (`zookeeper`, `mysql`, `redis-master`,
+  `redis-sentinel`, `rabbitmq`), platform services (`apollo`, `xxl-job`),
+  mocks (`wiremock`, `llt`), observability (`skywalking-oap`,
+  `skywalking-ui`), and the six business services in the Compose allow-list.
+- A non-destructive restore plan against `local-pg` now reports
+  `componentGraph.configured=true`, `components=17`, `dependencies=42`,
+  `blockingDependencies=39`, `runtimeDependencies=3`, `assets=19`,
+  `inlineAssetBytes=0`, `requiredHealthChecks=17`, and
+  `missingHealthChecks=0`. The new `component-graph` readiness item is green.
+  Restore is still correctly blocked by missing startup assets, so the next
+  implementation slice should materialize those component-owned assets into
+  Store-generated startup files rather than treating the component graph as a
+  complete clean-machine restore by itself.

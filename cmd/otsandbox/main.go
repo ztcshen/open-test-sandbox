@@ -253,6 +253,8 @@ Usage:
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
+  otsandbox environment components inspect ENV_ID [--store NAME_OR_DSN] [--json]
+  otsandbox environment components replace ENV_ID --file COMPONENT_GRAPH_JSON [--store NAME_OR_DSN] [--json]
   otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--use-existing-containers] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
   otsandbox environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox environment acceptance report ENV_ID --server-url URL --run ID [--json]
@@ -446,6 +448,8 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentBootstrap(ctx, args[1:])
 	case "startup-file":
 		return runEnvironmentStartupFile(ctx, args[1:])
+	case "components":
+		return runEnvironmentComponents(ctx, args[1:])
 	case "restore":
 		return runEnvironmentRestore(ctx, args[1:])
 	case "acceptance":
@@ -687,6 +691,126 @@ func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
 	return nil
 }
 
+func runEnvironmentComponents(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing environment components command")
+	}
+	switch args[0] {
+	case "inspect":
+		return runEnvironmentComponentsInspect(ctx, args[1:])
+	case "replace":
+		return runEnvironmentComponentsReplace(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown environment components command: %s", args[0])
+	}
+}
+
+func runEnvironmentComponentsInspect(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment components inspect", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if _, err := runtime.GetEnvironment(ctx, id); err != nil {
+		return err
+	}
+	graph, err := runtime.GetEnvironmentComponentGraph(ctx, id)
+	if err != nil {
+		return err
+	}
+	return printEnvironmentComponentGraph(id, graph, *jsonOutput)
+}
+
+func runEnvironmentComponentsReplace(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment components replace", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	file := flags.String("file", "", "Component graph JSON file")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	if strings.TrimSpace(*file) == "" {
+		return errors.New("--file COMPONENT_GRAPH_JSON is required")
+	}
+	raw, err := os.ReadFile(strings.TrimSpace(*file))
+	if err != nil {
+		return err
+	}
+	var graph store.EnvironmentComponentGraph
+	if err := json.Unmarshal(raw, &graph); err != nil {
+		return fmt.Errorf("decode component graph JSON: %w", err)
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if _, err := runtime.GetEnvironment(ctx, id); err != nil {
+		return err
+	}
+	if err := runtime.ReplaceEnvironmentComponentGraph(ctx, id, graph); err != nil {
+		return err
+	}
+	graph, err = runtime.GetEnvironmentComponentGraph(ctx, id)
+	if err != nil {
+		return err
+	}
+	return printEnvironmentComponentGraph(id, graph, *jsonOutput)
+}
+
+func printEnvironmentComponentGraph(envID string, graph store.EnvironmentComponentGraph, jsonOutput bool) error {
+	payload := map[string]any{
+		"ok":            true,
+		"environmentId": envID,
+		"componentGraph": map[string]any{
+			"components":   graph.Components,
+			"dependencies": graph.Dependencies,
+			"assets":       graph.Assets,
+			"counts": map[string]int{
+				"components":   len(graph.Components),
+				"dependencies": len(graph.Dependencies),
+				"assets":       len(graph.Assets),
+			},
+		},
+	}
+	if jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	fmt.Printf("Environment Component Graph: %s\n", envID)
+	fmt.Printf("Components: %d\n", len(graph.Components))
+	fmt.Printf("Dependencies: %d\n", len(graph.Dependencies))
+	fmt.Printf("Assets: %d\n", len(graph.Assets))
+	for _, component := range graph.Components {
+		label := strings.TrimSpace(component.DisplayName)
+		if label == "" {
+			label = component.ComponentID
+		}
+		fmt.Printf("- %s [%s/%s] compose=%s required=%t\n", component.ComponentID, component.Kind, component.Role, component.ComposeService, component.Required)
+		if label != component.ComponentID {
+			fmt.Printf("  name: %s\n", label)
+		}
+	}
+	return nil
+}
+
 func environmentStartupFilePayload(files map[string]string) []map[string]any {
 	paths := make([]string, 0, len(files))
 	for path := range files {
@@ -713,30 +837,47 @@ func environmentStartupFileSummaryJSON(existing string, files map[string]string)
 }
 
 type environmentRestoreReport struct {
-	OK                   bool                            `json:"ok"`
-	RestoreID            string                          `json:"restoreId"`
-	Executed             bool                            `json:"executed"`
-	EnvironmentID        string                          `json:"environmentId"`
-	VerificationWorkflow string                          `json:"verificationWorkflow"`
-	Workspace            string                          `json:"workspace"`
-	Environment          map[string]any                  `json:"environment,omitempty"`
-	Error                string                          `json:"error,omitempty"`
-	Package              environmentRestorePackageReport `json:"package,omitempty"`
-	Repos                []environmentRestoreRepoReport  `json:"repos"`
-	SourcePolicy         environmentRestoreSourcePolicy  `json:"sourcePolicy,omitempty"`
-	Compose              map[string]any                  `json:"compose"`
-	HealthChecks         []any                           `json:"healthChecks"`
-	Preflight            environmentRestorePreflight     `json:"preflight"`
-	Readiness            environmentRestoreReadiness     `json:"readiness"`
-	Docker               environmentRestoreDockerReport  `json:"docker"`
-	Workflow             environmentRestoreWorkflowRun   `json:"workflow"`
-	NextActions          []string                        `json:"nextActions"`
+	OK                   bool                             `json:"ok"`
+	RestoreID            string                           `json:"restoreId"`
+	Executed             bool                             `json:"executed"`
+	EnvironmentID        string                           `json:"environmentId"`
+	VerificationWorkflow string                           `json:"verificationWorkflow"`
+	Workspace            string                           `json:"workspace"`
+	Environment          map[string]any                   `json:"environment,omitempty"`
+	Error                string                           `json:"error,omitempty"`
+	Package              environmentRestorePackageReport  `json:"package,omitempty"`
+	Repos                []environmentRestoreRepoReport   `json:"repos"`
+	SourcePolicy         environmentRestoreSourcePolicy   `json:"sourcePolicy,omitempty"`
+	ComponentGraph       environmentRestoreComponentGraph `json:"componentGraph,omitempty"`
+	Compose              map[string]any                   `json:"compose"`
+	HealthChecks         []any                            `json:"healthChecks"`
+	Preflight            environmentRestorePreflight      `json:"preflight"`
+	Readiness            environmentRestoreReadiness      `json:"readiness"`
+	Docker               environmentRestoreDockerReport   `json:"docker"`
+	Workflow             environmentRestoreWorkflowRun    `json:"workflow"`
+	NextActions          []string                         `json:"nextActions"`
 }
 
 type environmentRestoreSourcePolicy struct {
 	RemoteOnly bool     `json:"remoteOnly"`
 	OK         bool     `json:"ok"`
 	Violations []string `json:"violations,omitempty"`
+}
+
+type environmentRestoreComponentGraph struct {
+	Configured              bool   `json:"configured"`
+	OK                      bool   `json:"ok"`
+	Components              int    `json:"components"`
+	Dependencies            int    `json:"dependencies"`
+	BlockingDependencies    int    `json:"blockingDependencies"`
+	RuntimeDependencies     int    `json:"runtimeDependencies"`
+	Assets                  int    `json:"assets"`
+	InlineAssetBytes        int64  `json:"inlineAssetBytes"`
+	RequiredHealthChecks    int    `json:"requiredHealthChecks"`
+	MissingHealthChecks     int    `json:"missingHealthChecks"`
+	LargestInlineAssetID    string `json:"largestInlineAssetId,omitempty"`
+	LargestInlineAssetBytes int64  `json:"largestInlineAssetBytes,omitempty"`
+	Error                   string `json:"error,omitempty"`
 }
 
 type environmentRestorePackageReport struct {
@@ -983,6 +1124,10 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	componentGraph, err := runtime.GetEnvironmentComponentGraph(ctx, env.ID)
+	if err != nil {
+		return err
+	}
 	report, err := buildEnvironmentRestoreReport(ctx, env, *workspace, *execute, *pull, *prepareReposOnly, time.Duration(*healthTimeoutSeconds)*time.Second, environmentRestoreWorkflowOptions{
 		Run:            *runWorkflow,
 		EnvironmentID:  env.ID,
@@ -996,7 +1141,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 		IncludeImages:         *cleanDockerImages,
 		Allowed:               *allowDestructiveDockerCleanup,
 		UseExistingContainers: *useExistingContainers,
-	})
+	}, componentGraph)
 	if err != nil {
 		return err
 	}
@@ -1096,7 +1241,7 @@ func environmentAcceptanceRunURL(serverURL string, envID string, runID string) s
 	return base
 }
 
-func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreReport, error) {
+func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreReport, error) {
 	workflowID := strings.TrimSpace(env.VerificationWorkflowID)
 	if workflowID == "" {
 		return environmentRestoreReport{}, fmt.Errorf("environment %s has no verification workflow; restore must be anchored to a verified workflow", env.ID)
@@ -1109,6 +1254,11 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	compose := jsonObjectString(env.ComposeJSON)
 	packageSpec := environmentRestorePackageSpecFromCompose(compose, workspace)
 	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose)
+	componentGraph := store.EnvironmentComponentGraph{}
+	if len(componentGraphs) > 0 {
+		componentGraph = componentGraphs[0]
+	}
+	componentGraphReport := environmentRestoreComponentGraphReport(env.ID, componentGraph)
 	attemptedAt := time.Now().UTC()
 	remoteOnly := environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL)
 	report := environmentRestoreReport{
@@ -1120,6 +1270,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Workspace:            workspace,
 		Compose:              compose,
 		HealthChecks:         healthChecks,
+		ComponentGraph:       componentGraphReport,
 		Preflight:            environmentRestorePreflightReport(packageSpec, specs, compose, workspace, cleanupOptions, prepareReposOnly),
 		SourcePolicy:         environmentRestoreSourcePolicyReport(packageSpec, specs, remoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
@@ -1135,6 +1286,9 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		report.OK = false
 	}
 	if !report.SourcePolicy.OK {
+		report.OK = false
+	}
+	if report.ComponentGraph.Configured && !report.ComponentGraph.OK {
 		report.OK = false
 	}
 	report.Package = environmentRestorePackage(ctx, packageSpec, execute, pull, remoteOnly)
@@ -1651,6 +1805,52 @@ func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs
 	return report
 }
 
+func environmentRestoreComponentGraphReport(envID string, graph store.EnvironmentComponentGraph) environmentRestoreComponentGraph {
+	report := environmentRestoreComponentGraph{
+		Configured:   len(graph.Components) > 0 || len(graph.Dependencies) > 0 || len(graph.Assets) > 0,
+		OK:           true,
+		Components:   len(graph.Components),
+		Dependencies: len(graph.Dependencies),
+		Assets:       len(graph.Assets),
+	}
+	if !report.Configured {
+		return report
+	}
+	if err := store.ValidateEnvironmentComponentGraph(envID, graph); err != nil {
+		report.OK = false
+		report.Error = err.Error()
+		return report
+	}
+	for _, component := range graph.Components {
+		if component.Required {
+			report.RequiredHealthChecks++
+			if strings.TrimSpace(component.HealthCheckJSON) == "" || strings.TrimSpace(component.HealthCheckJSON) == "{}" {
+				report.MissingHealthChecks++
+			}
+		}
+	}
+	for _, dep := range graph.Dependencies {
+		if strings.EqualFold(strings.TrimSpace(dep.Phase), "runtime") {
+			report.RuntimeDependencies++
+		} else {
+			report.BlockingDependencies++
+		}
+	}
+	for _, asset := range graph.Assets {
+		size := int64(len(asset.ContentInline))
+		report.InlineAssetBytes += size
+		if size > report.LargestInlineAssetBytes {
+			report.LargestInlineAssetBytes = size
+			report.LargestInlineAssetID = asset.AssetID
+		}
+	}
+	if report.MissingHealthChecks > 0 {
+		report.OK = false
+		report.Error = fmt.Sprintf("%d required component(s) are missing Store-backed health checks", report.MissingHealthChecks)
+	}
+	return report
+}
+
 func environmentRestoreIsRemoteGitURL(rawURL string) bool {
 	rawURL = strings.TrimSpace(rawURL)
 	lower := strings.ToLower(rawURL)
@@ -1850,6 +2050,17 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 
 	addItem("store-boundary", true, true, "sandbox PostgreSQL Store must stay outside the restored Docker target environment")
 	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
+	if report.ComponentGraph.Configured {
+		detail := fmt.Sprintf("%d component(s), %d blocking dependency edge(s), %d runtime edge(s), %d asset(s), %d inline asset bytes",
+			report.ComponentGraph.Components, report.ComponentGraph.BlockingDependencies, report.ComponentGraph.RuntimeDependencies,
+			report.ComponentGraph.Assets, report.ComponentGraph.InlineAssetBytes)
+		if strings.TrimSpace(report.ComponentGraph.Error) != "" {
+			detail = report.ComponentGraph.Error
+		}
+		addItem("component-graph", true, report.ComponentGraph.OK, detail)
+	} else {
+		addItem("component-graph", false, true, "no Store component graph recorded yet; restore will use legacy service and compose metadata")
+	}
 	if len(report.Preflight.ContainerConflicts) > 0 {
 		addItem("docker-container-conflicts", true, false, "existing Docker containers would be reused or replaced by fixed container_name values: "+strings.Join(report.Preflight.ContainerConflicts, ", "))
 	} else if cleanupOptions.UseExistingContainers {

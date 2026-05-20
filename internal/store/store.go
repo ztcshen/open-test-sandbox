@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -49,6 +50,8 @@ type Store interface {
 	UpsertEnvironment(context.Context, Environment) (Environment, error)
 	GetEnvironment(context.Context, string) (Environment, error)
 	ListEnvironments(context.Context) ([]Environment, error)
+	ReplaceEnvironmentComponentGraph(context.Context, string, EnvironmentComponentGraph) error
+	GetEnvironmentComponentGraph(context.Context, string) (EnvironmentComponentGraph, error)
 }
 
 type Run struct {
@@ -191,6 +194,8 @@ type Environment struct {
 const (
 	EnvironmentDefinitionMaxBytes = 64 * 1024
 	EnvironmentSummaryMaxBytes    = 128 * 1024
+	ComponentAssetInlineMaxBytes  = 16 * 1024
+	ComponentGraphMaxBytes        = 64 * 1024
 )
 
 func ValidateEnvironmentDefinitionSize(e Environment) error {
@@ -201,6 +206,113 @@ func ValidateEnvironmentDefinitionSize(e Environment) error {
 	}
 	if len(e.SummaryJSON) > EnvironmentSummaryMaxBytes {
 		return fmt.Errorf("environment summary metadata is %d bytes; maximum is %d bytes. Store only compact acceptance summaries and indexes in PostgreSQL, not code, images, logs, evidence payloads, or large files", len(e.SummaryJSON), EnvironmentSummaryMaxBytes)
+	}
+	return nil
+}
+
+type EnvironmentComponentGraph struct {
+	Components   []EnvironmentComponent `json:"components"`
+	Dependencies []ComponentDependency  `json:"dependencies"`
+	Assets       []ComponentConfigAsset `json:"assets"`
+}
+
+type EnvironmentComponent struct {
+	EnvID           string    `json:"envId,omitempty"`
+	ComponentID     string    `json:"componentId"`
+	DisplayName     string    `json:"displayName,omitempty"`
+	Kind            string    `json:"kind,omitempty"`
+	Role            string    `json:"role,omitempty"`
+	ComposeService  string    `json:"composeService,omitempty"`
+	Image           string    `json:"image,omitempty"`
+	Required        bool      `json:"required"`
+	RuntimeJSON     string    `json:"runtimeJson,omitempty"`
+	HealthCheckJSON string    `json:"healthCheckJson,omitempty"`
+	SummaryJSON     string    `json:"summaryJson,omitempty"`
+	CreatedAt       time.Time `json:"createdAt,omitempty"`
+	UpdatedAt       time.Time `json:"updatedAt,omitempty"`
+}
+
+type ComponentDependency struct {
+	EnvID               string    `json:"envId,omitempty"`
+	ConsumerComponentID string    `json:"consumerComponentId"`
+	ProviderComponentID string    `json:"providerComponentId"`
+	Phase               string    `json:"phase,omitempty"`
+	Capability          string    `json:"capability,omitempty"`
+	Required            bool      `json:"required"`
+	ProfileJSON         string    `json:"profileJson,omitempty"`
+	CreatedAt           time.Time `json:"createdAt,omitempty"`
+	UpdatedAt           time.Time `json:"updatedAt,omitempty"`
+}
+
+type ComponentConfigAsset struct {
+	EnvID             string    `json:"envId,omitempty"`
+	OwnerComponentID  string    `json:"ownerComponentId"`
+	AssetID           string    `json:"assetId"`
+	AssetKind         string    `json:"assetKind,omitempty"`
+	TargetComponentID string    `json:"targetComponentId,omitempty"`
+	TargetPath        string    `json:"targetPath,omitempty"`
+	ContentInline     string    `json:"contentInline,omitempty"`
+	RemoteRefJSON     string    `json:"remoteRefJson,omitempty"`
+	SHA256            string    `json:"sha256,omitempty"`
+	SizeBytes         int64     `json:"sizeBytes,omitempty"`
+	ApplyOrder        int       `json:"applyOrder,omitempty"`
+	Sensitive         bool      `json:"sensitive"`
+	SummaryJSON       string    `json:"summaryJson,omitempty"`
+	CreatedAt         time.Time `json:"createdAt,omitempty"`
+	UpdatedAt         time.Time `json:"updatedAt,omitempty"`
+}
+
+func ValidateEnvironmentComponentGraph(envID string, g EnvironmentComponentGraph) error {
+	envID = strings.TrimSpace(envID)
+	if envID == "" {
+		return fmt.Errorf("environment id is required for component graph")
+	}
+	total := 0
+	componentIDs := map[string]bool{}
+	for _, component := range g.Components {
+		id := strings.TrimSpace(component.ComponentID)
+		if id == "" {
+			return fmt.Errorf("component id is required")
+		}
+		componentIDs[id] = true
+		total += len(id) + len(component.DisplayName) + len(component.Kind) + len(component.Role) +
+			len(component.ComposeService) + len(component.Image) + len(component.RuntimeJSON) +
+			len(component.HealthCheckJSON) + len(component.SummaryJSON)
+	}
+	for _, dep := range g.Dependencies {
+		consumer := strings.TrimSpace(dep.ConsumerComponentID)
+		provider := strings.TrimSpace(dep.ProviderComponentID)
+		if consumer == "" || provider == "" {
+			return fmt.Errorf("component dependency requires consumer and provider component ids")
+		}
+		if !componentIDs[consumer] {
+			return fmt.Errorf("component dependency consumer %q is not registered in environment %s", consumer, envID)
+		}
+		if !componentIDs[provider] {
+			return fmt.Errorf("component dependency provider %q is not registered in environment %s", provider, envID)
+		}
+		total += len(consumer) + len(provider) + len(dep.Phase) + len(dep.Capability) + len(dep.ProfileJSON)
+	}
+	for _, asset := range g.Assets {
+		owner := strings.TrimSpace(asset.OwnerComponentID)
+		if owner == "" || strings.TrimSpace(asset.AssetID) == "" {
+			return fmt.Errorf("component config asset requires owner component id and asset id")
+		}
+		if !componentIDs[owner] {
+			return fmt.Errorf("component config asset owner %q is not registered in environment %s", owner, envID)
+		}
+		target := strings.TrimSpace(asset.TargetComponentID)
+		if target != "" && !componentIDs[target] {
+			return fmt.Errorf("component config asset target %q is not registered in environment %s", target, envID)
+		}
+		if len(asset.ContentInline) > ComponentAssetInlineMaxBytes {
+			return fmt.Errorf("component config asset %q inline content is %d bytes; maximum is %d bytes. Store only compact deterministic startup text, not images, code, logs, evidence payloads, runtime databases, or large binaries", asset.AssetID, len(asset.ContentInline), ComponentAssetInlineMaxBytes)
+		}
+		total += len(owner) + len(asset.AssetID) + len(asset.AssetKind) + len(target) + len(asset.TargetPath) +
+			len(asset.ContentInline) + len(asset.RemoteRefJSON) + len(asset.SHA256) + len(asset.SummaryJSON)
+	}
+	if total > ComponentGraphMaxBytes {
+		return fmt.Errorf("environment component graph metadata is %d bytes; maximum is %d bytes. Store only compact Docker restore metadata in PostgreSQL", total, ComponentGraphMaxBytes)
 	}
 	return nil
 }

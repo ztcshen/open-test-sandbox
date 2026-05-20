@@ -527,6 +527,155 @@ from environments order by verified desc, updated_at desc, id;`)
 	return out, nil
 }
 
+func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID string, graph store.EnvironmentComponentGraph) error {
+	if err := store.ValidateEnvironmentComponentGraph(envID, graph); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"component_config_assets", "component_dependencies", "environment_components"} {
+		query := fmt.Sprintf(`delete from %s where env_id = %s;`, table, s.dialect.BindVar(1))
+		if _, err := tx.ExecContext(ctx, query, envID); err != nil {
+			return fmt.Errorf("clear %s for environment %q: %w", table, envID, err)
+		}
+	}
+	now := utcNow()
+	for _, component := range graph.Components {
+		if component.CreatedAt.IsZero() {
+			component.CreatedAt = now
+		}
+		if component.UpdatedAt.IsZero() {
+			component.UpdatedAt = now
+		}
+		query := fmt.Sprintf(`
+insert into environment_components (
+  env_id, component_id, display_name, kind, role, compose_service, image, required,
+  runtime_json, healthcheck_json, summary_json, created_at, updated_at
+) values (%s);`, s.bindVars(13))
+		if _, err := tx.ExecContext(ctx, query,
+			envID, component.ComponentID, component.DisplayName, component.Kind, component.Role, component.ComposeService,
+			component.Image, component.Required, stringDefault(component.RuntimeJSON, "{}"), stringDefault(component.HealthCheckJSON, "{}"),
+			stringDefault(component.SummaryJSON, "{}"), dbTimeArg(s.dialect, component.CreatedAt), dbTimeArg(s.dialect, component.UpdatedAt),
+		); err != nil {
+			return fmt.Errorf("insert environment component %q: %w", component.ComponentID, err)
+		}
+	}
+	for _, dep := range graph.Dependencies {
+		if dep.CreatedAt.IsZero() {
+			dep.CreatedAt = now
+		}
+		if dep.UpdatedAt.IsZero() {
+			dep.UpdatedAt = now
+		}
+		query := fmt.Sprintf(`
+insert into component_dependencies (
+  env_id, consumer_component_id, provider_component_id, phase, capability, required,
+  profile_json, created_at, updated_at
+) values (%s);`, s.bindVars(9))
+		if _, err := tx.ExecContext(ctx, query,
+			envID, dep.ConsumerComponentID, dep.ProviderComponentID, dep.Phase, dep.Capability, dep.Required,
+			stringDefault(dep.ProfileJSON, "{}"), dbTimeArg(s.dialect, dep.CreatedAt), dbTimeArg(s.dialect, dep.UpdatedAt),
+		); err != nil {
+			return fmt.Errorf("insert component dependency %q -> %q: %w", dep.ConsumerComponentID, dep.ProviderComponentID, err)
+		}
+	}
+	for _, asset := range graph.Assets {
+		if asset.CreatedAt.IsZero() {
+			asset.CreatedAt = now
+		}
+		if asset.UpdatedAt.IsZero() {
+			asset.UpdatedAt = now
+		}
+		if strings.TrimSpace(asset.TargetComponentID) == "" {
+			asset.TargetComponentID = asset.OwnerComponentID
+		}
+		query := fmt.Sprintf(`
+insert into component_config_assets (
+  env_id, owner_component_id, asset_id, asset_kind, target_component_id, target_path,
+  content_inline, remote_ref_json, sha256, size_bytes, apply_order, sensitive,
+  summary_json, created_at, updated_at
+) values (%s);`, s.bindVars(15))
+		if _, err := tx.ExecContext(ctx, query,
+			envID, asset.OwnerComponentID, asset.AssetID, asset.AssetKind, asset.TargetComponentID, asset.TargetPath,
+			asset.ContentInline, stringDefault(asset.RemoteRefJSON, "{}"), asset.SHA256, asset.SizeBytes, asset.ApplyOrder, asset.Sensitive,
+			stringDefault(asset.SummaryJSON, "{}"), dbTimeArg(s.dialect, asset.CreatedAt), dbTimeArg(s.dialect, asset.UpdatedAt),
+		); err != nil {
+			return fmt.Errorf("insert component config asset %q: %w", asset.AssetID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetEnvironmentComponentGraph(ctx context.Context, envID string) (store.EnvironmentComponentGraph, error) {
+	graph := store.EnvironmentComponentGraph{
+		Components:   []store.EnvironmentComponent{},
+		Dependencies: []store.ComponentDependency{},
+		Assets:       []store.ComponentConfigAsset{},
+	}
+	componentRows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+select env_id, component_id, display_name, kind, role, compose_service, image, required,
+  runtime_json, healthcheck_json, summary_json, created_at, updated_at
+from environment_components
+where env_id = %s
+order by component_id;`, s.dialect.BindVar(1)), envID)
+	if err != nil {
+		return store.EnvironmentComponentGraph{}, err
+	}
+	defer componentRows.Close()
+	for componentRows.Next() {
+		item, err := scanEnvironmentComponent(componentRows)
+		if err != nil {
+			return store.EnvironmentComponentGraph{}, err
+		}
+		graph.Components = append(graph.Components, item)
+	}
+	if err := componentRows.Err(); err != nil {
+		return store.EnvironmentComponentGraph{}, err
+	}
+	depRows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+select env_id, consumer_component_id, provider_component_id, phase, capability, required,
+  profile_json, created_at, updated_at
+from component_dependencies
+where env_id = %s
+order by consumer_component_id, provider_component_id, phase, capability;`, s.dialect.BindVar(1)), envID)
+	if err != nil {
+		return store.EnvironmentComponentGraph{}, err
+	}
+	defer depRows.Close()
+	for depRows.Next() {
+		item, err := scanComponentDependency(depRows)
+		if err != nil {
+			return store.EnvironmentComponentGraph{}, err
+		}
+		graph.Dependencies = append(graph.Dependencies, item)
+	}
+	if err := depRows.Err(); err != nil {
+		return store.EnvironmentComponentGraph{}, err
+	}
+	assetRows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+select env_id, owner_component_id, asset_id, asset_kind, target_component_id, target_path,
+  content_inline, remote_ref_json, sha256, size_bytes, apply_order, sensitive,
+  summary_json, created_at, updated_at
+from component_config_assets
+where env_id = %s
+order by owner_component_id, apply_order, asset_id;`, s.dialect.BindVar(1)), envID)
+	if err != nil {
+		return store.EnvironmentComponentGraph{}, err
+	}
+	defer assetRows.Close()
+	for assetRows.Next() {
+		item, err := scanComponentConfigAsset(assetRows)
+		if err != nil {
+			return store.EnvironmentComponentGraph{}, err
+		}
+		graph.Assets = append(graph.Assets, item)
+	}
+	return graph, assetRows.Err()
+}
+
 func (s *Store) bindVars(count int) string {
 	vars := make([]string, 0, count)
 	for i := 1; i <= count; i++ {
@@ -733,6 +882,56 @@ func scanEnvironment(row scanner) (store.Environment, error) {
 	e.CreatedAt = decodeDBTime(createdAt)
 	e.UpdatedAt = decodeDBTime(updatedAt)
 	return e, nil
+}
+
+func scanEnvironmentComponent(row scanner) (store.EnvironmentComponent, error) {
+	var item store.EnvironmentComponent
+	var createdAt, updatedAt any
+	if err := row.Scan(
+		&item.EnvID, &item.ComponentID, &item.DisplayName, &item.Kind, &item.Role, &item.ComposeService,
+		&item.Image, &item.Required, &item.RuntimeJSON, &item.HealthCheckJSON, &item.SummaryJSON,
+		&createdAt, &updatedAt,
+	); err != nil {
+		return store.EnvironmentComponent{}, err
+	}
+	item.RuntimeJSON = normalizeJSONText(item.RuntimeJSON)
+	item.HealthCheckJSON = normalizeJSONText(item.HealthCheckJSON)
+	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
+	item.CreatedAt = decodeDBTime(createdAt)
+	item.UpdatedAt = decodeDBTime(updatedAt)
+	return item, nil
+}
+
+func scanComponentDependency(row scanner) (store.ComponentDependency, error) {
+	var item store.ComponentDependency
+	var createdAt, updatedAt any
+	if err := row.Scan(
+		&item.EnvID, &item.ConsumerComponentID, &item.ProviderComponentID, &item.Phase, &item.Capability,
+		&item.Required, &item.ProfileJSON, &createdAt, &updatedAt,
+	); err != nil {
+		return store.ComponentDependency{}, err
+	}
+	item.ProfileJSON = normalizeJSONText(item.ProfileJSON)
+	item.CreatedAt = decodeDBTime(createdAt)
+	item.UpdatedAt = decodeDBTime(updatedAt)
+	return item, nil
+}
+
+func scanComponentConfigAsset(row scanner) (store.ComponentConfigAsset, error) {
+	var item store.ComponentConfigAsset
+	var createdAt, updatedAt any
+	if err := row.Scan(
+		&item.EnvID, &item.OwnerComponentID, &item.AssetID, &item.AssetKind, &item.TargetComponentID,
+		&item.TargetPath, &item.ContentInline, &item.RemoteRefJSON, &item.SHA256, &item.SizeBytes,
+		&item.ApplyOrder, &item.Sensitive, &item.SummaryJSON, &createdAt, &updatedAt,
+	); err != nil {
+		return store.ComponentConfigAsset{}, err
+	}
+	item.RemoteRefJSON = normalizeJSONText(item.RemoteRefJSON)
+	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
+	item.CreatedAt = decodeDBTime(createdAt)
+	item.UpdatedAt = decodeDBTime(updatedAt)
+	return item, nil
 }
 
 func catalogCounts(catalog store.ProfileCatalog) store.ProfileCatalogCounts {

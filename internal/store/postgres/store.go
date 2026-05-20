@@ -175,6 +175,14 @@ func (s *Store) ListEnvironments(ctx context.Context) ([]store.Environment, erro
 	return s.core.ListEnvironments(ctx)
 }
 
+func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID string, graph store.EnvironmentComponentGraph) error {
+	return s.core.ReplaceEnvironmentComponentGraph(ctx, envID, graph)
+}
+
+func (s *Store) GetEnvironmentComponentGraph(ctx context.Context, envID string) (store.EnvironmentComponentGraph, error) {
+	return s.core.GetEnvironmentComponentGraph(ctx, envID)
+}
+
 type SchemaStatusResult struct {
 	URL            string
 	CurrentVersion int

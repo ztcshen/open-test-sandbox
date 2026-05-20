@@ -6,7 +6,7 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 16
+const CurrentVersion = 17
 
 func All() []Change {
 	return []Change{
@@ -581,6 +581,58 @@ create index if not exists idx_service_config_assets_target
 
 create index if not exists idx_service_config_assets_service_order
   on service_config_assets(env_id, service_id, apply_order, asset_id);`,
+		},
+		{
+			Version: 17,
+			Name:    "generalize environment component graph",
+			SQL: `
+create table if not exists component_dependencies (
+  env_id text not null,
+  consumer_component_id text not null,
+  provider_component_id text not null,
+  phase text not null default '',
+  capability text not null default '',
+  required integer not null default 1,
+  profile_json text not null default '{}',
+  created_at text not null,
+  updated_at text not null,
+  primary key (env_id, consumer_component_id, provider_component_id, phase, capability),
+  foreign key (env_id, consumer_component_id) references environment_components(env_id, component_id) on delete cascade,
+  foreign key (env_id, provider_component_id) references environment_components(env_id, component_id) on delete cascade
+);
+
+create index if not exists idx_component_dependencies_provider
+  on component_dependencies(env_id, provider_component_id, phase, capability, consumer_component_id);
+
+create index if not exists idx_component_dependencies_phase
+  on component_dependencies(env_id, phase, capability, consumer_component_id, provider_component_id);
+
+create table if not exists component_config_assets (
+  env_id text not null,
+  owner_component_id text not null,
+  asset_id text not null,
+  asset_kind text not null default '',
+  target_component_id text not null default '',
+  target_path text not null default '',
+  content_inline text not null default '',
+  remote_ref_json text not null default '{}',
+  sha256 text not null default '',
+  size_bytes integer not null default 0,
+  apply_order integer not null default 0,
+  sensitive integer not null default 0,
+  summary_json text not null default '{}',
+  created_at text not null,
+  updated_at text not null,
+  primary key (env_id, owner_component_id, asset_id),
+  foreign key (env_id, owner_component_id) references environment_components(env_id, component_id) on delete cascade,
+  foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
+);
+
+create index if not exists idx_component_config_assets_target
+  on component_config_assets(env_id, target_component_id, asset_kind, apply_order, asset_id);
+
+create index if not exists idx_component_config_assets_owner_order
+  on component_config_assets(env_id, owner_component_id, apply_order, asset_id);`,
 		},
 	}
 }

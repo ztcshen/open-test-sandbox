@@ -95,6 +95,8 @@ func TestSQLiteSchemaIncludesEnvironmentComponentAssets(t *testing.T) {
 		"environment_components",
 		"service_dependencies",
 		"service_config_assets",
+		"component_dependencies",
+		"component_config_assets",
 	} {
 		if !tables[table] {
 			t.Fatalf("missing environment component asset table %q in %#v", table, tables)
@@ -113,6 +115,33 @@ func TestSQLiteSchemaIncludesEnvironmentComponentAssets(t *testing.T) {
 	} {
 		if !assetColumns[column] {
 			t.Fatalf("missing service_config_assets.%s in %#v", column, assetColumns)
+		}
+	}
+	dependencyColumns := sqliteTableColumns(t, dbPath, "component_dependencies")
+	for _, column := range []string{
+		"consumer_component_id",
+		"provider_component_id",
+		"phase",
+		"capability",
+		"profile_json",
+	} {
+		if !dependencyColumns[column] {
+			t.Fatalf("missing component_dependencies.%s in %#v", column, dependencyColumns)
+		}
+	}
+	componentAssetColumns := sqliteTableColumns(t, dbPath, "component_config_assets")
+	for _, column := range []string{
+		"owner_component_id",
+		"asset_kind",
+		"target_component_id",
+		"content_inline",
+		"remote_ref_json",
+		"size_bytes",
+		"apply_order",
+		"sensitive",
+	} {
+		if !componentAssetColumns[column] {
+			t.Fatalf("missing component_config_assets.%s in %#v", column, componentAssetColumns)
 		}
 	}
 }

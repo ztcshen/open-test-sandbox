@@ -143,6 +143,16 @@ func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
 		"sensitive boolean not null",
 		"idx_service_config_assets_target",
 		"idx_service_config_assets_service_order",
+		"create table if not exists component_dependencies",
+		"consumer_component_id text not null",
+		"provider_component_id text not null",
+		"phase text not null",
+		"capability text not null",
+		"idx_component_dependencies_provider",
+		"create table if not exists component_config_assets",
+		"owner_component_id text not null",
+		"idx_component_config_assets_target",
+		"idx_component_config_assets_owner_order",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("core schema missing environment component asset DDL %q:\n%s", want, joined)

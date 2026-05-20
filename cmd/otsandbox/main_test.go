@@ -1024,6 +1024,70 @@ func TestEnvironmentRestoreRequiresRemoteGitSourcesForPostgreSQLOneClickEnvironm
 	}
 }
 
+func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.component.graph",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "mysql",
+				Kind:            "middleware",
+				Role:            "database",
+				ComposeService:  "mysql",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service","service":"mysql"}`,
+				SummaryJSON:     `{}`,
+			},
+			{
+				ComponentID:     "service.alpha",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "service-alpha",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service","service":"service-alpha"}`,
+				SummaryJSON:     `{}`,
+			},
+		},
+		Dependencies: []store.ComponentDependency{
+			{
+				ConsumerComponentID: "service.alpha",
+				ProviderComponentID: "mysql",
+				Phase:               "startup",
+				Capability:          "sql",
+				Required:            true,
+				ProfileJSON:         `{}`,
+			},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{
+				OwnerComponentID:  "service.alpha",
+				AssetID:           "service.alpha.mysql.ddl",
+				AssetKind:         "mysql-ddl",
+				TargetComponentID: "mysql",
+				TargetPath:        "compose/mysql/init/service-alpha.sql",
+				ContentInline:     "create table service_alpha_smoke (id bigint primary key);",
+				SizeBytes:         int64(len("create table service_alpha_smoke (id bigint primary key);")),
+				SummaryJSON:       `{}`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build component graph restore report: %v", err)
+	}
+	if !report.ComponentGraph.Configured || !report.ComponentGraph.OK || report.ComponentGraph.Components != 2 || report.ComponentGraph.BlockingDependencies != 1 || report.ComponentGraph.Assets != 1 || report.ComponentGraph.MissingHealthChecks != 0 {
+		t.Fatalf("component graph report = %#v", report.ComponentGraph)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-graph", true, "2 component(s)") {
+		t.Fatalf("readiness should include component graph item: %#v", report.Readiness.Items)
+	}
+}
+
 func TestEnvironmentRestorePostgreSQLUsesStoreGeneratedStartupFiles(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeBin := t.TempDir()

@@ -273,6 +273,72 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if len(environments) != 1 || environments[0].ID != "env.team.accepted" || !environments[0].Verified {
 		t.Fatalf("environments = %#v", environments)
 	}
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "mysql",
+				DisplayName:     "MySQL",
+				Kind:            "middleware",
+				Role:            "database",
+				ComposeService:  "mysql",
+				Image:           "mysql:8",
+				Required:        true,
+				RuntimeJSON:     `{"ports":[3306]}`,
+				HealthCheckJSON: `{"type":"tcp","address":"127.0.0.1:3306"}`,
+				SummaryJSON:     `{}`,
+			},
+			{
+				ComponentID:     "service.alpha",
+				DisplayName:     "Service Alpha",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "service-alpha",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`,
+				SummaryJSON:     `{}`,
+			},
+		},
+		Dependencies: []store.ComponentDependency{
+			{
+				ConsumerComponentID: "service.alpha",
+				ProviderComponentID: "mysql",
+				Phase:               "startup",
+				Capability:          "sql",
+				Required:            true,
+				ProfileJSON:         `{"database":"alpha"}`,
+			},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{
+				OwnerComponentID:  "service.alpha",
+				AssetID:           "alpha.mysql.ddl",
+				AssetKind:         "mysql-ddl",
+				TargetComponentID: "mysql",
+				TargetPath:        "compose/mysql/init/alpha.sql",
+				ContentInline:     "create table alpha_smoke (id bigint primary key);",
+				SizeBytes:         int64(len("create table alpha_smoke (id bigint primary key);")),
+				ApplyOrder:        10,
+				SummaryJSON:       `{"ownedBy":"service.alpha"}`,
+			},
+		},
+	}
+	if err := s.ReplaceEnvironmentComponentGraph(ctx, env.ID, graph); err != nil {
+		t.Fatalf("replace environment component graph: %v", err)
+	}
+	loadedGraph, err := s.GetEnvironmentComponentGraph(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("get environment component graph: %v", err)
+	}
+	if len(loadedGraph.Components) != 2 || len(loadedGraph.Dependencies) != 1 || len(loadedGraph.Assets) != 1 {
+		t.Fatalf("loaded component graph = %#v", loadedGraph)
+	}
+	if loadedGraph.Dependencies[0].ConsumerComponentID != "service.alpha" || loadedGraph.Dependencies[0].ProviderComponentID != "mysql" || loadedGraph.Dependencies[0].Phase != "startup" {
+		t.Fatalf("loaded component dependency = %#v", loadedGraph.Dependencies[0])
+	}
+	if loadedGraph.Assets[0].OwnerComponentID != "service.alpha" || loadedGraph.Assets[0].TargetComponentID != "mysql" || !jsonEqual(loadedGraph.Assets[0].SummaryJSON, graph.Assets[0].SummaryJSON) {
+		t.Fatalf("loaded component asset = %#v", loadedGraph.Assets[0])
+	}
 
 	gate, err := s.UpsertBaselineGate(ctx, store.BaselineGate{
 		ProfileID:   "empty",

@@ -1157,6 +1157,120 @@ from environments order by verified desc, updated_at desc, id;`, &rows); err != 
 	return out, nil
 }
 
+func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID string, graph store.EnvironmentComponentGraph) error {
+	if err := store.ValidateEnvironmentComponentGraph(envID, graph); err != nil {
+		return err
+	}
+	now := utcNow()
+	statements := []string{
+		fmt.Sprintf("delete from component_config_assets where env_id = %s;", sqlString(envID)),
+		fmt.Sprintf("delete from component_dependencies where env_id = %s;", sqlString(envID)),
+		fmt.Sprintf("delete from environment_components where env_id = %s;", sqlString(envID)),
+	}
+	for _, component := range graph.Components {
+		if component.CreatedAt.IsZero() {
+			component.CreatedAt = now
+		}
+		if component.UpdatedAt.IsZero() {
+			component.UpdatedAt = now
+		}
+		statements = append(statements, fmt.Sprintf(`
+insert into environment_components (
+  env_id, component_id, display_name, kind, role, compose_service, image, required,
+  runtime_json, healthcheck_json, summary_json, created_at, updated_at
+) values (%s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s);`,
+			sqlString(envID), sqlString(component.ComponentID), sqlString(component.DisplayName), sqlString(component.Kind),
+			sqlString(component.Role), sqlString(component.ComposeService), sqlString(component.Image), boolInt(component.Required),
+			sqlString(stringDefault(component.RuntimeJSON, "{}")), sqlString(stringDefault(component.HealthCheckJSON, "{}")),
+			sqlString(stringDefault(component.SummaryJSON, "{}")), sqlString(encodeTime(component.CreatedAt)), sqlString(encodeTime(component.UpdatedAt))))
+	}
+	for _, dep := range graph.Dependencies {
+		if dep.CreatedAt.IsZero() {
+			dep.CreatedAt = now
+		}
+		if dep.UpdatedAt.IsZero() {
+			dep.UpdatedAt = now
+		}
+		statements = append(statements, fmt.Sprintf(`
+insert into component_dependencies (
+  env_id, consumer_component_id, provider_component_id, phase, capability, required,
+  profile_json, created_at, updated_at
+) values (%s, %s, %s, %s, %s, %d, %s, %s, %s);`,
+			sqlString(envID), sqlString(dep.ConsumerComponentID), sqlString(dep.ProviderComponentID),
+			sqlString(dep.Phase), sqlString(dep.Capability), boolInt(dep.Required),
+			sqlString(stringDefault(dep.ProfileJSON, "{}")), sqlString(encodeTime(dep.CreatedAt)), sqlString(encodeTime(dep.UpdatedAt))))
+	}
+	for _, asset := range graph.Assets {
+		if asset.CreatedAt.IsZero() {
+			asset.CreatedAt = now
+		}
+		if asset.UpdatedAt.IsZero() {
+			asset.UpdatedAt = now
+		}
+		if strings.TrimSpace(asset.TargetComponentID) == "" {
+			asset.TargetComponentID = asset.OwnerComponentID
+		}
+		statements = append(statements, fmt.Sprintf(`
+insert into component_config_assets (
+  env_id, owner_component_id, asset_id, asset_kind, target_component_id, target_path,
+  content_inline, remote_ref_json, sha256, size_bytes, apply_order, sensitive,
+  summary_json, created_at, updated_at
+) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %d, %d, %s, %s, %s);`,
+			sqlString(envID), sqlString(asset.OwnerComponentID), sqlString(asset.AssetID), sqlString(asset.AssetKind),
+			sqlString(asset.TargetComponentID), sqlString(asset.TargetPath), sqlString(asset.ContentInline),
+			sqlString(stringDefault(asset.RemoteRefJSON, "{}")), sqlString(asset.SHA256), asset.SizeBytes,
+			asset.ApplyOrder, boolInt(asset.Sensitive), sqlString(stringDefault(asset.SummaryJSON, "{}")),
+			sqlString(encodeTime(asset.CreatedAt)), sqlString(encodeTime(asset.UpdatedAt))))
+	}
+	return s.exec(ctx, "begin;\n"+strings.Join(statements, "\n")+"\ncommit;")
+}
+
+func (s *Store) GetEnvironmentComponentGraph(ctx context.Context, envID string) (store.EnvironmentComponentGraph, error) {
+	var componentRows []environmentComponentRow
+	if err := s.query(ctx, fmt.Sprintf(`
+select env_id, component_id, display_name, kind, role, compose_service, image, required,
+  runtime_json, healthcheck_json, summary_json, created_at, updated_at
+from environment_components
+where env_id = %s
+order by component_id;`, sqlString(envID)), &componentRows); err != nil {
+		return store.EnvironmentComponentGraph{}, err
+	}
+	var dependencyRows []componentDependencyRow
+	if err := s.query(ctx, fmt.Sprintf(`
+select env_id, consumer_component_id, provider_component_id, phase, capability, required,
+  profile_json, created_at, updated_at
+from component_dependencies
+where env_id = %s
+order by consumer_component_id, provider_component_id, phase, capability;`, sqlString(envID)), &dependencyRows); err != nil {
+		return store.EnvironmentComponentGraph{}, err
+	}
+	var assetRows []componentConfigAssetRow
+	if err := s.query(ctx, fmt.Sprintf(`
+select env_id, owner_component_id, asset_id, asset_kind, target_component_id, target_path,
+  content_inline, remote_ref_json, sha256, size_bytes, apply_order, sensitive,
+  summary_json, created_at, updated_at
+from component_config_assets
+where env_id = %s
+order by owner_component_id, apply_order, asset_id;`, sqlString(envID)), &assetRows); err != nil {
+		return store.EnvironmentComponentGraph{}, err
+	}
+	graph := store.EnvironmentComponentGraph{
+		Components:   make([]store.EnvironmentComponent, 0, len(componentRows)),
+		Dependencies: make([]store.ComponentDependency, 0, len(dependencyRows)),
+		Assets:       make([]store.ComponentConfigAsset, 0, len(assetRows)),
+	}
+	for _, row := range componentRows {
+		graph.Components = append(graph.Components, row.toStore())
+	}
+	for _, row := range dependencyRows {
+		graph.Dependencies = append(graph.Dependencies, row.toStore())
+	}
+	for _, row := range assetRows {
+		graph.Assets = append(graph.Assets, row.toStore())
+	}
+	return graph, nil
+}
+
 func (s *Store) exec(ctx context.Context, statement string) error {
 	out, err := sqliteCommand(ctx, false, s.path, statement)
 	if err != nil {
@@ -1718,6 +1832,104 @@ type environmentRow struct {
 	UpdatedAt              string `json:"updated_at"`
 }
 
+type environmentComponentRow struct {
+	EnvID           string `json:"env_id"`
+	ComponentID     string `json:"component_id"`
+	DisplayName     string `json:"display_name"`
+	Kind            string `json:"kind"`
+	Role            string `json:"role"`
+	ComposeService  string `json:"compose_service"`
+	Image           string `json:"image"`
+	Required        int    `json:"required"`
+	RuntimeJSON     string `json:"runtime_json"`
+	HealthCheckJSON string `json:"healthcheck_json"`
+	SummaryJSON     string `json:"summary_json"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+}
+
+func (r environmentComponentRow) toStore() store.EnvironmentComponent {
+	return store.EnvironmentComponent{
+		EnvID:           r.EnvID,
+		ComponentID:     r.ComponentID,
+		DisplayName:     r.DisplayName,
+		Kind:            r.Kind,
+		Role:            r.Role,
+		ComposeService:  r.ComposeService,
+		Image:           r.Image,
+		Required:        r.Required != 0,
+		RuntimeJSON:     normalizeJSONText(r.RuntimeJSON),
+		HealthCheckJSON: normalizeJSONText(r.HealthCheckJSON),
+		SummaryJSON:     normalizeJSONText(r.SummaryJSON),
+		CreatedAt:       decodeTime(r.CreatedAt),
+		UpdatedAt:       decodeTime(r.UpdatedAt),
+	}
+}
+
+type componentDependencyRow struct {
+	EnvID               string `json:"env_id"`
+	ConsumerComponentID string `json:"consumer_component_id"`
+	ProviderComponentID string `json:"provider_component_id"`
+	Phase               string `json:"phase"`
+	Capability          string `json:"capability"`
+	Required            int    `json:"required"`
+	ProfileJSON         string `json:"profile_json"`
+	CreatedAt           string `json:"created_at"`
+	UpdatedAt           string `json:"updated_at"`
+}
+
+func (r componentDependencyRow) toStore() store.ComponentDependency {
+	return store.ComponentDependency{
+		EnvID:               r.EnvID,
+		ConsumerComponentID: r.ConsumerComponentID,
+		ProviderComponentID: r.ProviderComponentID,
+		Phase:               r.Phase,
+		Capability:          r.Capability,
+		Required:            r.Required != 0,
+		ProfileJSON:         normalizeJSONText(r.ProfileJSON),
+		CreatedAt:           decodeTime(r.CreatedAt),
+		UpdatedAt:           decodeTime(r.UpdatedAt),
+	}
+}
+
+type componentConfigAssetRow struct {
+	EnvID             string `json:"env_id"`
+	OwnerComponentID  string `json:"owner_component_id"`
+	AssetID           string `json:"asset_id"`
+	AssetKind         string `json:"asset_kind"`
+	TargetComponentID string `json:"target_component_id"`
+	TargetPath        string `json:"target_path"`
+	ContentInline     string `json:"content_inline"`
+	RemoteRefJSON     string `json:"remote_ref_json"`
+	SHA256            string `json:"sha256"`
+	SizeBytes         int64  `json:"size_bytes"`
+	ApplyOrder        int    `json:"apply_order"`
+	Sensitive         int    `json:"sensitive"`
+	SummaryJSON       string `json:"summary_json"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+}
+
+func (r componentConfigAssetRow) toStore() store.ComponentConfigAsset {
+	return store.ComponentConfigAsset{
+		EnvID:             r.EnvID,
+		OwnerComponentID:  r.OwnerComponentID,
+		AssetID:           r.AssetID,
+		AssetKind:         r.AssetKind,
+		TargetComponentID: r.TargetComponentID,
+		TargetPath:        r.TargetPath,
+		ContentInline:     r.ContentInline,
+		RemoteRefJSON:     normalizeJSONText(r.RemoteRefJSON),
+		SHA256:            r.SHA256,
+		SizeBytes:         r.SizeBytes,
+		ApplyOrder:        r.ApplyOrder,
+		Sensitive:         r.Sensitive != 0,
+		SummaryJSON:       normalizeJSONText(r.SummaryJSON),
+		CreatedAt:         decodeTime(r.CreatedAt),
+		UpdatedAt:         decodeTime(r.UpdatedAt),
+	}
+}
+
 func (r environmentRow) toStore() store.Environment {
 	return store.Environment{
 		ID:                     r.ID,
@@ -1761,6 +1973,22 @@ func decodeTime(value string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+func normalizeJSONText(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		return value
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return value
+	}
+	return string(encoded)
 }
 
 func utcNow() time.Time {

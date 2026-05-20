@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 3
+	CurrentSchemaVersion = 4
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -325,6 +325,54 @@ create index if not exists idx_service_config_assets_target
 		`
 create index if not exists idx_service_config_assets_service_order
   on service_config_assets(env_id, service_id, apply_order, asset_id);`,
+		fmt.Sprintf(`
+create table if not exists component_dependencies (
+  env_id %s not null,
+  consumer_component_id %s not null,
+  provider_component_id %s not null,
+  phase %s not null,
+  capability %s not null,
+  required %s not null,
+  profile_json %s not null,
+  created_at %s not null,
+  updated_at %s not null,
+  primary key (env_id, consumer_component_id, provider_component_id, phase, capability),
+  foreign key (env_id, consumer_component_id) references environment_components(env_id, component_id) on delete cascade,
+  foreign key (env_id, provider_component_id) references environment_components(env_id, component_id) on delete cascade
+);`, text, text, text, text, text, boolType, jsonType, timeType, timeType),
+		`
+create index if not exists idx_component_dependencies_provider
+  on component_dependencies(env_id, provider_component_id, phase, capability, consumer_component_id);`,
+		`
+create index if not exists idx_component_dependencies_phase
+  on component_dependencies(env_id, phase, capability, consumer_component_id, provider_component_id);`,
+		fmt.Sprintf(`
+create table if not exists component_config_assets (
+  env_id %s not null,
+  owner_component_id %s not null,
+  asset_id %s not null,
+  asset_kind %s not null,
+  target_component_id %s not null,
+  target_path %s not null,
+  content_inline %s not null,
+  remote_ref_json %s not null,
+  sha256 %s not null,
+  size_bytes %s not null,
+  apply_order %s not null,
+  sensitive %s not null,
+  summary_json %s not null,
+  created_at %s not null,
+  updated_at %s not null,
+  primary key (env_id, owner_component_id, asset_id),
+  foreign key (env_id, owner_component_id) references environment_components(env_id, component_id) on delete cascade,
+  foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
+);`, text, text, text, text, text, text, text, jsonType, text, intType, intType, boolType, jsonType, timeType, timeType),
+		`
+create index if not exists idx_component_config_assets_target
+  on component_config_assets(env_id, target_component_id, asset_kind, apply_order, asset_id);`,
+		`
+create index if not exists idx_component_config_assets_owner_order
+  on component_config_assets(env_id, owner_component_id, apply_order, asset_id);`,
 	}
 }
 
