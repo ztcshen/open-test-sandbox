@@ -44,6 +44,35 @@ func TestParseConfigFromURLKeepsStoreTimeParsingAuthoritative(t *testing.T) {
 	}
 }
 
+func TestParseConfigFromURLAddsBoundedNetworkTimeouts(t *testing.T) {
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?tls=false")
+	if err != nil {
+		t.Fatalf("parse mysql url: %v", err)
+	}
+	for _, want := range []string{"timeout=10s", "readTimeout=30s", "writeTimeout=30s"} {
+		if !strings.Contains(cfg.DSN, want) {
+			t.Fatalf("mysql driver dsn missing bounded network timeout %q: %q", want, cfg.DSN)
+		}
+	}
+}
+
+func TestParseConfigFromURLKeepsExplicitNetworkTimeouts(t *testing.T) {
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?timeout=2s&readTimeout=3s&writeTimeout=4s")
+	if err != nil {
+		t.Fatalf("parse mysql url: %v", err)
+	}
+	for _, want := range []string{"timeout=2s", "readTimeout=3s", "writeTimeout=4s"} {
+		if !strings.Contains(cfg.DSN, want) {
+			t.Fatalf("mysql driver dsn should keep explicit network timeout %q: %q", want, cfg.DSN)
+		}
+	}
+	for _, reject := range []string{"timeout=10s", "readTimeout=30s", "writeTimeout=30s"} {
+		if strings.Contains(cfg.DSN, reject) {
+			t.Fatalf("mysql driver dsn should not duplicate default timeout %q when explicit timeout is set: %q", reject, cfg.DSN)
+		}
+	}
+}
+
 func TestParseConfigFromURLRejectsNonMySQLDSN(t *testing.T) {
 	_, err := mysql.ParseConfigFromURL("postgres://localhost/otsandbox")
 	if err == nil {

@@ -405,3 +405,25 @@ Current blocker:
 
 - Final completion still requires `npm run release-check:mysql-real` against a
   dedicated company MySQL Store DSN.
+
+## 2026-05-21 MySQL Network Timeout DSN Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Added bounded MySQL Store driver network defaults when the DSN omits them:
+  `timeout=10s`, `readTimeout=30s`, and `writeTimeout=30s`.
+- Preserved explicit operator-provided timeout values, including case-insensitive
+  key matching, so company MySQL DSNs can still tune network behavior.
+- Added focused tests that first proved missing timeout defaults, then verify
+  defaults are present and explicit values are not duplicated.
+
+Validated:
+
+- `go test ./internal/store/mysql -run 'TestParseConfigFromURLAcceptsMySQLURL|TestParseConfigFromURLKeepsStoreTimeParsingAuthoritative|TestParseConfigFromURLAddsBoundedNetworkTimeouts|TestParseConfigFromURLKeepsExplicitNetworkTimeouts|TestParseConfigFromURLRejectsNonMySQLDSN|TestParseConfigFromURLRequiresDatabaseName' -count=1`
+
+Current blocker:
+
+- Real company MySQL Store proof still requires a dedicated DSN for
+  `npm run release-check:mysql-real`.

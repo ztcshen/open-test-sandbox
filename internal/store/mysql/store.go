@@ -150,6 +150,9 @@ func driverDSNFromURL(parsed *url.URL) (string, error) {
 	if _, ok := params["loc"]; !ok {
 		params["loc"] = "UTC"
 	}
+	setDefaultMySQLParam(params, "timeout", "10s")
+	setDefaultMySQLParam(params, "readTimeout", "30s")
+	setDefaultMySQLParam(params, "writeTimeout", "30s")
 	cfg := mysqlDriver.NewConfig()
 	cfg.User = parsed.User.Username()
 	cfg.Passwd = password
@@ -160,4 +163,13 @@ func driverDSNFromURL(parsed *url.URL) (string, error) {
 	cfg.ParseTime = true
 	cfg.Loc = time.UTC
 	return cfg.FormatDSN(), nil
+}
+
+func setDefaultMySQLParam(params map[string]string, key string, value string) {
+	for existing := range params {
+		if strings.EqualFold(strings.TrimSpace(existing), key) {
+			return
+		}
+	}
+	params[key] = value
 }
