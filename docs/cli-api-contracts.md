@@ -86,7 +86,7 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
 | `POST` | `/api/environments` | Register or update an Environment Catalog entry in the active Store. |
 | `GET` | `/api/environments` | Discover Environment Catalog entries from the active Store; verified discovery only returns entries promoted by `publish-verified`. |
 | `GET` | `/api/environments/{environmentId}` | Inspect one environment, including runtime facts, workflow coverage metadata, recorded Evidence/topology completeness flags, and verification status. |
-| `GET` | `/api/environments/{environmentId}/bootstrap` | Return the local clone/fetch, compose/start, health-check, and verification workflow plan for the environment. |
+| `GET` | `/api/environments/{environmentId}/bootstrap` | Return the local clone/fetch, compose/start, health-check, and verification workflow plan for the environment. This is a plan surface only; local CLI restore executes Git, Docker, health checks, and workflow runs. |
 | `POST` | `/api/environments/{environmentId}/verify` | Persist verification run status and recorded Evidence/topology completeness flags after the configured acceptance workflow has run. |
 | `POST` | `/api/environments/{environmentId}/publish-verified` | Promote an environment into verified discovery only after the recorded flags pass and the selected Store contains a passed verification run, indexed Evidence, and a complete SkyWalking topology row. |
 | `GET` | `/api/dashboard` | Return dashboard summary, Store-aware when available. |

@@ -3,6 +3,8 @@ package controlplane
 import (
 	"errors"
 	"net/http"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -79,7 +81,7 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		if !ok {
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "plan": environmentBootstrapPlan(env)})
+		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "plan": EnvironmentBootstrapPlan(env)})
 	case action == "verify" && r.Method == http.MethodPost:
 		handleEnvironmentVerifyAPI(w, r, runtime, id)
 	case action == "publish-verified" && r.Method == http.MethodPost:
@@ -211,13 +213,197 @@ func environmentAPIPayload(env store.Environment) map[string]any {
 	return payload
 }
 
-func environmentBootstrapPlan(env store.Environment) map[string]any {
+func EnvironmentBootstrapPlan(env store.Environment) map[string]any {
+	workspace := "$OTS_WORKSPACE"
+	repos := environmentBootstrapRepoPlan(env, workspace)
+	compose := jsonObject(env.ComposeJSON)
+	healthChecks := jsonArray(env.HealthChecksJSON)
+	docker := environmentBootstrapDockerPlan(compose, workspace)
 	return map[string]any{
 		"repos":                jsonObject(env.ReposJSON),
 		"compose":              jsonObject(env.ComposeJSON),
 		"healthChecks":         jsonArray(env.HealthChecksJSON),
 		"verificationWorkflow": env.VerificationWorkflowID,
+		"workspace":            workspace,
+		"steps":                environmentBootstrapSteps(repos, docker, healthChecks, env.VerificationWorkflowID),
+		"restore": map[string]any{
+			"repos":        repos,
+			"docker":       docker,
+			"healthChecks": environmentBootstrapHealthPlan(healthChecks),
+			"workflow": map[string]any{
+				"action":     "run-verification-workflow",
+				"workflowId": env.VerificationWorkflowID,
+			},
+			"pauseBeforeHeavyValidation": true,
+			"notes": []string{
+				"API bootstrap returns a plan only; local CLI restore executes Git, Docker, health checks, and workflow runs.",
+				"Sandbox control-plane Store must already be reachable outside the restored Docker target environment.",
+			},
+		},
 	}
+}
+
+func environmentBootstrapRepoPlan(env store.Environment, workspace string) []map[string]any {
+	repoMap := jsonObject(env.ReposJSON)
+	services := jsonArray(env.ServicesJSON)
+	specByID := map[string]map[string]string{}
+	for id, raw := range repoMap {
+		item := environmentPlanMap(raw)
+		specByID[strings.TrimSpace(id)] = map[string]string{
+			"id":       strings.TrimSpace(id),
+			"url":      strings.TrimSpace(valueString(item["url"])),
+			"branch":   strings.TrimSpace(valueString(item["branch"])),
+			"checkout": strings.TrimSpace(valueString(item["checkout"])),
+		}
+	}
+	for _, raw := range services {
+		item := environmentPlanMap(raw)
+		id := strings.TrimSpace(valueString(item["id"]))
+		if id == "" {
+			continue
+		}
+		spec := specByID[id]
+		if spec == nil {
+			spec = map[string]string{"id": id}
+		}
+		if value := strings.TrimSpace(valueString(item["repo"])); value != "" {
+			spec["url"] = value
+		}
+		if value := strings.TrimSpace(valueString(item["branch"])); value != "" {
+			spec["branch"] = value
+		}
+		if value := strings.TrimSpace(valueString(item["checkout"])); value != "" {
+			spec["checkout"] = value
+		}
+		specByID[id] = spec
+	}
+	ids := make([]string, 0, len(specByID))
+	for id := range specByID {
+		if strings.TrimSpace(id) != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	out := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		spec := specByID[id]
+		checkout := strings.TrimSpace(spec["checkout"])
+		if checkout == "" {
+			checkout = filepath.Join(workspace, safePlanSegment(id))
+		} else if !filepath.IsAbs(checkout) && !strings.HasPrefix(checkout, "$") {
+			checkout = filepath.Join(workspace, checkout)
+		}
+		action := "use-existing-checkout"
+		command := []string{}
+		if strings.TrimSpace(spec["url"]) != "" {
+			action = "clone-if-missing"
+			command = []string{"git", "clone"}
+			if strings.TrimSpace(spec["branch"]) != "" {
+				command = append(command, "--branch", strings.TrimSpace(spec["branch"]))
+			}
+			command = append(command, strings.TrimSpace(spec["url"]), checkout)
+		}
+		out = append(out, map[string]any{
+			"serviceId": id,
+			"url":       strings.TrimSpace(spec["url"]),
+			"branch":    strings.TrimSpace(spec["branch"]),
+			"checkout":  checkout,
+			"action":    action,
+			"command":   command,
+		})
+	}
+	return out
+}
+
+func environmentBootstrapDockerPlan(compose map[string]any, workspace string) map[string]any {
+	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
+	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
+	if composeFile != "" {
+		if !filepath.IsAbs(composeFile) && !strings.HasPrefix(composeFile, "$") {
+			composeFile = filepath.Join(workspace, composeFile)
+		}
+		return map[string]any{
+			"action":      "docker-compose",
+			"composeFile": composeFile,
+			"commands": [][]string{
+				{"docker", "compose", "-f", composeFile, "pull"},
+				{"docker", "compose", "-f", composeFile, "build"},
+				{"docker", "compose", "-f", composeFile, "up", "-d"},
+			},
+			"heavy": true,
+		}
+	}
+	if startCommand != "" {
+		return map[string]any{
+			"action":   "start-command",
+			"commands": [][]string{{"/bin/sh", "-c", startCommand}},
+			"heavy":    true,
+		}
+	}
+	return map[string]any{"action": "missing-docker-plan", "commands": [][]string{}, "heavy": false}
+}
+
+func environmentBootstrapHealthPlan(checks []any) []map[string]any {
+	out := make([]map[string]any, 0, len(checks))
+	for _, raw := range checks {
+		item := environmentPlanMap(raw)
+		url := strings.TrimSpace(valueString(item["url"]))
+		if url == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":     strings.TrimSpace(valueString(item["id"])),
+			"url":    url,
+			"method": "GET",
+			"expect": "2xx",
+		})
+	}
+	return out
+}
+
+func environmentBootstrapSteps(repos []map[string]any, docker map[string]any, healthChecks []any, workflowID string) []map[string]any {
+	steps := make([]map[string]any, 0, len(repos)+3)
+	for _, repo := range repos {
+		steps = append(steps, map[string]any{
+			"kind":      "repository",
+			"serviceId": repo["serviceId"],
+			"action":    repo["action"],
+			"command":   repo["command"],
+		})
+	}
+	steps = append(steps, map[string]any{
+		"kind":     "docker",
+		"action":   docker["action"],
+		"commands": docker["commands"],
+		"heavy":    docker["heavy"],
+	})
+	steps = append(steps, map[string]any{
+		"kind":   "health-checks",
+		"action": "wait",
+		"checks": environmentBootstrapHealthPlan(healthChecks),
+	})
+	steps = append(steps, map[string]any{
+		"kind":       "verification-workflow",
+		"action":     "run",
+		"workflowId": workflowID,
+	})
+	return steps
+}
+
+func safePlanSegment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "service"
+	}
+	return strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-").Replace(value)
+}
+
+func environmentPlanMap(value any) map[string]any {
+	item, _ := value.(map[string]any)
+	if item == nil {
+		return map[string]any{}
+	}
+	return item
 }
 
 func defaultJSONObject(value any) any {

@@ -572,12 +572,7 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	payload := map[string]any{
 		"ok":          true,
 		"environment": environmentPayload(env),
-		"plan": map[string]any{
-			"repos":                jsonObjectString(env.ReposJSON),
-			"compose":              jsonObjectString(env.ComposeJSON),
-			"healthChecks":         jsonArrayString(env.HealthChecksJSON),
-			"verificationWorkflow": env.VerificationWorkflowID,
-		},
+		"plan":        controlplane.EnvironmentBootstrapPlan(env),
 	}
 	if *jsonOutput {
 		return writeIndentedJSON(payload)

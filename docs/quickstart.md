@@ -110,6 +110,12 @@ you want a fixed local report directory. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
 
+The control-plane API exposes the same recovery shape through
+`GET /api/environments/{environmentId}/bootstrap`: repository steps, Docker
+commands, health checks, and the verification workflow are returned as a plan
+for UI review. The API does not execute local Docker; execution stays in the
+CLI restore path.
+
 ## Create and Install a Import Bundle
 
 ```sh

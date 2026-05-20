@@ -1127,6 +1127,15 @@ func TestServerManagesVerifiedEnvironmentCatalogFromStore(t *testing.T) {
 	if plan["verificationWorkflow"] != "workflow.core-10" || len(plan["healthChecks"].([]any)) != 1 {
 		t.Fatalf("bootstrap plan = %#v", plan)
 	}
+	restorePlan := plan["restore"].(map[string]any)
+	dockerPlan := restorePlan["docker"].(map[string]any)
+	if restorePlan["pauseBeforeHeavyValidation"] != true || dockerPlan["action"] != "docker-compose" || len(dockerPlan["commands"].([]any)) != 3 {
+		t.Fatalf("bootstrap restore plan = %#v", restorePlan)
+	}
+	steps := plan["steps"].([]any)
+	if len(steps) != 4 || steps[0].(map[string]any)["kind"] != "repository" || steps[1].(map[string]any)["kind"] != "docker" || steps[3].(map[string]any)["workflowId"] != "workflow.core-10" {
+		t.Fatalf("bootstrap executable steps = %#v", steps)
+	}
 }
 
 func TestServerListsInstalledProfilesFromProfileHome(t *testing.T) {

@@ -436,6 +436,16 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 			VerificationWorkflow string         `json:"verificationWorkflow"`
 			Repos                map[string]any `json:"repos"`
 			HealthChecks         []any          `json:"healthChecks"`
+			Restore              struct {
+				PauseBeforeHeavyValidation bool `json:"pauseBeforeHeavyValidation"`
+				Docker                     struct {
+					Action   string     `json:"action"`
+					Commands [][]string `json:"commands"`
+				} `json:"docker"`
+			} `json:"restore"`
+			Steps []struct {
+				Kind string `json:"kind"`
+			} `json:"steps"`
 		} `json:"plan"`
 	}
 	if err := json.Unmarshal([]byte(bootstrapOut), &bootstrap); err != nil {
@@ -443,6 +453,12 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	}
 	if bootstrap.Plan.VerificationWorkflow != "workflow.core-10" || bootstrap.Plan.Repos["entry-gateway"] == nil || len(bootstrap.Plan.HealthChecks) != 1 {
 		t.Fatalf("bootstrap plan = %#v", bootstrap.Plan)
+	}
+	if !bootstrap.Plan.Restore.PauseBeforeHeavyValidation || bootstrap.Plan.Restore.Docker.Action != "docker-compose" || len(bootstrap.Plan.Restore.Docker.Commands) != 3 {
+		t.Fatalf("bootstrap restore plan = %#v", bootstrap.Plan.Restore)
+	}
+	if len(bootstrap.Plan.Steps) != 4 || bootstrap.Plan.Steps[0].Kind != "repository" || bootstrap.Plan.Steps[1].Kind != "docker" {
+		t.Fatalf("bootstrap executable steps = %#v", bootstrap.Plan.Steps)
 	}
 }
 
