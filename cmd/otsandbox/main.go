@@ -244,7 +244,8 @@ func printHelp() {
 
 Usage:
   otsandbox version
-  otsandbox store config set NAME --url postgres://...|mysql://...
+  otsandbox store config set NAME --url postgres://...
+  otsandbox store config set NAME --url mysql://...
   otsandbox store config list [--json]
   otsandbox store use NAME
   otsandbox store current [--json]

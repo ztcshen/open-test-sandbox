@@ -43,6 +43,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "--store NAME_OR_DSN") {
 		t.Fatalf("top-level help should show Store-first flag, got %q", out)
 	}
+	if !strings.Contains(out, "otsandbox store config set NAME --url postgres://...") || !strings.Contains(out, "otsandbox store config set NAME --url mysql://...") {
+		t.Fatalf("top-level help should show copyable PostgreSQL and MySQL Store setup commands:\n%s", out)
+	}
 	for _, want := range []string{"--clean-docker-state", "--clean-docker-images", "--allow-destructive-docker-cleanup"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("top-level help missing restore cleanup flag %q:\n%s", want, out)

@@ -638,6 +638,31 @@ Current blocker:
 - Daily CLI/API named active Store parity still has deeper DSN-gated coverage
   to add beyond Store guidance.
 
+## 2026-05-21 Top-Level Help MySQL Store Guidance Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Split the top-level `otsandbox` help Store setup entry into two complete
+  commands: one for PostgreSQL and one for MySQL.
+- Added a regression assertion so the first CLI help screen must keep the
+  copyable `otsandbox store config set NAME --url mysql://...` command visible.
+- Kept the Store-first daily command shape unchanged: daily commands still use
+  `--store NAME_OR_DSN`, and legacy `--store-url` paths remain hidden from the
+  top-level help.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run '^TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL$' -count=1`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Daily CLI/API named active Store parity still has deeper DSN-gated coverage
+  to add beyond Store guidance.
+
 ## 2026-05-21 Control Plane Smoke Shared Store Env Guidance Slice
 
 Progress: `[###################-] 97%`
