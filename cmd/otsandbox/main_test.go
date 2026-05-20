@@ -6069,9 +6069,19 @@ func TestProfileGenerationPlanOpenAPICommand(t *testing.T) {
 
 func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-executor-plan-pg")
+	runExecutorPlanCommandReportsProfileDescriptors(t, storeRef, "PostgreSQL")
+}
+
+func TestExecutorPlanCommandUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-executor-plan-mysql")
+	runExecutorPlanCommandReportsProfileDescriptors(t, storeRef, "MySQL")
+}
+
+func runExecutorPlanCommandReportsProfileDescriptors(t *testing.T, storeRef string, label string) {
+	t.Helper()
 	s, err := openStore(context.Background(), storeRef)
 	if err != nil {
-		t.Fatalf("open executor store: %v", err)
+		t.Fatalf("open %s executor store: %v", label, err)
 	}
 	if err := s.ReplaceProfileCatalog(context.Background(), store.ProfileCatalog{
 		ProfileID: "current",
@@ -6080,10 +6090,10 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 			{ID: "case.blocked", DisplayName: "Blocked Case", SourceKind: "pytest", ExecutorID: "executor.blocked", Status: "active"},
 		},
 	}); err != nil {
-		t.Fatalf("seed executor store: %v", err)
+		t.Fatalf("seed %s executor store: %v", label, err)
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("close executor store: %v", err)
+		t.Fatalf("close %s executor store: %v", label, err)
 	}
 
 	out := runCLI(t, "executor", "plan", "--json")
@@ -6106,10 +6116,10 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode executor plan json: %v\n%s", err, out)
+		t.Fatalf("decode %s executor plan json: %v\n%s", label, err, out)
 	}
 	if report.OK || report.ProfileID != "current" || report.Counts.Total != 2 || report.Counts.Ready != 1 || report.Counts.Blocked != 1 {
-		t.Fatalf("executor plan summary = %#v", report)
+		t.Fatalf("%s executor plan summary = %#v", label, report)
 	}
 	itemsByID := map[string]struct {
 		ID             string   `json:"id"`
@@ -6125,17 +6135,17 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 	}
 	blocked := itemsByID["executor.blocked"]
 	if blocked.ID == "" || blocked.Ready || !containsString(blocked.Issues, "missing-source-path") {
-		t.Fatalf("blocked executor item = %#v", blocked)
+		t.Fatalf("%s blocked executor item = %#v", label, blocked)
 	}
 	ready := itemsByID["executor.catalog"]
 	if ready.ID == "" || ready.Kind != "pytest" || ready.SourcePath != "tests/catalog_test.py" || !ready.Ready || ready.RunMode != "dry-run" || ready.TimeoutSeconds != 11 {
-		t.Fatalf("ready executor item = %#v", ready)
+		t.Fatalf("%s ready executor item = %#v", label, ready)
 	}
 
 	textOut := runCLI(t, "executor", "plan")
 	for _, want := range []string{"Executor Plan", "Profile: current", "Ready: 1", "Blocked: 1", "missing-source-path"} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("executor plan text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s executor plan text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
@@ -6740,6 +6750,16 @@ func TestWorkflowAuditAllowsExplicitOfflineTemplatePackage(t *testing.T) {
 
 func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-template-render-pg")
+	runTemplateRenderCommandPrintsRequestPreview(t, storeRef, "PostgreSQL")
+}
+
+func TestTemplateRenderCommandUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-template-render-mysql")
+	runTemplateRenderCommandPrintsRequestPreview(t, storeRef, "MySQL")
+}
+
+func runTemplateRenderCommandPrintsRequestPreview(t *testing.T, storeRef string, label string) {
+	t.Helper()
 	dir := t.TempDir()
 	writeTemplateProfile(t, dir)
 	runCLI(t, "config", "publish", "--from", dir)
@@ -6752,19 +6772,19 @@ func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 		Body   map[string]any `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(out), &rendered); err != nil {
-		t.Fatalf("decode template render output: %v\n%s", err, out)
+		t.Fatalf("decode %s template render output: %v\n%s", label, err, out)
 	}
 	if rendered.Method != "POST" || rendered.Path != "/v1/items/item-001" {
-		t.Fatalf("rendered request identity = %#v", rendered)
+		t.Fatalf("%s rendered request identity = %#v", label, rendered)
 	}
 	if rendered.Body["id"] != "item-001" || rendered.Body["quantity"].(float64) != 3 {
-		t.Fatalf("rendered request body = %#v", rendered.Body)
+		t.Fatalf("%s rendered request body = %#v", label, rendered.Body)
 	}
 
 	ctx := context.Background()
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open template store: %v", err)
+		t.Fatalf("open %s template store: %v", label, err)
 	}
 	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
 		ProfileID: "current",
@@ -6788,10 +6808,10 @@ func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 			},
 		},
 	}); err != nil {
-		t.Fatalf("seed template store: %v", err)
+		t.Fatalf("seed %s template store: %v", label, err)
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("close template store: %v", err)
+		t.Fatalf("close %s template store: %v", label, err)
 	}
 
 	storeOut := runCLI(t, "template", "render", "--template", "template.store", "--fixture", "fixture.store")
@@ -6801,10 +6821,10 @@ func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 		Body   map[string]any `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(storeOut), &storeRendered); err != nil {
-		t.Fatalf("decode store template render output: %v\n%s", err, storeOut)
+		t.Fatalf("decode %s store template render output: %v\n%s", label, err, storeOut)
 	}
 	if storeRendered.Method != "PATCH" || storeRendered.Path != "/v1/items/item-002" || storeRendered.Body["enabled"] != true {
-		t.Fatalf("store rendered request = %#v", storeRendered)
+		t.Fatalf("%s store rendered request = %#v", label, storeRendered)
 	}
 }
 

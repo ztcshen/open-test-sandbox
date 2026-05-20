@@ -1530,3 +1530,29 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Executor and Template CLI Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for `executor plan` over
+  Store catalog descriptors.
+- Added env-gated MySQL named active Store coverage for `template render`,
+  including published profile rendering and direct Store catalog rendering.
+- Shared the existing PostgreSQL scenarios through helpers so PostgreSQL and
+  MySQL assert identical CLI behavior against the active Store.
+
+Validated:
+
+- `go test -v ./cmd/otsandbox -run 'Test(ExecutorPlanCommand(ReportsProfileDescriptors|UsesNamedMySQLActiveStore)|TemplateRenderCommand(PrintsRequestPreview|UsesNamedMySQLActiveStore))' -count=1`
+  compiled and passed locally; the env-gated PostgreSQL/MySQL cases skipped
+  because local DSNs were not exported in this shell.
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
