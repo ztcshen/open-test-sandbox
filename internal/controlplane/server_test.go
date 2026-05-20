@@ -1020,6 +1020,11 @@ func TestServerManagesVerifiedEnvironmentCatalogFromStore(t *testing.T) {
 	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
 	defer server.Close()
 
+	missingWorkflow := postJSONResponse(t, server.URL+"/api/environments", `{"id":"env.no-workflow"}`, http.StatusBadRequest)
+	if !strings.Contains(fmt.Sprint(missingWorkflow["error"]), "verificationWorkflowId") {
+		t.Fatalf("register without verification workflow should be denied: %#v", missingWorkflow)
+	}
+
 	registered := postJSONResponse(t, server.URL+"/api/environments", `{
   "id": "env.team.api",
   "displayName": "Team API Environment",
@@ -2972,9 +2977,10 @@ JSON
 
 	var payload struct {
 		Summary struct {
-			Total   int `json:"total"`
-			Healthy int `json:"healthy"`
-			Missing int `json:"missing"`
+			Total     int `json:"total"`
+			Healthy   int `json:"healthy"`
+			Missing   int `json:"missing"`
+			Unhealthy int `json:"unhealthy"`
 		} `json:"summary"`
 		Groups []struct {
 			Items []struct {
@@ -2992,11 +2998,11 @@ JSON
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode dashboard api: %v", err)
 	}
-	if payload.Summary.Total != 1 || payload.Summary.Healthy != 1 || payload.Summary.Missing != 0 {
+	if payload.Summary.Total != 1 || payload.Summary.Healthy != 0 || payload.Summary.Missing != 0 || payload.Summary.Unhealthy != 1 {
 		t.Fatalf("dashboard summary = %#v", payload.Summary)
 	}
 	item := payload.Groups[0].Items[0]
-	if item.ID != "service-alpha" || !item.OK || item.State != "running" || item.Health != "healthy" {
+	if item.ID != "service-alpha" || item.OK || item.State != "running" || item.Health != "unchecked" {
 		t.Fatalf("dashboard item state = %#v", item)
 	}
 	if item.Container != "sandbox-service-alpha" || item.Image != "example/service-alpha:1" {
@@ -3004,6 +3010,49 @@ JSON
 	}
 	if item.Port != 18080 || item.ManagementPort != 19090 {
 		t.Fatalf("dashboard item ports = %#v", item)
+	}
+}
+
+func TestServerHydratesDashboardHealthFromHTTPCheck(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Fatalf("unexpected health path %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ready":true}`))
+	}))
+	defer target.Close()
+
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		Services: []profile.Service{
+			{ID: "service-alpha", DisplayName: "Service Alpha", Kind: "http", HealthURL: target.URL + "/health"},
+		},
+	}
+	fakeBin := t.TempDir()
+	docker := filepath.Join(fakeBin, "docker")
+	if err := os.WriteFile(docker, []byte(`#!/bin/sh
+cat <<'JSON'
+{"Names":"sandbox-service-alpha","Image":"example/service-alpha:1","State":"running","Status":"Up 12 seconds","Ports":"0.0.0.0:18080->8080/tcp, 0.0.0.0:19090->9090/tcp"}
+JSON
+`), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/dashboard", http.StatusOK)
+	summary := payload["summary"].(map[string]any)
+	if summary["total"] != float64(1) || summary["healthy"] != float64(1) || summary["missing"] != float64(0) {
+		t.Fatalf("dashboard summary = %#v", summary)
+	}
+	groups := payload["groups"].([]any)
+	item := groups[0].(map[string]any)["items"].([]any)[0].(map[string]any)
+	if item["id"] != "service-alpha" || item["ok"] != true || item["state"] != "running" || item["health"] != "healthy" {
+		t.Fatalf("dashboard item state = %#v", item)
 	}
 }
 
@@ -6094,6 +6143,7 @@ func TestServerStartsCaseSuiteImpactBatchRun(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Sandbox-Trace-Endpoint", "/v1/env-acceptance")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	defer target.Close()
@@ -8086,6 +8136,118 @@ func TestServerAsyncWorkflowAcceptancePassesWithSkyWalkingTopology(t *testing.T)
 	}
 }
 
+func TestServerStartsEnvironmentAcceptanceRunWithHealthSummary(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Request-Id", "request.env.acceptance")
+		if r.URL.Path == "/health" {
+			_, _ = w.Write([]byte(`{"ready":true}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer target.Close()
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode provider request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(payload.Query, "queryBasicTraces"):
+			_, _ = w.Write([]byte(`{"data":{"queryBasicTraces":{"traces":[{"endpointNames":["GET:/v1/env-acceptance"],"duration":80,"start":"2026-05-20 0320","isError":false,"traceIds":["trace.env.acceptance"]}]}}}`))
+		case strings.Contains(payload.Query, "queryTrace"):
+			_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[{"traceId":"trace.env.acceptance","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/v1/env-acceptance","type":"Entry","component":"Tomcat"},{"traceId":"trace.env.acceptance","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.env.acceptance","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"GET:/v1/env-acceptance","type":"Entry","component":"Server"}]}}}`))
+		default:
+			t.Fatalf("unexpected provider query: %s", payload.Query)
+		}
+	}))
+	defer provider.Close()
+
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case-env-acceptance.json")
+	if err := os.WriteFile(casePath, []byte(`{
+  "id": "case.env.acceptance",
+  "title": "Environment Acceptance Step",
+  "request": {"method": "GET", "path": "/v1/env-acceptance"},
+  "assertions": {"expectedStatusCodes": [200], "responseContains": ["ok"]}
+}`), 0o644); err != nil {
+		t.Fatalf("write api case: %v", err)
+	}
+	bundle := profile.Bundle{
+		ID:             "sample",
+		Workflows:      []profile.Workflow{{ID: "workflow.env.acceptance"}},
+		InterfaceNodes: []profile.InterfaceNode{{ID: "node.env.acceptance"}},
+		APICases: []profile.APICase{{
+			ID:          "case.env.acceptance",
+			NodeID:      "node.env.acceptance",
+			CasePath:    casePath,
+			BaseURL:     target.URL,
+			EvidenceDir: filepath.Join(dir, "evidence"),
+		}},
+		WorkflowBindings: []profile.WorkflowBinding{{
+			WorkflowID: "workflow.env.acceptance",
+			StepID:     "step.env.acceptance",
+			NodeID:     "node.env.acceptance",
+			CaseID:     "case.env.acceptance",
+			Required:   true,
+			SortOrder:  1,
+		}},
+	}
+	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s, TraceGraphQLURL: provider.URL}))
+	defer server.Close()
+
+	registered := postJSONResponse(t, server.URL+"/api/environments", fmt.Sprintf(`{
+  "id": "env.acceptance",
+  "verificationWorkflowId": "workflow.env.acceptance",
+  "healthChecks": [{"id":"gateway-health","kind":"url","url":%q}]
+}`, target.URL+"/health"), http.StatusOK)
+	if registered["ok"] != true {
+		t.Fatalf("register environment = %#v", registered)
+	}
+
+	started := postJSONResponse(t, server.URL+"/api/environments/env.acceptance/acceptance-runs", `{"requestId":"env-acceptance-001"}`, http.StatusAccepted)
+	reportURL := fmt.Sprint(started["reportUrl"])
+	if started["environmentId"] != "env.acceptance" || started["workflowId"] != "workflow.env.acceptance" || reportURL == "" {
+		t.Fatalf("environment acceptance start = %#v", started)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+reportURL)
+	if !report.Acceptance.OK || report.Acceptance.HealthSummary.Total != 1 || report.Acceptance.HealthSummary.Passed != 1 || len(report.Acceptance.NodeHealth) != 1 || !report.Acceptance.NodeHealth[0].OK {
+		t.Fatalf("environment acceptance health summary = %#v", report.Acceptance)
+	}
+	env, err := s.GetEnvironment(ctx, "env.acceptance")
+	if err != nil {
+		t.Fatalf("get environment after acceptance: %v", err)
+	}
+	if env.Status != "verified-ready" || env.LastVerificationRunID != report.BatchRunID || env.LastVerificationStatus != store.StatusPassed || !env.EvidenceComplete || !env.TopologyComplete {
+		t.Fatalf("environment after acceptance = %#v", env)
+	}
+	topologies, err := s.ListTraceTopologies(ctx, report.BatchRunID)
+	if err != nil {
+		t.Fatalf("list batch topology: %v", err)
+	}
+	if len(topologies) != 1 || topologies[0].WorkflowRunID != report.BatchRunID || topologies[0].StepID != "step.env.acceptance" {
+		t.Fatalf("batch topology copies = %#v", topologies)
+	}
+
+	restarted := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s}))
+	defer restarted.Close()
+	persisted := decodeJSONResponse(t, restarted.URL+reportURL, http.StatusOK)
+	if persisted["environmentId"] != "env.acceptance" || persisted["batchRunId"] != report.BatchRunID {
+		t.Fatalf("persisted environment acceptance report = %#v", persisted)
+	}
+}
+
 type apiCaseBatchReportForTest struct {
 	OK                   bool   `json:"ok"`
 	BatchRunID           string `json:"batchRunId"`
@@ -8108,7 +8270,19 @@ type apiCaseBatchReportForTest struct {
 		CompletedSteps   int    `json:"completedSteps"`
 		PassedSteps      int    `json:"passedSteps"`
 		TopologyProvider string `json:"topologyProvider"`
-		Steps            []struct {
+		HealthSummary    struct {
+			Total  int `json:"total"`
+			Passed int `json:"passed"`
+			Failed int `json:"failed"`
+		} `json:"healthSummary"`
+		NodeHealth []struct {
+			ID     string `json:"id"`
+			Kind   string `json:"kind"`
+			URL    string `json:"url"`
+			OK     bool   `json:"ok"`
+			Status string `json:"status"`
+		} `json:"nodeHealth"`
+		Steps []struct {
 			StepID           string `json:"stepId"`
 			CaseID           string `json:"caseId"`
 			Status           string `json:"status"`

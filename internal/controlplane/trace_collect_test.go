@@ -118,6 +118,9 @@ func TestTraceTopologyCollectPersistsProviderSpanRefs(t *testing.T) {
 	if len(rows) != 1 || rows[0].WorkflowID != "workflow.alpha" || rows[0].CaseID != "case.alpha" {
 		t.Fatalf("stored topologies = %#v", rows)
 	}
+	if strings.TrimSpace(rows[0].ID) == "" {
+		t.Fatalf("stored topology id should be generated when payload omits id: %#v", rows[0])
+	}
 	tasks, err := s.ListPostProcessTasks(ctx, "run.alpha")
 	if err != nil {
 		t.Fatalf("list post-process tasks: %v", err)

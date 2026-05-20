@@ -1092,7 +1092,15 @@ func headerValue(headers any, key string) any {
 	case map[string]any:
 		return typed[key]
 	case map[string]string:
-		return typed[key]
+		if value, ok := typed[key]; ok {
+			return value
+		}
+		for itemKey, value := range typed {
+			if strings.EqualFold(itemKey, key) {
+				return value
+			}
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -1119,6 +1127,7 @@ func findAPICase(items []profile.APICase, id string) (profile.APICase, bool) {
 
 func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime store.Store, id string, payload map[string]any) (runnableAPICase, bool) {
 	if item, ok := findAPICase(bundle.APICases, id); ok {
+		item.CasePath = resolveBundleAPICasePath(ctx, runtime, bundle, item.CasePath)
 		return runnableAPICase{Case: item, Execution: findCaseExecutionConfig(ctx, runtime, id, payload)}, true
 	}
 	if runtime == nil {
@@ -1134,10 +1143,49 @@ func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime sto
 				ID:          item.ID,
 				DisplayName: item.DisplayName,
 				NodeID:      item.NodeID,
+				CasePath:    resolveCatalogAPICasePath(ctx, runtime, catalog.ProfileID, item.CasePath),
 			}, Execution: findCaseExecutionConfigFromCatalog(catalog, id, payload), CaseBaseURL: item.BaseURL}, true
 		}
 	}
 	return runnableAPICase{}, false
+}
+
+func resolveBundleAPICasePath(ctx context.Context, runtime store.Store, bundle profile.Bundle, casePath string) string {
+	casePath = strings.TrimSpace(casePath)
+	if casePath == "" || filepath.IsAbs(casePath) || fileExists(casePath) {
+		return casePath
+	}
+	if strings.TrimSpace(bundle.BaseDir) != "" {
+		candidate := resolveProfilePath(bundle.BaseDir, filepath.FromSlash(casePath))
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return resolveCatalogAPICasePath(ctx, runtime, bundle.ID, casePath)
+}
+
+func resolveCatalogAPICasePath(ctx context.Context, runtime store.Store, profileID string, casePath string) string {
+	casePath = strings.TrimSpace(casePath)
+	if casePath == "" || filepath.IsAbs(casePath) || fileExists(casePath) || runtime == nil {
+		return casePath
+	}
+	index, err := runtime.GetProfileIndex(ctx, strings.TrimSpace(profileID))
+	if err != nil || strings.TrimSpace(index.BundlePath) == "" {
+		return casePath
+	}
+	candidate := filepath.Join(index.BundlePath, filepath.FromSlash(casePath))
+	if fileExists(candidate) {
+		return candidate
+	}
+	return casePath
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func findCaseExecutionConfig(ctx context.Context, runtime store.Store, caseID string, payload map[string]any) *caseExecutionConfig {

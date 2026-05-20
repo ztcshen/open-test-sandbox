@@ -306,6 +306,18 @@ func TestEnvironmentCommandsRejectActiveSQLiteStore(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRegisterRequiresVerificationWorkflow(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	out := runCLIFails(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.no-workflow",
+		"--repo", "entry-gateway=https://example.com/team/entry-gateway.git",
+	)
+	if !strings.Contains(out, "--verification-workflow") {
+		t.Fatalf("register without verification workflow output = %q", out)
+	}
+}
+
 func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	storeRef := "sqlite://" + storePath
@@ -554,6 +566,90 @@ func TestWorkflowAcceptanceCLIStartsAndReadsAsyncReport(t *testing.T) {
 	}
 	if !report.Acceptance.OK || report.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Acceptance.TopologyProvider != "skywalking" {
 		t.Fatalf("workflow acceptance report = %#v", report.Acceptance)
+	}
+}
+
+func TestEnvironmentAcceptanceCLIStartsAndReadsAsyncReport(t *testing.T) {
+	var startPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/environments/env.team/acceptance-runs":
+			if err := json.NewDecoder(r.Body).Decode(&startPayload); err != nil {
+				t.Fatalf("decode environment start payload: %v", err)
+			}
+			writeTestJSON(t, w, http.StatusAccepted, map[string]any{
+				"ok":            true,
+				"environmentId": "env.team",
+				"batchRunId":    "batch.env.acceptance.001",
+				"requestId":     "env-acceptance-001",
+				"workflowId":    "workflow.core-10",
+				"status":        "running",
+				"reportUrl":     "/api/environments/env.team/acceptance-runs/batch.env.acceptance.001",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/environments/env.team/acceptance-runs/batch.env.acceptance.001":
+			writeTestJSON(t, w, http.StatusOK, map[string]any{
+				"ok":            true,
+				"environmentId": "env.team",
+				"batchRunId":    "batch.env.acceptance.001",
+				"workflowId":    "workflow.core-10",
+				"status":        "passed",
+				"acceptance": map[string]any{
+					"ok":               true,
+					"templateId":       "environment.workflow.skywalking.v1",
+					"workflowId":       "workflow.core-10",
+					"topologyProvider": "skywalking",
+					"healthSummary":    map[string]any{"total": 1, "passed": 1, "failed": 0},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	startOut := runCLI(t, "environment", "acceptance", "start",
+		"--server-url", server.URL,
+		"--request-id", "env-acceptance-001",
+		"--base-url", "http://127.0.0.1:18080",
+		"--json",
+		"env.team",
+	)
+	var started struct {
+		OK            bool   `json:"ok"`
+		EnvironmentID string `json:"environmentId"`
+		BatchRunID    string `json:"batchRunId"`
+		WorkflowID    string `json:"workflowId"`
+	}
+	if err := json.Unmarshal([]byte(startOut), &started); err != nil {
+		t.Fatalf("decode environment acceptance start: %v\n%s", err, startOut)
+	}
+	if !started.OK || started.EnvironmentID != "env.team" || started.BatchRunID != "batch.env.acceptance.001" || started.WorkflowID != "workflow.core-10" {
+		t.Fatalf("environment acceptance start = %#v", started)
+	}
+	if startPayload["requestId"] != "env-acceptance-001" || startPayload["baseUrl"] != "http://127.0.0.1:18080" {
+		t.Fatalf("environment acceptance start payload = %#v", startPayload)
+	}
+
+	reportOut := runCLI(t, "environment", "acceptance", "report",
+		"--server-url", server.URL,
+		"--run", "batch.env.acceptance.001",
+		"--json",
+		"env.team",
+	)
+	var report struct {
+		Acceptance struct {
+			OK            bool `json:"ok"`
+			HealthSummary struct {
+				Total  int `json:"total"`
+				Passed int `json:"passed"`
+			} `json:"healthSummary"`
+		} `json:"acceptance"`
+	}
+	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
+		t.Fatalf("decode environment acceptance report: %v\n%s", err, reportOut)
+	}
+	if !report.Acceptance.OK || report.Acceptance.HealthSummary.Total != 1 || report.Acceptance.HealthSummary.Passed != 1 {
+		t.Fatalf("environment acceptance report = %#v", report.Acceptance)
 	}
 }
 
@@ -1469,19 +1565,6 @@ func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
 	caseRunsOut := runCLI(t, "case", "runs", "--run", report.Workflow.RunID, "--json")
 	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
 		t.Fatalf("active PostgreSQL restore did not persist case runs: %s", caseRunsOut)
-	}
-}
-
-func TestEnvironmentRestoreRequiresVerificationWorkflow(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "environment", "register",
-		"--store", "sqlite://"+storePath,
-		"--id", "env.no-workflow",
-		"--repo", "entry-gateway=https://example.com/team/entry-gateway.git",
-	)
-	out := runCLIFails(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", t.TempDir(), "env.no-workflow")
-	if !strings.Contains(out, "verification workflow") {
-		t.Fatalf("restore without workflow output = %q", out)
 	}
 }
 

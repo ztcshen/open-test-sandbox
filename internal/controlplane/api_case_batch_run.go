@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 
 type apiCaseBatchRunRequest struct {
 	RequestID      string                    `json:"requestId"`
+	EnvironmentID  string                    `json:"environmentId,omitempty"`
 	CaseIDs        []string                  `json:"caseIds"`
 	NodeIDs        []string                  `json:"nodeIds"`
 	WorkflowID     string                    `json:"workflowId"`
@@ -60,6 +62,7 @@ type apiCaseBatchCasePlan struct {
 	EvidenceDir     string
 	TimeoutSeconds  int
 	Overrides       map[string]any
+	Execution       *caseExecutionConfig
 }
 
 type apiCaseBatchCaseReport struct {
@@ -97,6 +100,7 @@ type apiCaseBatchRunReport struct {
 	OK                   bool                       `json:"ok"`
 	BatchRunID           string                     `json:"batchRunId"`
 	RequestID            string                     `json:"requestId"`
+	EnvironmentID        string                     `json:"environmentId,omitempty"`
 	ProfileID            string                     `json:"profileId"`
 	CaseIDs              []string                   `json:"caseIds,omitempty"`
 	NodeIDs              []string                   `json:"nodeIds"`
@@ -177,6 +181,7 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 	}
 	request := apiCaseBatchRunRequest{
 		RequestID:      strings.TrimSpace(valueString(payload["requestId"])),
+		EnvironmentID:  strings.TrimSpace(valueString(payload["environmentId"])),
 		CaseIDs:        stringListValue(payload["caseIds"]),
 		NodeIDs:        stringListValue(payload["nodeIds"]),
 		WorkflowID:     strings.TrimSpace(valueString(payload["workflowId"])),
@@ -218,6 +223,7 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 		OK:                   true,
 		BatchRunID:           batchRunID,
 		RequestID:            request.RequestID,
+		EnvironmentID:        request.EnvironmentID,
 		ProfileID:            bundle.ID,
 		CaseIDs:              request.CaseIDs,
 		NodeIDs:              request.NodeIDs,
@@ -269,7 +275,7 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	}
 	runner.save(report)
 
-	go runner.run(context.Background(), batchRunID, bundle.ID, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
+	go runner.run(context.Background(), batchRunID, bundle, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
 	return report, http.StatusAccepted, nil
 }
 
@@ -320,19 +326,51 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	writeJSON(w, report)
 }
 
-func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profileID string, workflowID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule, collector traceCollector) {
+func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, bundle profile.Bundle, workflowID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule, collector traceCollector) {
+	workflowOverrides := map[string]any{}
 	for index, plan := range plans {
 		caseCtx := ctx
 		var cancel context.CancelFunc
 		if plan.TimeoutSeconds > 0 {
 			caseCtx, cancel = context.WithTimeout(ctx, time.Duration(plan.TimeoutSeconds)*time.Second)
 		}
+		casePath := plan.CasePath
+		baseURL := plan.BaseURL
+		overrides := mergeStringAnyMaps(workflowOverrides, plan.Overrides)
+		if plan.Execution != nil {
+			plan.Overrides = overrides
+			materializedPath, materializedBaseURL, err := materializeAPICaseBatchExecution(caseCtx, bundle, runtime, batchRunID, workflowID, plan)
+			if err != nil {
+				if cancel != nil {
+					cancel()
+				}
+				item := apiCaseBatchCaseReport{
+					CaseID:          plan.ID,
+					DisplayName:     plan.DisplayName,
+					Scenario:        plan.Scenario,
+					NodeID:          plan.NodeID,
+					NodeDisplayName: plan.NodeDisplayName,
+					Operation:       plan.Operation,
+					Method:          plan.Method,
+					Path:            plan.Path,
+					StepID:          plan.StepID,
+					Status:          store.StatusFailed,
+					Error:           err.Error(),
+				}
+				item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategoryFromError(err), item.Error)
+				r.updateCase(batchRunID, index, item)
+				continue
+			}
+			casePath = materializedPath
+			baseURL = materializedBaseURL
+			overrides = nil
+		}
 		result, err := apicase.Run(caseCtx, apicase.RunOptions{
-			CasePath:    plan.CasePath,
-			BaseURL:     plan.BaseURL,
+			CasePath:    casePath,
+			BaseURL:     baseURL,
 			EvidenceDir: plan.EvidenceDir,
 			RunID:       apiCaseBatchCaseRunID(batchRunID, plan.StepID, plan.ID),
-			Overrides:   plan.Overrides,
+			Overrides:   overrides,
 		})
 		if cancel != nil {
 			cancel()
@@ -366,7 +404,7 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profile
 			item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategory(result), item.Error)
 			if runtime != nil {
 				if err := recordAPICaseRunWithContext(ctx, runtime, recordAPICaseRunContext{
-					ProfileID:  profileID,
+					ProfileID:  bundle.ID,
 					WorkflowID: workflowID,
 					StepID:     plan.StepID,
 				}, result); err != nil {
@@ -378,10 +416,194 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profile
 					collectAPICaseBatchTraceTopology(ctx, runtime, collector, workflowID, plan, result)
 				}
 			}
+			if item.Status == store.StatusPassed {
+				workflowOverrides = mergeStringAnyMaps(workflowOverrides, apiCaseBatchEvidenceOverrides(result.EvidencePath))
+			}
 		}
 		r.updateCase(batchRunID, index, item)
 	}
-	r.finish(ctx, batchRunID, profileID, workflowID, runtime)
+	r.finish(ctx, batchRunID, bundle.ID, workflowID, runtime)
+}
+
+func materializeAPICaseBatchExecution(ctx context.Context, bundle profile.Bundle, runtime store.Store, batchRunID string, workflowID string, plan apiCaseBatchCasePlan) (string, string, error) {
+	payload := map[string]any{
+		"caseId":     plan.ID,
+		"stepId":     plan.StepID,
+		"workflowId": workflowID,
+		"baseUrl":    plan.BaseURL,
+		"overrides":  plan.Overrides,
+	}
+	request, err := buildCaseHTTPRequest(ctx, bundle, runtime, *plan.Execution, plan.BaseURL, payload)
+	if err != nil {
+		return "", "", err
+	}
+	body := mapFromAny(request.body)
+	apiCase := apicase.Case{
+		ID:    plan.ID,
+		Title: firstNonEmpty(plan.DisplayName, plan.ID),
+		Request: apicase.Request{
+			Method:  request.method,
+			Path:    apiCaseBatchRequestPath(request),
+			Headers: request.headers,
+			Body:    body,
+		},
+		Assertions: apicase.Assertions{
+			ExpectedStatusCodes: request.expectedHTTPCodes,
+		},
+	}
+	dir := filepath.Join(".runtime", "case-batches", batchRunID, "materialized-cases")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", "", err
+	}
+	path := filepath.Join(dir, safeRuntimeLogPathSegment(firstNonEmpty(plan.StepID, plan.ID))+".json")
+	raw, err := json.MarshalIndent(apiCase, "", "  ")
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
+		return "", "", err
+	}
+	return path, request.baseURL, nil
+}
+
+func apiCaseBatchRequestPath(request caseHTTPRequest) string {
+	baseURL := strings.TrimRight(strings.TrimSpace(request.baseURL), "/")
+	fullURL := strings.TrimSpace(request.fullURL)
+	if baseURL != "" && strings.HasPrefix(fullURL, baseURL) {
+		path := strings.TrimSpace(strings.TrimPrefix(fullURL, baseURL))
+		if path != "" {
+			return path
+		}
+	}
+	if strings.TrimSpace(request.path) != "" {
+		return request.path
+	}
+	return "/"
+}
+
+func apiCaseBatchEvidenceOverrides(evidencePath string) map[string]any {
+	out := map[string]any{}
+	for _, name := range []string{"request.json", "response.json"} {
+		payload, _ := jsonFileObject(filepath.Join(evidencePath, name))
+		collectAPICaseBatchOverrideFields(out, payload)
+		if body := strings.TrimSpace(valueString(payload["body"])); body != "" {
+			var parsed any
+			decoder := json.NewDecoder(strings.NewReader(body))
+			decoder.UseNumber()
+			if decoder.Decode(&parsed) == nil {
+				collectAPICaseBatchOverrideFields(out, parsed)
+			}
+		}
+	}
+	return out
+}
+
+func collectAPICaseBatchOverrideFields(out map[string]any, value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			recordAPICaseBatchOverrideField(out, key, item)
+			collectAPICaseBatchOverrideFields(out, item)
+		}
+	case []any:
+		for _, item := range typed {
+			collectAPICaseBatchOverrideFields(out, item)
+		}
+	case map[string]string:
+		for key, item := range typed {
+			recordAPICaseBatchOverrideField(out, key, item)
+		}
+	}
+}
+
+func recordAPICaseBatchOverrideField(out map[string]any, key string, value any) {
+	normalized := apiCaseBatchOverrideKey(key)
+	if normalized == "" {
+		return
+	}
+	text := strings.TrimSpace(apiCaseBatchOverrideValueString(value))
+	if text == "" {
+		return
+	}
+	out[normalized] = text
+}
+
+func apiCaseBatchOverrideValueString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	case float64:
+		asInt := int64(typed)
+		if typed == float64(asInt) {
+			return strconv.FormatInt(asInt, 10)
+		}
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		asInt := int64(typed)
+		if typed == float32(asInt) {
+			return strconv.FormatInt(asInt, 10)
+		}
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+	default:
+		return valueString(value)
+	}
+}
+
+func apiCaseBatchOverrideKey(key string) string {
+	switch strings.TrimSpace(key) {
+	case "financing_order_id", "mer_trans_no", "outer_business_no", "outer_business_id", "payout_id", "payout_amount", "total_amount", "repay_amount", "repay_interest", "repay_penalty", "member_id":
+		return strings.TrimSpace(key)
+	case "financingOrderId":
+		return "financing_order_id"
+	case "merTransNo":
+		return "mer_trans_no"
+	case "outerBusinessNo":
+		return "outer_business_no"
+	case "outerBusinessId":
+		return "outer_business_id"
+	case "payoutId":
+		return "payout_id"
+	case "payoutAmount":
+		return "payout_amount"
+	case "totalAmount":
+		return "total_amount"
+	case "total_repay_amount":
+		return "total_amount"
+	case "totalRepayAmount":
+		return "total_amount"
+	case "total_principal":
+		return "repay_amount"
+	case "totalPrincipal":
+		return "repay_amount"
+	case "repayAmount":
+		return "repay_amount"
+	case "repay_principal":
+		return "repay_amount"
+	case "repayPrincipal":
+		return "repay_amount"
+	case "total_interest":
+		return "repay_interest"
+	case "totalInterest":
+		return "repay_interest"
+	case "repayInterest":
+		return "repay_interest"
+	case "total_penalty":
+		return "repay_penalty"
+	case "totalPenalty":
+		return "repay_penalty"
+	case "repayPenalty":
+		return "repay_penalty"
+	case "memberId":
+		return "member_id"
+	case "orderId":
+		return "financing_order_id"
+	default:
+		return ""
+	}
 }
 
 func collectAPICaseBatchTraceTopology(ctx context.Context, runtime store.Store, collector traceCollector, workflowID string, plan apiCaseBatchCasePlan, result apicase.RunResult) {
@@ -395,15 +617,46 @@ func collectAPICaseBatchTraceTopology(ctx context.Context, runtime store.Store, 
 		"stepId":     plan.StepID,
 	}
 	resultPayload := map[string]any{
-		"ok":     true,
-		"caseId": result.CaseID,
-		"stepId": plan.StepID,
+		"ok":         true,
+		"caseId":     result.CaseID,
+		"stepId":     plan.StepID,
+		"startedAt":  result.StartedAt,
+		"finishedAt": result.FinishedAt,
 		"result": map[string]any{
 			"request":  request,
 			"response": response,
 		},
 	}
 	collectAndRecordTestKitTraceTopology(ctx, runtime, collector, result.RunID, payload, resultPayload)
+}
+
+func copyAPICaseBatchTraceTopologies(ctx context.Context, runtime store.Store, report apiCaseBatchRunReport) {
+	if runtime == nil || strings.TrimSpace(report.BatchRunID) == "" {
+		return
+	}
+	for _, item := range report.Cases {
+		sourceRunID := strings.TrimSpace(item.RunID)
+		if sourceRunID == "" {
+			continue
+		}
+		rows, err := runtime.ListTraceTopologies(ctx, sourceRunID)
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			if !isSkyWalkingTraceTopology(row) {
+				continue
+			}
+			copied := row
+			copied.ID = report.BatchRunID + "." + safeRuntimeLogPathSegment(firstNonEmpty(item.StepID, row.StepID, item.CaseID, row.CaseID)) + ".topology.skywalking"
+			copied.WorkflowRunID = report.BatchRunID
+			copied.WorkflowID = firstNonEmpty(report.WorkflowID, row.WorkflowID)
+			copied.StepID = firstNonEmpty(item.StepID, row.StepID)
+			copied.CaseID = firstNonEmpty(item.CaseID, row.CaseID)
+			copied.CreatedAt = time.Now().UTC()
+			_, _ = runtime.SaveTraceTopology(ctx, copied)
+		}
+	}
 }
 
 func (r *apiCaseBatchRunner) save(report apiCaseBatchRunReport) {
@@ -454,6 +707,10 @@ func (r *apiCaseBatchRunner) finish(ctx context.Context, batchRunID string, prof
 	_ = writeAPICaseBatchArtifactManifest(report)
 	_ = writeAPICaseBatchFailureSummary(report)
 	recordAPICaseBatchReportArtifacts(ctx, runtime, profileID, workflowID, report)
+	if strings.TrimSpace(report.WorkflowID) != "" {
+		copyAPICaseBatchTraceTopologies(ctx, runtime, report)
+	}
+	finalizeEnvironmentAcceptanceRun(ctx, runtime, report)
 	r.runs[batchRunID] = report
 	r.mu.Unlock()
 }
@@ -779,18 +1036,18 @@ func containsMessageFragment(fragments []string, message string) bool {
 
 func apiCaseBatchPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {
 	if len(request.CaseIDs) > 0 {
-		return apiCaseBatchExactCasePlans(bundle, request), nil
+		return apiCaseBatchExactCasePlans(ctx, bundle, runtime, request), nil
 	}
 	if strings.TrimSpace(request.WorkflowID) != "" {
-		return apiCaseBatchWorkflowPlans(bundle, request), nil
+		return apiCaseBatchWorkflowPlans(ctx, bundle, runtime, request), nil
 	}
 	if request.Suite.configured() {
 		return apiCaseBatchSuitePlans(ctx, bundle, runtime, request)
 	}
-	return apiCaseBatchNodePlans(bundle, request), nil
+	return apiCaseBatchNodePlans(ctx, bundle, runtime, request), nil
 }
 
-func apiCaseBatchExactCasePlans(bundle profile.Bundle, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
+func apiCaseBatchExactCasePlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
 	casesByID := make(map[string]profile.APICase, len(bundle.APICases))
 	for _, item := range bundle.APICases {
 		casesByID[item.ID] = item
@@ -801,10 +1058,10 @@ func apiCaseBatchExactCasePlans(bundle profile.Bundle, request apiCaseBatchRunRe
 			cases = append(cases, item)
 		}
 	}
-	return apiCaseBatchPlansFromCases(bundle, request, cases)
+	return apiCaseBatchPlansFromCases(ctx, bundle, runtime, request, cases)
 }
 
-func apiCaseBatchNodePlans(bundle profile.Bundle, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
+func apiCaseBatchNodePlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
 	nodesByID := apiCaseBatchNodesByID(bundle)
 	nodeSet := map[string]bool{}
 	for _, id := range request.NodeIDs {
@@ -820,6 +1077,7 @@ func apiCaseBatchNodePlans(bundle profile.Bundle, request apiCaseBatchRunRequest
 			continue
 		}
 		node := nodesByID[item.NodeID]
+		payload := map[string]any{"caseId": item.ID}
 		out = append(out, apiCaseBatchCasePlan{
 			ID:              item.ID,
 			DisplayName:     item.DisplayName,
@@ -829,11 +1087,12 @@ func apiCaseBatchNodePlans(bundle profile.Bundle, request apiCaseBatchRunRequest
 			Operation:       node.Operation,
 			Method:          node.Method,
 			Path:            node.Path,
-			CasePath:        resolveBundleFilePath(bundle.BaseDir, casePath),
+			CasePath:        resolveBatchAPICasePath(ctx, runtime, bundle, casePath),
 			BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
 			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
+			Execution:       findCaseExecutionConfig(ctx, runtime, item.ID, payload),
 		})
 	}
 	return out
@@ -866,10 +1125,10 @@ func apiCaseBatchSuitePlans(ctx context.Context, bundle profile.Bundle, runtime 
 		}
 		cases = filtered
 	}
-	return apiCaseBatchPlansFromCases(bundle, request, cases), nil
+	return apiCaseBatchPlansFromCases(ctx, bundle, runtime, request, cases), nil
 }
 
-func apiCaseBatchPlansFromCases(bundle profile.Bundle, request apiCaseBatchRunRequest, cases []profile.APICase) []apiCaseBatchCasePlan {
+func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest, cases []profile.APICase) []apiCaseBatchCasePlan {
 	nodesByID := apiCaseBatchNodesByID(bundle)
 	out := make([]apiCaseBatchCasePlan, 0, len(cases))
 	for _, item := range cases {
@@ -878,6 +1137,7 @@ func apiCaseBatchPlansFromCases(bundle profile.Bundle, request apiCaseBatchRunRe
 			continue
 		}
 		node := nodesByID[item.NodeID]
+		payload := map[string]any{"caseId": item.ID}
 		out = append(out, apiCaseBatchCasePlan{
 			ID:              item.ID,
 			DisplayName:     item.DisplayName,
@@ -887,17 +1147,18 @@ func apiCaseBatchPlansFromCases(bundle profile.Bundle, request apiCaseBatchRunRe
 			Operation:       node.Operation,
 			Method:          node.Method,
 			Path:            node.Path,
-			CasePath:        resolveBundleFilePath(bundle.BaseDir, casePath),
+			CasePath:        resolveBatchAPICasePath(ctx, runtime, bundle, casePath),
 			BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
 			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
+			Execution:       findCaseExecutionConfig(ctx, runtime, item.ID, payload),
 		})
 	}
 	return out
 }
 
-func apiCaseBatchWorkflowPlans(bundle profile.Bundle, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
+func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
 	nodesByID := apiCaseBatchNodesByID(bundle)
 	casesByID := make(map[string]profile.APICase, len(bundle.APICases))
 	for _, item := range bundle.APICases {
@@ -927,6 +1188,7 @@ func apiCaseBatchWorkflowPlans(bundle profile.Bundle, request apiCaseBatchRunReq
 		}
 		nodeID := firstNonEmpty(binding.NodeID, item.NodeID)
 		node := nodesByID[nodeID]
+		payload := map[string]any{"caseId": item.ID, "workflowId": request.WorkflowID, "stepId": binding.StepID}
 		out = append(out, apiCaseBatchCasePlan{
 			ID:              item.ID,
 			DisplayName:     item.DisplayName,
@@ -937,14 +1199,19 @@ func apiCaseBatchWorkflowPlans(bundle profile.Bundle, request apiCaseBatchRunReq
 			Method:          node.Method,
 			Path:            node.Path,
 			StepID:          binding.StepID,
-			CasePath:        resolveBundleFilePath(bundle.BaseDir, casePath),
+			CasePath:        resolveBatchAPICasePath(ctx, runtime, bundle, casePath),
 			BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
 			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
+			Execution:       findCaseExecutionConfig(ctx, runtime, item.ID, payload),
 		})
 	}
 	return out
+}
+
+func resolveBatchAPICasePath(ctx context.Context, runtime store.Store, bundle profile.Bundle, casePath string) string {
+	return resolveBundleAPICasePath(ctx, runtime, bundle, casePath)
 }
 
 func apiCaseBatchNodesByID(bundle profile.Bundle) map[string]profile.InterfaceNode {

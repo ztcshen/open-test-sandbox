@@ -1743,3 +1743,52 @@ Acceptance report gate slice:
   live-validated against real Docker state.
 - Future restore hardening should add explicit dependency ordering and richer
   per-service readiness policies beyond the current Store-backed probes.
+
+Core 10-step workflow green-run slice:
+
+- 2026-05-20T04:18:49Z: the running workbench at
+  `http://127.0.0.1:58663/workflow-detail.html?id=sandbox.financing_to_repay_result_query`
+  produced a real passed workflow run:
+  `run.20260520T041849.493116000Z`.
+- The run finished `10/10` steps green with `elapsedMs=4031`, backed by the
+  running local PostgreSQL Store `local-pg` and the current Docker target
+  services. No Docker image/container deletion or clean-machine simulation was
+  run.
+- Root causes fixed in the live validation environment:
+  `sandbox-scf-gateway` was missing and was started from the existing local fat
+  jar because a fresh Maven build was blocked by Nexus 502; the LLT simulator
+  had an SM2 envelope edge case that could corrupt response key material when a
+  generated ciphertext began with byte `0x04`; the LLT callback workflow step
+  was still targeting `/v1/api/dispatcher` and was corrected in the active
+  Store catalog to `POST /__sandbox/llt/callback`.
+- Evidence from the passed run: all ten steps returned HTTP 200 and passed:
+  trial, apply, callback, query, loan-apply, loan-callback, loan-query,
+  repay-trial, repay-apply, repay-query.
+- Remaining follow-up from this slice: the dashboard health summary still needs
+  to stop treating Docker `running` as business healthy; service cards should
+  require real HTTP healthcheck success or show unchecked/unhealthy.
+
+Core 10-step workflow acceptance-green slice:
+
+- 2026-05-20T05:02:12Z: restarted the local workbench with the real SkyWalking
+  OAP GraphQL endpoint:
+  `OTS_TRACE_GRAPHQL_URL=http://127.0.0.1:12800/graphql`.
+- Manual async acceptance run
+  `batch.manual-green-skywalking-fixed-20260520T050212Z.20260520T050212.526123000Z`
+  passed the full `sandbox.financing_to_repay_result_query` workflow:
+  `completed=10`, `passed=10`, `failed=0`, `acceptance.ok=true`.
+- Acceptance report details: template
+  `environment.workflow.skywalking.v1`; workflow steps `10/10`; Evidence
+  complete for every interface step; real SkyWalking topology complete for
+  every step (`topologyComplete=true` on all ten steps).
+- Root cause fixed for the previous partial topology result: the trace
+  collector persisted rows with an empty topology id when the payload omitted
+  `id`, so repeated step topology writes overwrote each other. It now generates
+  a stable id from run, step, trace/request/case identity before saving.
+- Dashboard health semantics were tightened: Docker `running` without a real
+  HTTP healthcheck no longer appears as healthy. The current dashboard summary
+  correctly reports only healthchecked services as healthy and marks unchecked
+  services as not OK.
+- Light validation for this slice:
+  `go test ./internal/controlplane -run 'TestTraceTopologyCollectPersistsProviderSpanRefs|TestServerStartsAsyncAPICaseBatchRunForWorkflow|TestServerAsyncWorkflowAcceptancePassesWithSkyWalkingTopology' -count=1`;
+  `go test ./cmd/otsandbox -run 'TestEnvironmentAcceptanceCLIStartsAndReadsAsyncReport' -count=1`.

@@ -218,7 +218,7 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 		handleSandboxInterfaceRegistration(w, r, runtime)
 	})
 	mux.HandleFunc("/api/environments/", func(w http.ResponseWriter, r *http.Request) {
-		handleEnvironmentItem(w, r, runtime)
+		handleEnvironmentItem(w, r, runtime, profiles.Current(), caseBatchRunner, collector)
 	})
 	mux.HandleFunc("/api/environments", func(w http.ResponseWriter, r *http.Request) {
 		handleEnvironmentCollection(w, r, runtime)
@@ -1192,6 +1192,7 @@ func hydrateDashboardRuntime(ctx context.Context, payload *dashboardPayload, cat
 		if observed, ok := dockerRuntimes[service.ID]; ok {
 			runtime = mergeRuntime(runtime, observed)
 		}
+		runtime = applyHTTPServiceHealth(ctx, runtime, service.HealthURL)
 		runtimeByService[service.ID] = runtime
 	}
 	payload.ServiceRuntime = make([]serviceRuntime, 0, len(services))
@@ -1371,9 +1372,10 @@ func dashboardPayloadFromBundle(ctx context.Context, bundle profile.Bundle) dash
 				Health:    "external",
 				OK:        true,
 			}
+			runtime = applyHTTPServiceHealth(ctx, runtime, service.HealthURL)
 			state = "external"
-			health = "external"
-			healthy = true
+			health = runtime.Health
+			healthy = runtime.OK
 		}
 		if runtime.ServiceID != "" {
 			serviceRuntimes = append(serviceRuntimes, runtime)
@@ -1467,18 +1469,20 @@ func dockerRuntimeByService(ctx context.Context, services []profile.Service) map
 		}
 		health := dockerHealth(container.Status, state)
 		port, managementPort := dockerPublishedPorts(container.Ports)
-		out[service.ID] = serviceRuntime{
+		runtime := serviceRuntime{
 			ServiceID:      service.ID,
 			NodeRole:       service.Kind,
 			Container:      container.Names,
 			Image:          firstNonEmpty(container.Image, service.Image),
 			State:          state,
 			Health:         health,
-			OK:             state == "running" && health != "unhealthy",
+			OK:             false,
 			Port:           firstPositiveInt(port, service.ServicePort),
 			ManagementPort: firstPositiveInt(managementPort, service.ManagementPort),
 			Message:        container.Status,
 		}
+		runtime = applyHTTPServiceHealth(ctx, runtime, service.HealthURL)
+		out[service.ID] = runtime
 	}
 	return out
 }
@@ -1501,7 +1505,7 @@ func dockerRuntimeByCatalogService(ctx context.Context, services []store.Catalog
 		}
 		health := dockerHealth(container.Status, state)
 		port, managementPort := dockerPublishedPorts(container.Ports)
-		out[service.ID] = serviceRuntime{
+		runtime := serviceRuntime{
 			ServiceID:      service.ID,
 			NodeRole:       service.Kind,
 			Container:      container.Names,
@@ -1511,11 +1515,12 @@ func dockerRuntimeByCatalogService(ctx context.Context, services []store.Catalog
 			CommitID:       configured.CommitID,
 			State:          state,
 			Health:         health,
-			OK:             state == "running" && health != "unhealthy",
+			OK:             false,
 			Port:           firstPositiveInt(port, service.ServicePort),
 			ManagementPort: firstPositiveInt(managementPort, service.ManagementPort),
 			Message:        container.Status,
 		}
+		out[service.ID] = runtime
 	}
 	return out
 }
@@ -1738,12 +1743,73 @@ func dockerHealth(status string, state string) string {
 	case strings.Contains(status, "(unhealthy)"):
 		return "unhealthy"
 	case state == "running":
-		return "healthy"
+		return "unchecked"
 	case state == "":
 		return "unknown"
 	default:
 		return state
 	}
+}
+
+func applyHTTPServiceHealth(ctx context.Context, runtime serviceRuntime, rawURL string) serviceRuntime {
+	url := serviceHTTPHealthURL(rawURL, runtime)
+	if strings.TrimSpace(url) == "" {
+		if runtime.State == "running" || runtime.State == "external" {
+			runtime.Health = "unchecked"
+			runtime.OK = false
+			runtime.Message = firstNonEmpty(runtime.Message, "HTTP health check is not configured")
+		}
+		return runtime
+	}
+	if runtime.State != "running" && runtime.State != "external" {
+		runtime.OK = false
+		return runtime
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		runtime.Health = "unhealthy"
+		runtime.OK = false
+		runtime.Message = err.Error()
+		return runtime
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		runtime.Health = "unhealthy"
+		runtime.OK = false
+		runtime.Message = err.Error()
+		return runtime
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		runtime.Health = "healthy"
+		runtime.OK = true
+		runtime.Message = firstNonEmpty(runtime.Message, "HTTP health check passed: "+url)
+		return runtime
+	}
+	runtime.Health = "unhealthy"
+	runtime.OK = false
+	runtime.Message = "HTTP health check returned " + strconv.Itoa(resp.StatusCode) + ": " + url
+	return runtime
+}
+
+func serviceHTTPHealthURL(rawURL string, runtime serviceRuntime) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
+		return rawURL
+	}
+	if strings.HasPrefix(rawURL, "/") {
+		port := firstPositiveInt(runtime.ManagementPort, runtime.Port)
+		if port <= 0 {
+			return ""
+		}
+		return "http://127.0.0.1:" + strconv.Itoa(port) + rawURL
+	}
+	return rawURL
 }
 
 func dockerPublishedPorts(raw string) (int, int) {

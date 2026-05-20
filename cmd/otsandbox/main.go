@@ -253,6 +253,8 @@ Usage:
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
+  otsandbox environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox environment acceptance report ENV_ID --server-url URL --run ID [--json]
   otsandbox environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
   otsandbox environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
@@ -443,6 +445,8 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentBootstrap(ctx, args[1:])
 	case "restore":
 		return runEnvironmentRestore(ctx, args[1:])
+	case "acceptance":
+		return runEnvironmentAcceptance(ctx, args[1:])
 	case "verify":
 		return runEnvironmentVerify(ctx, args[1:])
 	case "publish-verified":
@@ -486,6 +490,9 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	}
 	if strings.TrimSpace(*id) == "" {
 		return errors.New("--id is required")
+	}
+	if strings.TrimSpace(*verificationWorkflowID) == "" {
+		return errors.New("--verification-workflow is required for environment acceptance")
 	}
 	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
@@ -801,6 +808,89 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 		return errors.New("environment restore did not complete")
 	}
 	return nil
+}
+
+func runEnvironmentAcceptance(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing environment acceptance command")
+	}
+	switch args[0] {
+	case "start":
+		return runEnvironmentAcceptanceStart(ctx, args[1:])
+	case "report":
+		return runEnvironmentAcceptanceReport(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown environment acceptance command: %s", args[0])
+	}
+}
+
+func runEnvironmentAcceptanceStart(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment acceptance start", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	serverURL := flags.String("server-url", "", "Running control plane base URL")
+	requestID := flags.String("request-id", "", "Acceptance request id")
+	baseURL := flags.String("base-url", "", "Base URL for live request execution")
+	evidenceDir := flags.String("evidence-dir", "", "Evidence output directory")
+	timeoutSeconds := flags.Int("timeout-seconds", 0, "Per-step timeout in seconds")
+	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	envID := strings.TrimSpace(flags.Arg(0))
+	if envID == "" || strings.TrimSpace(*serverURL) == "" || strings.TrimSpace(*requestID) == "" {
+		return errors.New("environment id, --server-url, and --request-id are required")
+	}
+	payload := map[string]any{"requestId": strings.TrimSpace(*requestID)}
+	if strings.TrimSpace(*baseURL) != "" {
+		payload["baseUrl"] = strings.TrimSpace(*baseURL)
+	}
+	if strings.TrimSpace(*evidenceDir) != "" {
+		payload["evidenceDir"] = strings.TrimSpace(*evidenceDir)
+	}
+	if *timeoutSeconds > 0 {
+		payload["timeoutSeconds"] = *timeoutSeconds
+	}
+	result, err := postWorkflowAcceptanceJSON(ctx, environmentAcceptanceRunURL(*serverURL, envID, ""), payload)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(result)
+	}
+	printEnvironmentAcceptanceStart(result)
+	return nil
+}
+
+func runEnvironmentAcceptanceReport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment acceptance report", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	serverURL := flags.String("server-url", "", "Running control plane base URL")
+	runID := flags.String("run", "", "Acceptance batch run id")
+	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	envID := strings.TrimSpace(flags.Arg(0))
+	if envID == "" || strings.TrimSpace(*serverURL) == "" || strings.TrimSpace(*runID) == "" {
+		return errors.New("environment id, --server-url, and --run are required")
+	}
+	result, err := fetchWorkflowAcceptanceJSON(ctx, environmentAcceptanceRunURL(*serverURL, envID, *runID))
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(result)
+	}
+	printEnvironmentAcceptanceReport(result)
+	return nil
+}
+
+func environmentAcceptanceRunURL(serverURL string, envID string, runID string) string {
+	base := strings.TrimRight(strings.TrimSpace(serverURL), "/") + "/api/environments/" + url.PathEscape(strings.TrimSpace(envID)) + "/acceptance-runs"
+	if strings.TrimSpace(runID) != "" {
+		base += "/" + url.PathEscape(strings.TrimSpace(runID))
+	}
+	return base
 }
 
 func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreReport, error) {
@@ -6134,6 +6224,25 @@ func printWorkflowAcceptanceReport(payload map[string]any) {
 	fmt.Printf("Status: %s\n", valueString(payload["status"]))
 	fmt.Printf("Accepted: %t\n", boolFromReportAny(acceptance["ok"]))
 	fmt.Printf("Template: %s\n", valueString(acceptance["templateId"]))
+}
+
+func printEnvironmentAcceptanceStart(payload map[string]any) {
+	fmt.Printf("Environment Acceptance Run: %s\n", valueString(payload["batchRunId"]))
+	fmt.Printf("Environment: %s\n", valueString(payload["environmentId"]))
+	fmt.Printf("Workflow: %s\n", valueString(payload["workflowId"]))
+	fmt.Printf("Status: %s\n", valueString(payload["status"]))
+	fmt.Printf("Report: %s\n", valueString(payload["reportUrl"]))
+}
+
+func printEnvironmentAcceptanceReport(payload map[string]any) {
+	acceptance := mapFromReportAny(payload["acceptance"])
+	health := mapFromReportAny(acceptance["healthSummary"])
+	fmt.Printf("Environment Acceptance Report: %s\n", valueString(payload["batchRunId"]))
+	fmt.Printf("Environment: %s\n", valueString(payload["environmentId"]))
+	fmt.Printf("Workflow: %s\n", firstNonEmpty(valueString(acceptance["workflowId"]), valueString(payload["workflowId"])))
+	fmt.Printf("Status: %s\n", valueString(payload["status"]))
+	fmt.Printf("Accepted: %t\n", boolFromReportAny(acceptance["ok"]))
+	fmt.Printf("Health: %d/%d\n", intFromReportAny(health["passed"]), intFromReportAny(health["total"]))
 }
 
 func runWorkflowStep(ctx context.Context, args []string) error {

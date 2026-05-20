@@ -165,8 +165,12 @@ func collectTraceTopology(ctx context.Context, runtime store.Store, collector tr
 	if err != nil {
 		return store.TraceTopology{}, traceTopology{}, err
 	}
+	rowID := strings.TrimSpace(valueString(payload["id"]))
+	if rowID == "" {
+		rowID = traceTopologyRowID(run.ID, stepID, caseID, topology.TraceID, topology.RequestID)
+	}
 	row, err := runtime.SaveTraceTopology(ctx, store.TraceTopology{
-		ID:            strings.TrimSpace(valueString(payload["id"])),
+		ID:            rowID,
 		WorkflowRunID: run.ID,
 		WorkflowID:    run.WorkflowID,
 		StepID:        stepID,
@@ -182,6 +186,16 @@ func collectTraceTopology(ctx context.Context, runtime store.Store, collector tr
 		return store.TraceTopology{}, traceTopology{}, err
 	}
 	return row, topology, nil
+}
+
+func traceTopologyRowID(runID string, stepID string, caseID string, traceID string, requestID string) string {
+	identity := firstNonEmpty(traceID, requestID, caseID, "topology")
+	return strings.Join([]string{
+		safeRuntimeLogPathSegment(runID),
+		safeRuntimeLogPathSegment(firstNonEmpty(stepID, caseID, "step")),
+		safeRuntimeLogPathSegment(identity),
+		postProcessKindTraceTopology,
+	}, ".")
 }
 
 func sortTraceCandidatesByRunWindow(candidates []traceCandidate, startedAt, finishedAt time.Time) {
