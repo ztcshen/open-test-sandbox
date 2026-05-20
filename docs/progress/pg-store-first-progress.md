@@ -2371,3 +2371,21 @@ Remote source policy slice:
   `component-graph`, `component-startup-plan`, `remote-git-sources`,
   `store-startup-files`, `startup-assets`, `service-repositories`,
   `docker-start-plan`, and `health-probes`.
+- 2026-05-20T09:56Z implementation slice: `cleanMachine` now exposes a
+  two-phase command path for new machines. `prepareCommand` runs
+  `environment restore --execute --prepare-repos-only --json` to clone or
+  validate repositories and write Store-generated startup files without
+  starting Docker. `executeCommand` remains the full Docker startup command.
+  This matches the intended flow: prove code and startup assets first, then
+  proceed to image pull/build/up and health gates.
+- Verification: focused CLI coverage passed for the generated prepare and
+  execute commands. A real `local-pg` dry-run returned `ok=true`,
+  `cleanMachine.ready=true`, 12 green prerequisites, a prepare command for
+  `scf-chain-core10-local-docker` with `--prepare-repos-only`, and a separate
+  execute command without the clean-machine assumption flag.
+- 2026-05-20T09:57Z scope note: the immediate goal is now explicitly narrowed
+  to the colleague/new-machine path: use the PostgreSQL Store as the source of
+  truth to precheck remote repositories, generate startup material, start the
+  Docker-side business environment, and gate it with health checks. CLI/API
+  parity polish, frontend refinements, and richer report/topology details stay
+  secondary unless they directly unblock that one-click restore path.

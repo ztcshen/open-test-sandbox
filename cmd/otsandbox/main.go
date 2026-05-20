@@ -889,6 +889,7 @@ type environmentRestoreReport struct {
 
 type environmentRestoreCleanMachinePlan struct {
 	Ready          bool                                         `json:"ready"`
+	PrepareCommand []string                                     `json:"prepareCommand,omitempty"`
 	ExecuteCommand []string                                     `json:"executeCommand,omitempty"`
 	Prerequisites  []environmentRestoreCleanMachinePrerequisite `json:"prerequisites,omitempty"`
 	Notes          []string                                     `json:"notes,omitempty"`
@@ -1472,6 +1473,19 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 	}
 	plan := environmentRestoreCleanMachinePlan{
 		Ready: report.OK,
+		PrepareCommand: []string{
+			"otsandbox",
+			"environment",
+			"restore",
+			report.EnvironmentID,
+			"--store",
+			storeRef,
+			"--workspace",
+			report.Workspace,
+			"--execute",
+			"--prepare-repos-only",
+			"--json",
+		},
 		ExecuteCommand: []string{
 			"otsandbox",
 			"environment",
@@ -1486,7 +1500,8 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 		},
 		Prerequisites: environmentRestoreCleanMachinePrerequisites(report, workflowOptions),
 		Notes: []string{
-			"Run this command on the colleague/new machine after the PostgreSQL Store is configured and reachable outside the target Docker environment.",
+			"Run prepareCommand on the colleague/new machine first to clone or validate repositories and write Store-generated startup files without starting Docker.",
+			"Run executeCommand after prepareCommand passes to start Docker and wait for health gates.",
 			"The dry-run assumption is not included in the execute command; Docker will be checked on the target machine before startup.",
 			"Add --run-workflow --server-url URL after Docker health passes when the control plane is running for acceptance verification.",
 		},
