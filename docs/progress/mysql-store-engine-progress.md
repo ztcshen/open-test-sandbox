@@ -356,3 +356,28 @@ Current blocker:
 
 - Real company MySQL Store DSN is still required for
   `npm run release-check:mysql-real` and final goal completion.
+
+## 2026-05-21 MySQL API Smoke Env Parity Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Made the standalone MySQL API smoke accept the shared `OTSANDBOX_SMOKE_STORE`
+  environment variable in addition to `OTSANDBOX_MYSQL_API_SMOKE_DSN` and
+  `OTSANDBOX_SMOKE_STORE_DSN`.
+- Exported the MySQL API smoke DSN resolver behind an import-safe module guard,
+  so smoke selection can be unit-tested without starting a server or requiring
+  a live MySQL database.
+- Added tests for shared smoke Store env support, dedicated-DSN precedence, and
+  rejection of non-MySQL shared Store DSNs.
+
+Validated:
+
+- `node --check tools/smoke/mysql-store-api-smoke.mjs`
+- `node --test tools/smoke/mysql-store-api-smoke.test.mjs`
+
+Current blocker:
+
+- Still waiting for a dedicated company MySQL Store DSN to run the guarded real
+  MySQL release proof.

@@ -3,16 +3,16 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { writeSmokeProfile } from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
-function requiredMySQLDSN() {
-  const dsn = process.env.OTSANDBOX_MYSQL_API_SMOKE_DSN || process.env.OTSANDBOX_SMOKE_STORE_DSN || "";
+export function requiredMySQLDSN(env = process.env) {
+  const dsn = env.OTSANDBOX_MYSQL_API_SMOKE_DSN || env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
   if (!dsn.trim()) {
-    throw new Error("Set OTSANDBOX_MYSQL_API_SMOKE_DSN or OTSANDBOX_SMOKE_STORE_DSN to run the MySQL Store API smoke");
+    throw new Error("Set OTSANDBOX_MYSQL_API_SMOKE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to run the MySQL Store API smoke");
   }
   if (!/^mysql:\/\//i.test(dsn)) {
     throw new Error("The MySQL Store API smoke requires a mysql:// Store DSN");
@@ -220,7 +220,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
+}
