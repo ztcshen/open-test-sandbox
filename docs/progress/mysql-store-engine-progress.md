@@ -864,3 +864,35 @@ Current blocker:
   for all 10 workflow steps.
 - Remaining MySQL daily parity work is now mostly final live release proof and
   optional deeper publish-verified DSN smoke coverage.
+
+## 2026-05-21 MySQL API Environment Publish Smoke Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Extended the MySQL Store API smoke to call
+  `/api/environments/{id}/publish-verified` after the environment acceptance
+  report passes.
+- The smoke now verifies the published Environment Catalog entry is persisted as
+  `verified`, remains Evidence/topology complete, and appears in default
+  verified discovery.
+- Added focused helper coverage so the smoke fails clearly if publish-verified
+  stops enforcing or persisting the verified Environment Catalog state.
+
+Validated:
+
+- `node --test tools/smoke/mysql-store-api-smoke.test.mjs`
+- `node --check tools/smoke/mysql-store-api-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Final release proof still requires real SkyWalking:
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
+  for all 10 workflow steps.
+- MySQL daily API smoke now covers Store current, catalog/workflow discovery,
+  async workflow report, Evidence readback, service/interface registration,
+  Environment Catalog register/inspect/bootstrap/acceptance, and
+  publish-verified; remaining work is primarily live DSN validation.

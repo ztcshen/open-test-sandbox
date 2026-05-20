@@ -250,6 +250,23 @@ export function assertEnvironmentAcceptancePayload({ report, inspect }, {
   }
 }
 
+export function assertEnvironmentPublishedPayload({ published, discoverVerified, inspect }, {
+  environmentID = "env.mysql-api-smoke",
+} = {}) {
+  const publishedEnv = published?.environment || {};
+  if (!published?.ok || publishedEnv.id !== environmentID || publishedEnv.status !== "verified" || publishedEnv.verified !== true) {
+    throw new Error(`unexpected MySQL Environment publish-verified payload: ${JSON.stringify(published)}`);
+  }
+  const discovered = (Array.isArray(discoverVerified?.items) ? discoverVerified.items : []).find((item) => item.id === environmentID);
+  if (!discoverVerified?.ok || !discovered || discovered.status !== "verified" || discovered.verified !== true) {
+    throw new Error(`published MySQL Environment was not returned by default verified discovery: ${JSON.stringify(discoverVerified)}`);
+  }
+  const env = inspect?.environment || {};
+  if (!inspect?.ok || env.id !== environmentID || env.status !== "verified" || env.verified !== true || env.evidenceComplete !== true || env.topologyComplete !== true) {
+    throw new Error(`published MySQL Environment status was not persisted: ${JSON.stringify(inspect)}`);
+  }
+}
+
 async function waitForWorkflowBatchReport(baseURL, reportURL, timeoutMs = 30000) {
   if (!reportURL) {
     throw new Error("workflow batch start did not return reportUrl");
@@ -521,6 +538,15 @@ async function main() {
     assertEnvironmentAcceptancePayload({
       report: acceptanceReport,
       inspect: environmentAfterAcceptance,
+    });
+
+    const published = await postJSON(`${baseURL}/api/environments/env.mysql-api-smoke/publish-verified`, {});
+    const environmentDiscoverVerified = await waitForJSON(`${baseURL}/api/environments`);
+    const environmentAfterPublish = await waitForJSON(`${baseURL}/api/environments/env.mysql-api-smoke`);
+    assertEnvironmentPublishedPayload({
+      published,
+      discoverVerified: environmentDiscoverVerified,
+      inspect: environmentAfterPublish,
     });
   } finally {
     await closeHTTPServer(traceProvider?.server);

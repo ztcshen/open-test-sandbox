@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { assertCaseEvidencePayload, assertEnvironmentAcceptancePayload, assertEnvironmentCatalogPayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
+import { assertCaseEvidencePayload, assertEnvironmentAcceptancePayload, assertEnvironmentCatalogPayload, assertEnvironmentPublishedPayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
 
 test("MySQL API smoke accepts the shared SQL smoke Store env", () => {
   assert.equal(
@@ -166,6 +166,34 @@ test("MySQL API smoke validates Environment acceptance report payloads", () => {
         status: "verified-ready",
         lastVerificationRunId: "batch.mysql-api-smoke",
         lastVerificationStatus: "passed",
+        evidenceComplete: true,
+        topologyComplete: true,
+      },
+    },
+  });
+});
+
+test("MySQL API smoke validates Environment publish-verified payloads", () => {
+  assertEnvironmentPublishedPayload({
+    published: {
+      ok: true,
+      environment: {
+        id: "env.mysql-api-smoke",
+        status: "verified",
+        verified: true,
+      },
+    },
+    discoverVerified: {
+      ok: true,
+      count: 1,
+      items: [{ id: "env.mysql-api-smoke", status: "verified", verified: true }],
+    },
+    inspect: {
+      ok: true,
+      environment: {
+        id: "env.mysql-api-smoke",
+        status: "verified",
+        verified: true,
         evidenceComplete: true,
         topologyComplete: true,
       },
