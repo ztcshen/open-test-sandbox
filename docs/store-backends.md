@@ -3,7 +3,9 @@
 Open Test Sandbox treats the Store as a pluggable database backend. Users pick
 one backend for a workspace or team, and daily CLI/API/UI commands operate
 against the selected Store without changing command shape. The active product
-path is PostgreSQL. The Store holds environment catalogs, service and interface
+path is SQL Store-first: PostgreSQL remains the default upstream path, and
+MySQL is supported for teams whose test environments standardize on MySQL. The
+Store holds environment catalogs, service and interface
 registrations, workflows, maintained API cases, run records, Evidence indexes,
 trace topology indexes, baseline gates, timing data, and post-process task
 state. Evidence files and local logs may still live on disk, but their indexes
@@ -20,9 +22,8 @@ into daily workflow commands.
 
 Supported backend families:
 
-- PostgreSQL: active product path for personal and team Stores.
-- MySQL: recognized backend family, reserved for organizations that require it;
-  implementation is pending.
+- PostgreSQL: default active product path for personal and team Stores.
+- MySQL: active product path for organizations that require MySQL Stores.
 - SQLite: compatibility backend for migration, old local runs, and tests.
 
 Dialect responsibilities:
@@ -39,9 +40,9 @@ post-process tasks, and baseline gates with dialect-specific JSON/time/bool
 types. New Store tables should follow this pattern instead of adding SQLite-only
 SQL to the daily Store path.
 
-## PostgreSQL First
+## SQL Store First
 
-Use one PostgreSQL database per isolation boundary:
+Use one PostgreSQL or MySQL database per isolation boundary:
 
 - `local-personal`: a private database for unverified local work.
 - `team-verified`: a shared database for verified environments and reusable
@@ -52,11 +53,13 @@ Configure named Stores with:
 ```sh
 otsandbox store config set local-personal --url postgres://user:pass@host:5432/otsandbox_local?sslmode=disable
 otsandbox store config set team-verified --url postgres://user:pass@host:5432/otsandbox_team?sslmode=disable
+otsandbox store config set company-mysql --url mysql://user:pass@host:3306/otsandbox_team?tls=false
 otsandbox store use local-personal
 otsandbox store current
 ```
 
-Display commands, including JSON output, mask passwords in PostgreSQL DSNs.
+Display commands, including JSON output, mask passwords in PostgreSQL and MySQL
+DSNs.
 The on-disk Store config keeps the real DSN so CLI commands can still open the
 selected database.
 
@@ -67,7 +70,7 @@ it is trying to discover. Target application databases used by tested services
 are separate Docker-managed runtime dependencies.
 Docker cleanup for colleague-machine simulation is scoped to the recorded
 target Compose project only; it must not clean, recreate, or host the sandbox
-PostgreSQL Store.
+SQL Store.
 Restore attempt summaries are Store-first diagnostics kept in Environment
 Catalog `summary.lastRestore` and `summary.restoreAttempts`; they are not
 portable template package data and not a replacement for full Evidence or
@@ -78,9 +81,9 @@ CLI/API commands read and write the active Store unless that explicit override
 is present. Legacy `--store-url` remains accepted during migration and import
 tests.
 
-The command shape is location-agnostic. A local PostgreSQL database and a
-remote team PostgreSQL database use the same daily commands; only the selected
-Store changes:
+The command shape is location- and engine-agnostic. A local PostgreSQL
+database, a remote team PostgreSQL database, and a remote team MySQL database
+use the same daily commands; only the selected Store changes:
 
 ```sh
 otsandbox store use local-personal
@@ -91,6 +94,7 @@ otsandbox case discover --filter refund
 
 otsandbox case discover --store team-verified --filter refund
 otsandbox workflow discover --store postgres://user:pass@host:5432/team_verified --filter checkout
+otsandbox workflow discover --store mysql://user:pass@host:3306/team_verified --filter checkout
 ```
 
 ## Environment Catalog
@@ -124,15 +128,15 @@ validation for team-ready environments.
 
 SQLite is no longer the product target for new daily workflows. It remains a
 compatibility path for old local runs, legacy Evidence import, and tests that
-exercise historical behavior while the PostgreSQL Store is being rolled in.
+exercise historical behavior while the SQL Store path is being rolled in.
 
 Do not add new daily testing behavior that only works with SQLite.
 Daily execution/report commands must not create a hidden SQLite runtime when
-the selected Store is PostgreSQL. The inverse also holds for compatibility
+the selected Store is PostgreSQL or MySQL. The inverse also holds for compatibility
 runs: a command uses the selected Store engine end to end, and missing Store
 configuration fails with guidance instead of switching to another engine.
 
-## PostgreSQL-only Validation
+## SQL Store Validation
 
 Release and environment verification can hard-disable SQLite Store usage:
 
@@ -140,18 +144,22 @@ Release and environment verification can hard-disable SQLite Store usage:
 OTSANDBOX_DISABLE_SQLITE_STORE=1 \
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" \
 npm run smoke:frontend
+
+OTSANDBOX_DISABLE_SQLITE_STORE=1 \
+OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+npm run smoke:frontend
 ```
 
 When this flag is set, any accidental SQLite Store open fails immediately.
 This is the repeatable equivalent of taking the local SQLite path offline before
 running the core workflow. When `OTSANDBOX_SMOKE_STORE_DSN` is present, the smoke
 harness configures a temporary named Store, selects it as active, upgrades the
-schema, and serves the workbench through `--store smoke-postgres`. The smoke
-must still complete through that PostgreSQL Store.
+schema, and serves the workbench through that named Store. The smoke must still
+complete through the selected PostgreSQL or MySQL Store.
 
 Smoke topology collection uses a deterministic synthetic SkyWalking GraphQL
 provider unless `OTS_TRACE_GRAPHQL_URL` is set. That provider is only a local
-wiring check: it proves PostgreSQL Store writes, Evidence lookup, and topology
+wiring check: it proves SQL Store writes, Evidence lookup, and topology
 rendering semantics, but it is not release evidence for a real SkyWalking
 deployment. Set `OTS_TRACE_GRAPHQL_URL` and `OTS_SMOKE_TRACE_IDS`
 step-to-trace mappings when pointing smoke at an external SkyWalking endpoint.

@@ -76,11 +76,12 @@ async function closeServer(server) {
 }
 
 function runOTS(args, env) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("./bin/otsandbox.sh", args, {
-      cwd: rootDir,
-      env: { ...process.env, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
+	return new Promise((resolve, reject) => {
+		const command = env.OTSANDBOX_CLI_BIN || "./bin/otsandbox.sh";
+		const child = spawn(command, args, {
+			cwd: rootDir,
+			env: { ...process.env, ...env },
+			stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
@@ -94,7 +95,29 @@ function runOTS(args, env) {
       }
       reject(new Error(`otsandbox ${args.join(" ")} failed with ${code}\n${stdout}\n${stderr}`));
     });
-  });
+	});
+}
+
+function buildCLI(outputPath) {
+	return new Promise((resolve, reject) => {
+		const child = spawn("go", ["build", "-o", outputPath, "./cmd/otsandbox"], {
+			cwd: rootDir,
+			env: process.env,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdout = "";
+		let stderr = "";
+		child.stdout.on("data", (chunk) => { stdout += chunk; });
+		child.stderr.on("data", (chunk) => { stderr += chunk; });
+		child.on("error", reject);
+		child.on("close", (code) => {
+			if (code === 0) {
+				resolve();
+				return;
+			}
+			reject(new Error(`go build ./cmd/otsandbox failed with ${code}\n${stdout}\n${stderr}`));
+		});
+	});
 }
 
 async function runJSON(args, env) {
@@ -115,21 +138,24 @@ function assertCount(payload, key, expected, label) {
 
 async function main() {
   const dsn = requiredSQLStoreDSN();
-  const backend = storeBackend(dsn);
-  const storeName = backend === "mysql" ? "active-mysql" : "active-pg";
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-cli-pg-smoke-"));
+	const backend = storeBackend(dsn);
+	const storeName = backend === "mysql" ? "active-mysql" : "active-pg";
+	const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-cli-pg-smoke-"));
   const targetPort = await freePort();
   let targetServer;
   let traceProvider;
   try {
     targetServer = await startTargetServer(targetPort);
-    traceProvider = await prepareSmokeTraceProvider();
-    const profileDir = await writeSmokeProfile(tempDir, targetPort);
-    const env = {
-      OTSANDBOX_CONFIG_HOME: path.join(tempDir, "config"),
-      OTSANDBOX_DISABLE_SQLITE_STORE: "1",
-      OTS_TRACE_GRAPHQL_URL: traceProvider.graphQLURL,
-    };
+		traceProvider = await prepareSmokeTraceProvider();
+		const profileDir = await writeSmokeProfile(tempDir, targetPort);
+		const cliBin = path.join(tempDir, "otsandbox");
+		await buildCLI(cliBin);
+		const env = {
+			OTSANDBOX_CONFIG_HOME: path.join(tempDir, "config"),
+			OTSANDBOX_CLI_BIN: cliBin,
+			OTSANDBOX_DISABLE_SQLITE_STORE: "1",
+			OTS_TRACE_GRAPHQL_URL: traceProvider.graphQLURL,
+		};
     await mkdir(env.OTSANDBOX_CONFIG_HOME, { recursive: true });
 
     await runOTS(["store", "config", "set", storeName, "--url", dsn], env);
@@ -182,7 +208,10 @@ async function main() {
         "--json",
       ], env);
       try {
-        assertSkyWalkingTopologyEvidence(topology?.traceTopology, { traceID: step.traceID });
+        const storedTopology = topology?.traceTopology?.topologyJson
+          ? JSON.parse(topology.traceTopology.topologyJson)
+          : topology?.traceTopology || topology?.topology;
+        assertSkyWalkingTopologyEvidence(storedTopology, { traceID: step.traceID });
       } catch (error) {
         throw new Error(`trace topology did not persist SkyWalking data for ${step.id}: ${JSON.stringify(topology)}`);
       }

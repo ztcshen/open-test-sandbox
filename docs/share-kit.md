@@ -51,15 +51,19 @@ cd open-test-sandbox
 npm ci
 OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
+# MySQL Store can be used for the same smoke shape:
+OTSANDBOX_DEMO_STORE="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run demo:api-case
+OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
 ```
 
 What to point out:
 
 - `demo:api-case` starts a temporary local HTTP service and writes Evidence
-  indexes to the active PostgreSQL Store or `OTSANDBOX_DEMO_STORE=postgres://...`.
-- `release-check` requires a PostgreSQL smoke Store DSN, then runs guardrails,
-  Go tests, the demo, the React build, active PostgreSQL CLI smoke, and
-  PostgreSQL-only headless browser smoke tests.
+  indexes to the active PostgreSQL/MySQL Store or an explicit
+  `OTSANDBOX_DEMO_STORE=postgres://...` / `mysql://...`.
+- `release-check` requires a PostgreSQL or MySQL smoke Store DSN, then runs
+  guardrails, Go tests, the demo, the React build, active SQL Store CLI smoke,
+  and SQL Store headless browser smoke tests.
 - Live SkyWalking validation is a stricter sign-off mode: set
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` with mappings for every workflow step from `step-01`
@@ -70,9 +74,10 @@ What to point out:
 讲解重点：
 
 - `demo:api-case` 会启动临时本地 HTTP 服务，并把 Evidence 索引写入 active
-  PostgreSQL Store 或 `OTSANDBOX_DEMO_STORE=postgres://...`。
-- `release-check` 要求提供 PostgreSQL smoke Store DSN，然后运行守卫、Go 测试、
-  demo、React build、active PostgreSQL CLI smoke 和 PostgreSQL-only 无头浏览器冒烟。
+  PostgreSQL/MySQL Store 或显式 `OTSANDBOX_DEMO_STORE=postgres://...` /
+  `mysql://...`。
+- `release-check` 要求提供 PostgreSQL 或 MySQL smoke Store DSN，然后运行守卫、
+  Go 测试、demo、React build、active SQL Store CLI smoke 和 SQL Store 无头浏览器冒烟。
 - 真实 SkyWalking 验证是更严格的 sign-off 模式：设置
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`、`OTS_TRACE_GRAPHQL_URL` 和
   `OTS_SMOKE_TRACE_IDS`，并覆盖 `step-01` 到 `step-10` 的每一步；否则 demo

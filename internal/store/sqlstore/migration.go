@@ -294,14 +294,14 @@ create table if not exists service_config_assets (
   sha256 %s not null,
   size_bytes %s not null,
   apply_order %s not null,
-  sensitive %s not null,
+  %s %s not null,
   summary_json %s not null,
   created_at %s not null,
   updated_at %s not null,
   primary key (env_id, service_id, asset_id),
   foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
   foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, keyText, keyText, keyText, keyText, keyText, text, text, jsonType, text, intType, intType, boolType, jsonType, timeType, timeType),
+);`, keyText, keyText, keyText, keyText, keyText, text, text, jsonType, text, intType, intType, d.QuoteIdent("sensitive"), boolType, jsonType, timeType, timeType),
 		d.CreateIndexSQL("idx_service_config_assets_target", "service_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
 		d.CreateIndexSQL("idx_service_config_assets_service_order", "service_config_assets", []string{"env_id", "service_id", "apply_order", "asset_id"}),
 		fmt.Sprintf(`
@@ -334,14 +334,14 @@ create table if not exists component_config_assets (
   sha256 %s not null,
   size_bytes %s not null,
   apply_order %s not null,
-  sensitive %s not null,
+  %s %s not null,
   summary_json %s not null,
   created_at %s not null,
   updated_at %s not null,
   primary key (env_id, owner_component_id, asset_id),
   foreign key (env_id, owner_component_id) references environment_components(env_id, component_id) on delete cascade,
   foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, keyText, keyText, keyText, keyText, keyText, text, text, jsonType, text, intType, intType, boolType, jsonType, timeType, timeType),
+);`, keyText, keyText, keyText, keyText, keyText, text, text, jsonType, text, intType, intType, d.QuoteIdent("sensitive"), boolType, jsonType, timeType, timeType),
 		d.CreateIndexSQL("idx_component_config_assets_target", "component_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
 		d.CreateIndexSQL("idx_component_config_assets_owner_order", "component_config_assets", []string{"env_id", "owner_component_id", "apply_order", "asset_id"}),
 	}

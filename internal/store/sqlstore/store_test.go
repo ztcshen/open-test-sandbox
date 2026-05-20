@@ -183,7 +183,7 @@ func TestStoreListsLatestAPICaseRunsThroughDatabaseSQL(t *testing.T) {
 		t.Fatalf("latest case runs = %#v", caseRuns)
 	}
 	query := state.lastQuery(t)
-	if !strings.Contains(query.query, "row_number() over (partition by case_id order by created_at desc, id desc)") || !strings.Contains(query.query, "where row_number = 1") {
+	if !strings.Contains(query.query, "row_number() over (partition by case_id order by created_at desc, id desc)") || !strings.Contains(query.query, "where rn = 1") {
 		t.Fatalf("latest case run query = %s", query.query)
 	}
 }

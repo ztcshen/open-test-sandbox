@@ -21,11 +21,14 @@ npm ci
 ./bin/otsandbox.sh version
 OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
+# MySQL Store is also supported:
+OTSANDBOX_DEMO_STORE="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run demo:api-case
+OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
 ```
 
-The release check requires a PostgreSQL smoke Store DSN. It runs Go tests, the
-source-domain guardrail, the React build, active PostgreSQL CLI smoke, and a
-PostgreSQL-only headless browser smoke test against a generated generic import
+The release check requires a PostgreSQL or MySQL smoke Store DSN. It runs Go
+tests, the source-domain guardrail, the React build, active SQL Store CLI
+smoke, and a SQL Store headless browser smoke test against a generated generic import
 bundle. For final live topology sign-off, add
 `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
 `OTS_SMOKE_TRACE_IDS` with trace id mappings for every workflow step from
@@ -33,12 +36,13 @@ bundle. For final live topology sign-off, add
 synthetic SkyWalking provider or a partial trace-id set.
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active PostgreSQL Store
-or `OTSANDBOX_DEMO_STORE=postgres://...`, and prints the Evidence bundle path.
+or MySQL Store, or `OTSANDBOX_DEMO_STORE=postgres://...` /
+`OTSANDBOX_DEMO_STORE=mysql://...`, and prints the Evidence bundle path.
 Demo output is kept under the system temp directory so you can inspect it after
 the command exits. Set `OTSANDBOX_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.
 
-## Configure a PostgreSQL Store
+## Configure a SQL Store
 
 ```sh
 ./bin/otsandbox.sh store config set local-personal \
@@ -47,11 +51,18 @@ automatically.
 ./bin/otsandbox.sh store status --store local-personal
 ./bin/otsandbox.sh store upgrade --store local-personal
 ./bin/otsandbox.sh store ddl --backend postgres > otsandbox-schema.sql
+
+./bin/otsandbox.sh store config set company-mysql \
+  --url "mysql://user:pass@host:3306/otsandbox_local?tls=false"
+./bin/otsandbox.sh store use company-mysql
+./bin/otsandbox.sh store status --store company-mysql
+./bin/otsandbox.sh store upgrade --store company-mysql
+./bin/otsandbox.sh store ddl --backend mysql > otsandbox-mysql-schema.sql
 ```
 
-Use a private PostgreSQL database for unverified local work and a separate
-shared database for verified team environments. SQLite is kept only for legacy
-compatibility while PostgreSQL rollout continues.
+Use a private PostgreSQL or MySQL database for unverified local work and a
+separate shared database for verified team environments. SQLite is kept only
+for legacy compatibility while SQL Store rollout continues.
 The Open Test Sandbox Store is the control-plane database and should already
 exist outside any Docker environment restored for a tested target. Do not point
 the Store DSN at a Docker database that `environment restore` is responsible
@@ -59,8 +70,9 @@ for starting; business databases used by the tested services belong to the
 target environment, while the sandbox Store remains independent.
 
 Daily discovery commands do not change when you switch between a local
-PostgreSQL Store and a remote team PostgreSQL Store. Use `store use NAME` to
-change the active Store, or `--store NAME_OR_DSN` for a one-off read:
+PostgreSQL Store, a remote team PostgreSQL Store, and a team MySQL Store. Use
+`store use NAME` to change the active Store, or `--store NAME_OR_DSN` for a
+one-off read:
 
 ```sh
 ./bin/otsandbox.sh case discover --filter "login"
@@ -97,16 +109,16 @@ endpoint before publishing a verified environment.
 `environment restore` is anchored to the environment's verification workflow,
 for example the team core 10-step workflow. It prepares the local machine from
 the Store-backed environment facts instead of acting as a generic Docker
-launcher. PostgreSQL stores compact source pointers and restore rules, not
+launcher. The SQL Store stores compact source pointers and restore rules, not
 source archives, Docker images, logs, or Evidence payloads. For
-PostgreSQL-backed one-click environments, source pointers must be cloneable
+SQL Store-backed one-click environments, source pointers must be cloneable
 remote Git URLs, including private GitLab and public GitHub repositories. Local
 paths are reserved for SQLite compatibility tests and ad-hoc development, not
 published one-click environments. The optional environment package repository
 contains the Compose files and validation assets; service repositories contain
 the business code mounted or built by Compose. Small service-adjacent cert/key
 material can be stored as bounded, redacted environment metadata when it is
-required for startup, but large source/runtime artifacts stay outside PG. By
+required for startup, but large source/runtime artifacts stay outside the Store. By
 default restore is a dry run: it resolves the optional package and service
 checkouts under `--workspace`, shows Git clone commands when sources are
 recorded, and prints preflight tool checks, Docker Compose pull/build/up
@@ -141,7 +153,7 @@ file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
 
 The restore report also includes `readiness`, the final pre-Docker review gate
-for a colleague-machine simulation. It checks that the sandbox PostgreSQL Store
+for a colleague-machine simulation. It checks that the sandbox SQL Store
 is outside the target Docker environment, the restore is anchored to a
 verification workflow, all recorded service repositories can be cloned or
 validated before Docker, a Compose/start plan exists, recorded Compose services

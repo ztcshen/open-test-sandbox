@@ -233,7 +233,10 @@ The backend writes runtime artifacts that must not be committed:
 
 ## Current Boundaries / 当前边界
 
-- PostgreSQL is the active product Store for personal and team workflows. PostgreSQL 是个人与团队工作流的当前产品主路径 Store。
+- SQL Store is the active product Store for personal and team workflows:
+  PostgreSQL by default, and MySQL for teams whose test environments require it.
+  SQL Store 是个人与团队工作流的当前产品主路径 Store：默认 PostgreSQL，也支持以
+  MySQL 作为公司测试环境主库。
 - SQLite is retained for legacy migration, compatibility, and tests, not new daily workflows. SQLite 仅保留给旧数据迁移、兼容和测试，不作为新的日常工作流主路径。
 - Daily CLI/API operations use the active Store or `--store NAME_OR_DSN`; they
   do not maintain hidden Store engines for routine work. 日常 CLI/API 操作使用 active
@@ -241,13 +244,13 @@ The backend writes runtime artifacts that must not be committed:
 - Verified Environment Catalog discovery is an acceptance surface, not a raw
   registration list. 环境目录的 verified 发现是验收面，不是原始登记列表。
 - Docker cleanup for clean-machine simulation is scoped to recorded target
-  Compose projects only; the sandbox control-plane PostgreSQL Store must remain
-  outside the restored Docker target environment. 干净机器模拟的 Docker 清理只作用于已登记的目标 Compose 项目；沙箱控制面的 PostgreSQL Store 必须位于被恢复的目标 Docker 环境之外。
-- PostgreSQL one-click environment restore pulls business service code from
+  Compose projects only; the sandbox control-plane SQL Store must remain
+  outside the restored Docker target environment. 干净机器模拟的 Docker 清理只作用于已登记的目标 Compose 项目；沙箱控制面的 SQL Store 必须位于被恢复的目标 Docker 环境之外。
+- SQL Store one-click environment restore pulls business service code from
   remote Git repositories and writes only compact Store-backed startup files
   into the restore workspace before Docker starts. It must not require a
   separate local environment package repository as the daily restore source.
-  PostgreSQL 一键环境恢复从远程 Git 拉业务服务代码，并在 Docker 启动前只把紧凑的 Store 启动文件写入恢复工作区；日常恢复源不应要求单独的本地环境包仓库。
+  SQL Store 一键环境恢复从远程 Git 拉业务服务代码，并在 Docker 启动前只把紧凑的 Store 启动文件写入恢复工作区；日常恢复源不应要求单独的本地环境包仓库。
 - Import Bundle bundles are external configuration source, not core code. 配置包是外部配置源，不是核心代码。
 - HTML reports are temporary local artifacts. HTML 报告是本地临时产物。
 - Reports may contain failed cases; report generation success means the

@@ -2719,7 +2719,7 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 		}
 		addItem("component-startup-plan", true, report.ComponentStartupPlan.OK, startupDetail)
 	} else if report.SourcePolicy.RemoteOnly {
-		addItem("component-graph", true, false, "PostgreSQL one-click Docker restore requires a Store component graph for services, middleware, mocks, observability, dependencies, assets, and health gates")
+		addItem("component-graph", true, false, "SQL Store one-click Docker restore requires a Store component graph for services, middleware, mocks, observability, dependencies, assets, and health gates")
 	} else {
 		addItem("component-graph", false, true, "no Store component graph recorded yet; restore will use legacy service and compose metadata")
 	}
@@ -2733,7 +2733,7 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 		addItem("docker-container-conflicts", true, true, "no existing Docker container_name conflicts detected for non-destructive restore")
 	}
 	if report.SourcePolicy.RemoteOnly {
-		detail := "all service source repositories must be remote Git URLs for PostgreSQL-backed one-click environments; environment startup files come from compact Store metadata"
+		detail := "all service source repositories must be remote Git URLs for SQL Store-backed one-click environments; environment startup files come from compact Store metadata"
 		if len(report.SourcePolicy.Violations) > 0 {
 			detail = strings.Join(report.SourcePolicy.Violations, "; ")
 		}
@@ -2874,7 +2874,7 @@ func environmentRestoreStoreStartupFilesReady(compose map[string]any) (bool, str
 		}
 	}
 	if len(missing) > 0 {
-		return false, "PostgreSQL restore must write compose startup files from compact Store metadata; missing generatedFiles for: " + strings.Join(missing, ", ")
+		return false, "SQL Store restore must write compose startup files from compact Store metadata; missing generatedFiles for: " + strings.Join(missing, ", ")
 	}
 	return true, fmt.Sprintf("%d compose startup file(s) will be generated from Store metadata", len(composeFiles))
 }
@@ -6039,7 +6039,7 @@ func initProfileBundle(outputPath string, profileID string, displayName string, 
 	}
 	readmePath := filepath.Join(outputPath, "README.md")
 	if _, err := os.Stat(readmePath); errors.Is(err, os.ErrNotExist) || force {
-		body := "# External Profile Bundle\n\nPublish this bundle into the selected PostgreSQL Store before serving it through Open Test Sandbox:\n\n```sh\notsandbox store use local-personal\notsandbox config publish --from . --store local-personal\notsandbox serve --profile . --store local-personal\n```\n"
+		body := "# External Profile Bundle\n\nPublish this bundle into the selected PostgreSQL or MySQL Store before serving it through Open Test Sandbox:\n\n```sh\notsandbox store use local-personal\notsandbox config publish --from . --store local-personal\notsandbox serve --profile . --store local-personal\n```\n"
 		if err := os.WriteFile(readmePath, []byte(body), 0o644); err != nil {
 			return profileInitReport{}, err
 		}

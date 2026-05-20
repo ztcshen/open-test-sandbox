@@ -77,7 +77,7 @@ type Store struct {
 
 func Open(ctx context.Context, cfg Config) (*Store, error) {
 	if sqliteStoreDisabled() {
-		return nil, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL Store for this run")
+		return nil, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL or MySQL Store for this run")
 	}
 	s, err := openRaw(ctx, cfg)
 	if err != nil {
@@ -102,7 +102,7 @@ func (r SchemaStatusResult) HasPending() bool {
 
 func SchemaStatus(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
 	if sqliteStoreDisabled() {
-		return SchemaStatusResult{}, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL Store for this run")
+		return SchemaStatusResult{}, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL or MySQL Store for this run")
 	}
 	s, err := openRaw(ctx, cfg)
 	if err != nil {
@@ -114,7 +114,7 @@ func SchemaStatus(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
 
 func UpgradeSchema(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
 	if sqliteStoreDisabled() {
-		return SchemaStatusResult{}, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL Store for this run")
+		return SchemaStatusResult{}, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL or MySQL Store for this run")
 	}
 	s, err := openRaw(ctx, cfg)
 	if err != nil {

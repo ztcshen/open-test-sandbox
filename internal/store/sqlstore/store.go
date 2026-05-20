@@ -122,11 +122,11 @@ func (s *Store) ListLatestAPICaseRuns(ctx context.Context) ([]store.APICaseRun, 
 select id, run_id, case_id, status, request_summary_json, assertion_summary_json, started_at, finished_at, created_at
 from (
   select id, run_id, case_id, status, request_summary_json, assertion_summary_json, started_at, finished_at, created_at,
-    row_number() over (partition by case_id order by created_at desc, id desc) as row_number
+    row_number() over (partition by case_id order by created_at desc, id desc) as rn
   from api_case_runs
   where case_id <> ''
 ) latest
-where row_number = 1
+where rn = 1
 order by created_at, id;`)
 	if err != nil {
 		return nil, err
@@ -595,9 +595,9 @@ insert into component_dependencies (
 		query := fmt.Sprintf(`
 insert into component_config_assets (
   env_id, owner_component_id, asset_id, asset_kind, target_component_id, target_path,
-  content_inline, remote_ref_json, sha256, size_bytes, apply_order, sensitive,
+  content_inline, remote_ref_json, sha256, size_bytes, apply_order, %s,
   summary_json, created_at, updated_at
-) values (%s);`, s.bindVars(15))
+) values (%s);`, s.dialect.QuoteIdent("sensitive"), s.bindVars(15))
 		if _, err := tx.ExecContext(ctx, query,
 			envID, asset.OwnerComponentID, asset.AssetID, asset.AssetKind, asset.TargetComponentID, asset.TargetPath,
 			asset.ContentInline, stringDefault(asset.RemoteRefJSON, "{}"), asset.SHA256, asset.SizeBytes, asset.ApplyOrder, asset.Sensitive,
@@ -657,11 +657,11 @@ order by consumer_component_id, provider_component_id, phase, capability;`, s.di
 	}
 	assetRows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
 select env_id, owner_component_id, asset_id, asset_kind, target_component_id, target_path,
-  content_inline, remote_ref_json, sha256, size_bytes, apply_order, sensitive,
+  content_inline, remote_ref_json, sha256, size_bytes, apply_order, %s,
   summary_json, created_at, updated_at
 from component_config_assets
 where env_id = %s
-order by owner_component_id, apply_order, asset_id;`, s.dialect.BindVar(1)), envID)
+order by owner_component_id, apply_order, asset_id;`, s.dialect.QuoteIdent("sensitive"), s.dialect.BindVar(1)), envID)
 	if err != nil {
 		return store.EnvironmentComponentGraph{}, err
 	}

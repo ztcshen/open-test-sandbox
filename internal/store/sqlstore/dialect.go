@@ -92,7 +92,7 @@ func (PostgresDialect) TableExistsSQL(tableName string) string {
 	return fmt.Sprintf(`select case when exists (
   select 1 from information_schema.tables
   where table_schema = current_schema() and table_name = %s
-) then 1 else 0 end as exists`, sqlLiteral(tableName))
+) then 1 else 0 end as table_exists`, sqlLiteral(tableName))
 }
 func (d PostgresDialect) CreateIndexSQL(indexName string, tableName string, columns []string) string {
 	return standardCreateIndexSQL(d, indexName, tableName, columns)
@@ -126,7 +126,7 @@ func (MySQLDialect) TableExistsSQL(tableName string) string {
 	return fmt.Sprintf(`select case when exists (
   select 1 from information_schema.tables
   where table_schema = database() and table_name = %s
-) then 1 else 0 end as exists`, sqlLiteral(tableName))
+) then 1 else 0 end as table_exists`, sqlLiteral(tableName))
 }
 func (d MySQLDialect) CreateIndexSQL(indexName string, tableName string, columns []string) string {
 	return fmt.Sprintf("create index %s\n  on %s(%s);", d.QuoteIdent(indexName), d.QuoteIdent(tableName), quoteColumnList(d, columns))
@@ -152,7 +152,7 @@ func (SQLiteDialect) TableExistsSQL(tableName string) string {
 	return fmt.Sprintf(`select case when exists (
   select 1 from sqlite_master
   where type = 'table' and name = %s
-) then 1 else 0 end as exists`, sqlLiteral(tableName))
+) then 1 else 0 end as table_exists`, sqlLiteral(tableName))
 }
 func (d SQLiteDialect) CreateIndexSQL(indexName string, tableName string, columns []string) string {
 	return standardCreateIndexSQL(d, indexName, tableName, columns)

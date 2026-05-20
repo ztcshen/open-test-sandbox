@@ -152,7 +152,7 @@ func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
 		"content_inline text not null",
 		"remote_ref_json jsonb not null",
 		"size_bytes integer not null",
-		"sensitive boolean not null",
+		`"sensitive" boolean not null`,
 		"idx_service_config_assets_target",
 		"idx_service_config_assets_service_order",
 		"create table if not exists component_dependencies",
