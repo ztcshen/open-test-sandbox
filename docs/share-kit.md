@@ -19,13 +19,16 @@ HTML/JSON reports.**
 ## Short Description / 短介绍
 
 Open Test Sandbox lets teams keep test assets in external import bundle bundles,
-publish them into a selected PostgreSQL Store, run API cases or workflows, and
-inspect failed cases through Evidence-rich reports. Agents can discover
-runnable targets before executing reports, so prompts do not need hardcoded ids.
+publish them into a selected SQL Store, run API cases or workflows, and inspect
+failed cases through Evidence-rich reports. PostgreSQL is the default Store
+backend, and MySQL is supported for teams whose test environments require it.
+Agents can discover runnable targets before executing reports, so prompts do
+not need hardcoded ids.
 
 Open Test Sandbox 让团队把测试资产维护在外部 import bundle bundle 中，发布到本地
-或团队选择的 PostgreSQL Store 后执行 API 用例或工作流，并通过包含 Evidence 的报告
-审阅失败用例。agent 可以先发现可测目标，再执行报告，因此提示词不需要写死 ID。
+或团队选择的 SQL Store 后执行 API 用例或工作流，并通过包含 Evidence 的报告
+审阅失败用例。PostgreSQL 是默认 Store 后端；当团队测试环境需要 MySQL 时，也支持
+MySQL Store。agent 可以先发现可测目标，再执行报告，因此提示词不需要写死 ID。
 
 ## Longer Pitch / 较完整介绍
 

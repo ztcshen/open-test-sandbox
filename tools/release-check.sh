@@ -111,9 +111,14 @@ step "running smoke harness tests"
 node --test tools/examples/*.test.mjs tools/smoke/*.test.mjs
 
 step "running active SQL Store CLI smoke tests"
-npm run smoke:cli:pg-active
+npm run smoke:cli:sql-active
+
+if [[ "$smoke_store_dsn" =~ ^mysql:// ]]; then
+  step "running MySQL Store API smoke tests"
+  OTSANDBOX_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
+fi
 
 step "running active SQL Store browser smoke tests"
-npm run smoke:frontend:pg-only
+npm run smoke:frontend:sql-active
 
 step "release check passed"

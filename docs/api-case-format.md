@@ -105,12 +105,11 @@ records:
 
 The profile id comes from `--profile` and defaults to `default`. Store indexing
 does not replace the Evidence bundle; it makes local runs searchable and
-connects them to the active PostgreSQL Store, import bundle, or workflow
-records.
+connects them to the active SQL Store, import bundle, or workflow records.
 
 The deprecated compatibility flag `--store-url` is reserved for migration and
-legacy compatibility paths. Daily PostgreSQL Store-first usage should use an
-active named Store or `--store NAME_OR_DSN`.
+legacy compatibility paths. Daily SQL Store-first usage should use an active
+named Store or `--store NAME_OR_DSN`.
 
 ## Async Batch Runs
 

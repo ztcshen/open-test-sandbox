@@ -135,3 +135,48 @@ Remaining gaps:
   company's real MySQL test environment DSN.
 - Full release-check needs the existing source-domain guardrail violation
   cleaned up or scoped before this goal can be marked complete.
+
+## 2026-05-20 MySQL Release Gate Wiring Slice
+
+Progress: `[##################--] 92%`
+
+Implemented:
+
+- Updated `tools/release-check.sh` so the release gate uses SQL Store smoke
+  script names rather than PostgreSQL-only aliases.
+- Added a MySQL-specific release-check branch that runs
+  `npm run smoke:api:mysql-store` when `OTSANDBOX_SMOKE_STORE_DSN` is a
+  `mysql://` DSN.
+- Removed the old `smoke:cli:pg-active` and `smoke:frontend:pg-only` package
+  aliases; the active scripts are now `smoke:cli:sql-active`,
+  `smoke:frontend:sql-active`, and `smoke:api:mysql-store`.
+- Updated public direction docs and the visual capability overview so the
+  daily path is SQL Store-first: PostgreSQL remains the default product Store,
+  and MySQL is a supported Store for teams whose test environments require it.
+
+Validated:
+
+- `bash -n tools/release-check.sh`
+- `OTSANDBOX_MYSQL_API_SMOKE_DSN='mysql://root:...@127.0.0.1:54160/otsandbox_api_smoke?tls=false' npm run smoke:api:mysql-store`
+- `node --test tools/smoke/control-plane-smoke.test.mjs`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- Targeted docs/script scan found no remaining references to
+  `smoke:cli:pg-active`, `smoke:frontend:pg-only`, PostgreSQL-only smoke
+  wording, or PostgreSQL-only Store schema wording in the primary public docs.
+
+Release-check status:
+
+- MySQL `npm run release-check` still stops at
+  `tools/guardrails/check_no_source_domain_core.sh` before it reaches the smoke
+  stages, because of existing source-domain terms in private validation/progress
+  material and one control-plane mapping helper. The MySQL API smoke is now
+  wired into the release gate for the point after that guardrail is resolved.
+
+Remaining gaps:
+
+- Clean up or scope the existing source-domain guardrail blocker so a full
+  MySQL `npm run release-check` can reach and execute the CLI, API, and browser
+  smoke stages.
+- Run the same MySQL contract, CLI active Store smoke, API Store smoke, and
+  full release gate against the company's real MySQL test environment DSN.

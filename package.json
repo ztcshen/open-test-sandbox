@@ -11,9 +11,8 @@
     "release-check": "bash tools/release-check.sh",
     "smoke:api:mysql-store": "OTSANDBOX_DISABLE_SQLITE_STORE=1 node tools/smoke/mysql-store-api-smoke.mjs",
     "smoke:cli:sql-active": "OTSANDBOX_DISABLE_SQLITE_STORE=1 node tools/smoke/cli-active-store-smoke.mjs",
-    "smoke:cli:pg-active": "npm run smoke:cli:sql-active",
     "smoke:frontend": "OTSANDBOX_DISABLE_SQLITE_STORE=1 node tools/smoke/control-plane-smoke.mjs",
-    "smoke:frontend:pg-only": "OTSANDBOX_DISABLE_SQLITE_STORE=1 node tools/smoke/control-plane-smoke.mjs",
+    "smoke:frontend:sql-active": "npm run smoke:frontend",
     "test:frontend": "node --test control-plane/frontend/src/*.test.mjs",
     "test": "go test ./..."
   },
