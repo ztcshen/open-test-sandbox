@@ -607,20 +607,30 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	if id == "" {
 		return errors.New("environment id is required")
 	}
-	env, err := loadEnvironmentForCLI(ctx, *storeRef, *storeURL, id)
+	env, componentGraph, err := loadEnvironmentAndComponentGraphForCLI(ctx, *storeRef, *storeURL, id)
 	if err != nil {
 		return err
+	}
+	bootstrapPlan := controlplane.EnvironmentBootstrapPlan(env)
+	componentReadiness := environmentRestoreComponentGraphReport(env.ID, componentGraph)
+	bootstrapPlan["componentGraph"] = componentReadiness
+	if restorePlan, ok := bootstrapPlan["restore"].(map[string]any); ok {
+		restorePlan["componentGraph"] = componentReadiness
 	}
 	payload := map[string]any{
 		"ok":          true,
 		"environment": environmentPayload(env),
-		"plan":        controlplane.EnvironmentBootstrapPlan(env),
+		"plan":        bootstrapPlan,
 	}
 	if *jsonOutput {
 		return writeIndentedJSON(payload)
 	}
 	fmt.Printf("Environment Bootstrap Plan: %s\n", env.ID)
 	fmt.Printf("Verification Workflow: %s\n", env.VerificationWorkflowID)
+	fmt.Printf("Component Restore-ready: %t\n", componentReadiness.OK)
+	if len(componentReadiness.BlockingOrder) > 0 {
+		fmt.Printf("Component Blocking Order: %s\n", strings.Join(componentReadiness.BlockingOrder, " -> "))
+	}
 	fmt.Printf("Repos: %s\n", env.ReposJSON)
 	fmt.Printf("Compose: %s\n", env.ComposeJSON)
 	return nil
@@ -4158,6 +4168,23 @@ func loadEnvironmentForCLI(ctx context.Context, storeRef string, legacyStoreURL 
 	}
 	defer cleanup()
 	return runtime.GetEnvironment(ctx, id)
+}
+
+func loadEnvironmentAndComponentGraphForCLI(ctx context.Context, storeRef string, legacyStoreURL string, id string) (store.Environment, store.EnvironmentComponentGraph, error) {
+	runtime, cleanup, err := openRequiredCLIStore(ctx, storeRef, legacyStoreURL)
+	if err != nil {
+		return store.Environment{}, store.EnvironmentComponentGraph{}, err
+	}
+	defer cleanup()
+	env, err := runtime.GetEnvironment(ctx, id)
+	if err != nil {
+		return store.Environment{}, store.EnvironmentComponentGraph{}, err
+	}
+	graph, err := runtime.GetEnvironmentComponentGraph(ctx, id)
+	if err != nil {
+		return store.Environment{}, store.EnvironmentComponentGraph{}, err
+	}
+	return env, graph, nil
 }
 
 func printEnvironmentCommandResult(env store.Environment, jsonOutput bool) error {

@@ -1687,6 +1687,52 @@ func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
 	}
 }
 
+func TestEnvironmentBootstrapReportsComponentGraphReadiness(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.component.bootstrap-readiness",
+		"--start-command", "true",
+		"--verification-workflow", "workflow.core-10",
+	)
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
+		},
+	}))
+	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.component.bootstrap-readiness")
+	out := runCLI(t, "environment", "bootstrap", "--store", "sqlite://"+storePath, "--json", "env.component.bootstrap-readiness")
+	var payload struct {
+		Plan struct {
+			ComponentGraph struct {
+				OK                   bool     `json:"ok"`
+				BlockingDependencies int      `json:"blockingDependencies"`
+				BlockingOrder        []string `json:"blockingOrder"`
+			} `json:"componentGraph"`
+			Restore struct {
+				ComponentGraph struct {
+					OK            bool     `json:"ok"`
+					BlockingOrder []string `json:"blockingOrder"`
+				} `json:"componentGraph"`
+			} `json:"restore"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode bootstrap component readiness json: %v\n%s", err, out)
+	}
+	if !payload.Plan.ComponentGraph.OK || payload.Plan.ComponentGraph.BlockingDependencies != 1 || strings.Join(payload.Plan.ComponentGraph.BlockingOrder, ",") != "db,app" {
+		t.Fatalf("bootstrap component graph readiness = %#v", payload.Plan.ComponentGraph)
+	}
+	if !payload.Plan.Restore.ComponentGraph.OK || strings.Join(payload.Plan.Restore.ComponentGraph.BlockingOrder, ",") != "db,app" {
+		t.Fatalf("bootstrap restore component graph readiness = %#v", payload.Plan.Restore.ComponentGraph)
+	}
+}
+
 func TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeBin := t.TempDir()

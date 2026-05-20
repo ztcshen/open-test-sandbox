@@ -2230,3 +2230,14 @@ Remote source policy slice:
   24 ordered blocking components, zero blocking cycles, 20 required health
   checks, zero missing health checks, four remote assets, and zero missing
   remote asset refs.
+- 2026-05-20T09:06Z implementation slice: `environment bootstrap` now includes
+  the same component graph restore-readiness summary that `components inspect`
+  exposes. Bootstrap JSON places it at both `plan.componentGraph` and
+  `plan.restore.componentGraph`, so operators can see dependency order, cycle
+  status, component health gate counts, and remote component asset readiness
+  before running `environment restore` or touching Docker.
+- Verified the active `local-pg` bootstrap plan through CLI, not direct SQL.
+  The plan reports component readiness `ok=true`, 24 components,
+  47 dependencies, 41 blocking edges, 6 runtime edges, a 24-component blocking
+  order, zero blocking cycles, 20 required health checks, zero missing health
+  checks, four remote assets, and zero missing remote asset refs.
