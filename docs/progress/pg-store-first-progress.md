@@ -2162,3 +2162,17 @@ Remote source policy slice:
   compose-relative paths. A non-destructive restore plan now reports
   `remoteAssets=4`, `remoteAssetBytes=106813`, and
   `missingRemoteAssetRefs=0`, while keeping inline payload at 27,150 bytes.
+- 2026-05-20T08:32Z implementation slice: remote component assets now have a
+  restore materialization path. During dry-run, restore reports
+  `componentAssets` with `plan-materialize` plus the repo clone action. During
+  `--execute`, restore prepares the remote Git checkout under
+  `.otsandbox/component-assets/<repo-id>` and writes the referenced file into
+  the target workspace path before Docker startup. This keeps large DDL bodies
+  outside PostgreSQL while making them available to Docker on a clean machine.
+- Verified the active `local-pg` environment with a non-destructive restore
+  plan. It reports four remote component assets for the large MySQL DDL files,
+  all `ok=true`, all planned from
+  `git@github-personal:ztcshen/open-test-sandbox-validation.git`, and all
+  targeted under `compose/mysql/init`. The only remaining restore blockers are
+  existing fixed-name Docker container conflicts and the derived Docker start
+  plan block on this already-running machine.

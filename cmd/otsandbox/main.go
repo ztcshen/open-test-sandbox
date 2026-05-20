@@ -837,25 +837,26 @@ func environmentStartupFileSummaryJSON(existing string, files map[string]string)
 }
 
 type environmentRestoreReport struct {
-	OK                   bool                             `json:"ok"`
-	RestoreID            string                           `json:"restoreId"`
-	Executed             bool                             `json:"executed"`
-	EnvironmentID        string                           `json:"environmentId"`
-	VerificationWorkflow string                           `json:"verificationWorkflow"`
-	Workspace            string                           `json:"workspace"`
-	Environment          map[string]any                   `json:"environment,omitempty"`
-	Error                string                           `json:"error,omitempty"`
-	Package              environmentRestorePackageReport  `json:"package,omitempty"`
-	Repos                []environmentRestoreRepoReport   `json:"repos"`
-	SourcePolicy         environmentRestoreSourcePolicy   `json:"sourcePolicy,omitempty"`
-	ComponentGraph       environmentRestoreComponentGraph `json:"componentGraph,omitempty"`
-	Compose              map[string]any                   `json:"compose"`
-	HealthChecks         []any                            `json:"healthChecks"`
-	Preflight            environmentRestorePreflight      `json:"preflight"`
-	Readiness            environmentRestoreReadiness      `json:"readiness"`
-	Docker               environmentRestoreDockerReport   `json:"docker"`
-	Workflow             environmentRestoreWorkflowRun    `json:"workflow"`
-	NextActions          []string                         `json:"nextActions"`
+	OK                   bool                               `json:"ok"`
+	RestoreID            string                             `json:"restoreId"`
+	Executed             bool                               `json:"executed"`
+	EnvironmentID        string                             `json:"environmentId"`
+	VerificationWorkflow string                             `json:"verificationWorkflow"`
+	Workspace            string                             `json:"workspace"`
+	Environment          map[string]any                     `json:"environment,omitempty"`
+	Error                string                             `json:"error,omitempty"`
+	Package              environmentRestorePackageReport    `json:"package,omitempty"`
+	Repos                []environmentRestoreRepoReport     `json:"repos"`
+	SourcePolicy         environmentRestoreSourcePolicy     `json:"sourcePolicy,omitempty"`
+	ComponentGraph       environmentRestoreComponentGraph   `json:"componentGraph,omitempty"`
+	ComponentAssets      []environmentRestoreComponentAsset `json:"componentAssets,omitempty"`
+	Compose              map[string]any                     `json:"compose"`
+	HealthChecks         []any                              `json:"healthChecks"`
+	Preflight            environmentRestorePreflight        `json:"preflight"`
+	Readiness            environmentRestoreReadiness        `json:"readiness"`
+	Docker               environmentRestoreDockerReport     `json:"docker"`
+	Workflow             environmentRestoreWorkflowRun      `json:"workflow"`
+	NextActions          []string                           `json:"nextActions"`
 }
 
 type environmentRestoreSourcePolicy struct {
@@ -881,6 +882,21 @@ type environmentRestoreComponentGraph struct {
 	LargestInlineAssetID    string `json:"largestInlineAssetId,omitempty"`
 	LargestInlineAssetBytes int64  `json:"largestInlineAssetBytes,omitempty"`
 	Error                   string `json:"error,omitempty"`
+}
+
+type environmentRestoreComponentAsset struct {
+	AssetID          string   `json:"assetId"`
+	OwnerComponentID string   `json:"ownerComponentId,omitempty"`
+	SourceURL        string   `json:"sourceUrl,omitempty"`
+	SourcePath       string   `json:"sourcePath,omitempty"`
+	Checkout         string   `json:"checkout,omitempty"`
+	TargetPath       string   `json:"targetPath"`
+	Bytes            int64    `json:"bytes,omitempty"`
+	Action           string   `json:"action"`
+	RepoAction       string   `json:"repoAction,omitempty"`
+	Command          []string `json:"command,omitempty"`
+	OK               bool     `json:"ok"`
+	Error            string   `json:"error,omitempty"`
 }
 
 type environmentRestorePackageReport struct {
@@ -1305,6 +1321,12 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 			report.OK = false
 		}
 		report.Repos = append(report.Repos, item)
+	}
+	report.ComponentAssets = environmentRestoreRemoteComponentAssets(ctx, componentGraph, workspace, execute, pull)
+	for _, item := range report.ComponentAssets {
+		if !item.OK {
+			report.OK = false
+		}
 	}
 	if report.OK && prepareReposOnly {
 		report.Docker = environmentRestoreDockerReport{
@@ -1872,7 +1894,8 @@ func environmentRestoreComponentAssetRemoteRefOK(asset store.ComponentConfigAsse
 	if path == "" {
 		path = strings.TrimSpace(asset.TargetPath)
 	}
-	if path == "" || filepath.IsAbs(path) || strings.HasPrefix(filepath.Clean(path), ".."+string(os.PathSeparator)) {
+	cleanPath := filepath.Clean(path)
+	if path == "" || filepath.IsAbs(path) || cleanPath == "." || cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(os.PathSeparator)) {
 		return false
 	}
 	rawURL := strings.TrimSpace(valueString(ref["url"]))
@@ -1903,6 +1926,92 @@ func environmentRestoreComposeWithComponentAssets(compose map[string]any, graph 
 	}
 	if len(generated) > 0 {
 		out["generatedFiles"] = generated
+	}
+	return out
+}
+
+func environmentRestoreRemoteComponentAssets(ctx context.Context, graph store.EnvironmentComponentGraph, workspace string, execute bool, pull bool) []environmentRestoreComponentAsset {
+	out := []environmentRestoreComponentAsset{}
+	for _, asset := range graph.Assets {
+		if strings.TrimSpace(asset.ContentInline) != "" || strings.TrimSpace(asset.RemoteRefJSON) == "" {
+			continue
+		}
+		ref := jsonObjectString(asset.RemoteRefJSON)
+		sourceURL := strings.TrimSpace(valueString(ref["url"]))
+		sourcePath := strings.TrimSpace(valueString(ref["path"]))
+		if sourcePath == "" {
+			sourcePath = strings.TrimSpace(asset.TargetPath)
+		}
+		checkout := strings.TrimSpace(valueString(ref["checkout"]))
+		if checkout == "" {
+			checkout = filepath.Join(workspace, ".otsandbox", "component-assets", safeReportID(sourceURL))
+		} else if !filepath.IsAbs(checkout) {
+			checkout = filepath.Join(workspace, checkout)
+		}
+		report := environmentRestoreComponentAsset{
+			AssetID:          asset.AssetID,
+			OwnerComponentID: asset.OwnerComponentID,
+			SourceURL:        sourceURL,
+			SourcePath:       sourcePath,
+			Checkout:         checkout,
+			TargetPath:       restoreWorkspacePath(workspace, asset.TargetPath),
+			Bytes:            asset.SizeBytes,
+			Action:           "plan-materialize",
+			OK:               true,
+		}
+		if !environmentRestoreComponentAssetRemoteRefOK(asset) {
+			report.OK = false
+			report.Error = "remote component asset requires remote Git URL plus relative source path"
+			out = append(out, report)
+			continue
+		}
+		if ok, errText := environmentRestoreGeneratedFileTargetOK(asset.TargetPath, workspace); !ok {
+			report.OK = false
+			report.Error = errText
+			out = append(out, report)
+			continue
+		}
+		spec := environmentRestoreRepoSpec{
+			ServiceID: "component-asset-" + safeReportID(asset.AssetID),
+			URL:       sourceURL,
+			Branch:    strings.TrimSpace(valueString(ref["branch"])),
+			Ref:       strings.TrimSpace(valueString(ref["ref"])),
+			Checkout:  checkout,
+		}
+		repo := environmentRestoreRepo(ctx, spec, execute, pull)
+		report.RepoAction = repo.Action
+		report.Command = repo.Command
+		if !repo.OK {
+			report.OK = false
+			report.Error = repo.Error
+			out = append(out, report)
+			continue
+		}
+		if !execute {
+			out = append(out, report)
+			continue
+		}
+		report.Action = "materialize"
+		sourceFile := filepath.Join(checkout, filepath.Clean(sourcePath))
+		raw, err := os.ReadFile(sourceFile)
+		if err != nil {
+			report.OK = false
+			report.Error = err.Error()
+			out = append(out, report)
+			continue
+		}
+		report.Bytes = int64(len(raw))
+		if err := os.MkdirAll(filepath.Dir(report.TargetPath), 0o755); err != nil {
+			report.OK = false
+			report.Error = err.Error()
+			out = append(out, report)
+			continue
+		}
+		if err := os.WriteFile(report.TargetPath, raw, 0o644); err != nil {
+			report.OK = false
+			report.Error = err.Error()
+		}
+		out = append(out, report)
 	}
 	return out
 }

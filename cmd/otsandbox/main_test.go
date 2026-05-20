@@ -1130,6 +1130,56 @@ func TestEnvironmentRestoreRejectsComponentRemoteAssetWithoutRemoteURL(t *testin
 	}
 }
 
+func TestEnvironmentRestoreMaterializesRemoteComponentAsset(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	sourceCheckout := filepath.Join(t.TempDir(), "asset-source")
+	runGit(t, "", "init", "-b", "main", sourceCheckout)
+	writeFile(t, filepath.Join(sourceCheckout, "compose/mysql/init/app.sql"), "create table app_remote (id bigint primary key);\n")
+	runGit(t, sourceCheckout, "add", ".")
+	runGit(t, sourceCheckout, "-c", "user.name=Open Test", "-c", "user.email=open-test@example.com", "commit", "-m", "asset source")
+	runGit(t, sourceCheckout, "remote", "add", "origin", "git@example.com:team/assets.git")
+
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.component.remote-materialize",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, true, false, true, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "app",
+				Kind:            "app",
+				Role:            "business-service",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service","service":"app"}`,
+				SummaryJSON:     `{}`,
+			},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{
+				OwnerComponentID: "app",
+				AssetID:          "app.remote-ddl",
+				AssetKind:        "mysql-ddl",
+				TargetPath:       "compose/mysql/init/app.sql",
+				RemoteRefJSON:    `{"url":"git@example.com:team/assets.git","checkout":"` + filepath.ToSlash(sourceCheckout) + `","path":"compose/mysql/init/app.sql"}`,
+				SizeBytes:        48 * 1024,
+				SummaryJSON:      `{}`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build remote asset materialize report: %v", err)
+	}
+	if !report.OK || len(report.ComponentAssets) != 1 || !report.ComponentAssets[0].OK || report.ComponentAssets[0].Action != "materialize" {
+		t.Fatalf("remote component asset report = %#v", report)
+	}
+	raw, err := os.ReadFile(filepath.Join(workspace, "compose/mysql/init/app.sql"))
+	if err != nil || !strings.Contains(string(raw), "app_remote") {
+		t.Fatalf("remote component asset was not written raw=%q err=%v", raw, err)
+	}
+}
+
 func TestEnvironmentRestorePostgreSQLUsesStoreGeneratedStartupFiles(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeBin := t.TempDir()
