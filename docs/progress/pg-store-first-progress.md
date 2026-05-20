@@ -2480,3 +2480,28 @@ Remote source policy slice:
   `retail-gateway` still exits early during its startup script and needs the
   next evidence pass after the gateway dependency is addressed. The final
   two-step proof has not been run yet.
+- 2026-05-20T11:48Z health-gate main-path slice: after VPN access restored the
+  company Nexus endpoint, the real Docker restore for
+  `scf-chain-core10-local-docker` reached Docker green: 17 sandbox containers
+  running, six business actuator HTTP checks returning 2xx, and no restore
+  health failures. The root cause of the earlier misleading dashboard was not
+  a missing validator; the component graph validator and restore gate existed,
+  but the dashboard and environment acceptance report still read catalog or
+  legacy environment health data instead of the component graph health gates.
+  The main control-plane path now hydrates `/api/dashboard` from matching
+  environment component graph URL gates before marking services healthy, and
+  the async environment acceptance report now includes component graph URL
+  node-health checks. Apollo and WireMock component health gates were updated
+  through `environment components replace` to use their HTTP health endpoints,
+  so the live dashboard at `http://127.0.0.1:58663/api/dashboard` reports
+  `9/9 healthy` with HTTP-backed health semantics rather than container-only
+  state.
+- Verification: focused tests passed for component graph health validation,
+  restore health-check projection, dashboard component-graph HTTP hydration,
+  runtime catalog dashboard hydration, environment API component readiness, and
+  environment acceptance health summaries. `git diff --check` passed and the
+  exact-word guard returned no matches. Progress bar for the new-machine Docker
+  restore goal is now about 96%: Docker restore and dashboard health are green;
+  the remaining proof gap is still the anchored 10-step async workflow
+  acceptance, including 10/10 passed steps, complete Evidence, and real
+  SkyWalking topology, followed by a final fresh two-step clean-machine replay.

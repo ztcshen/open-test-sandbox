@@ -256,10 +256,10 @@ func buildCaseHTTPRequest(ctx context.Context, bundle profile.Bundle, runtime st
 		baseURL = strings.TrimRight(caseBaseURL, "/")
 	}
 	if baseURL == "" {
-		baseURL = serviceBaseURL(ctx, bundle.Services, execution.NodeID)
+		baseURL = catalogServiceBaseURL(ctx, runtime, execution.NodeID)
 	}
 	if baseURL == "" {
-		baseURL = catalogServiceBaseURL(ctx, runtime, execution.NodeID)
+		baseURL = serviceBaseURL(ctx, bundle.Services, execution.NodeID)
 	}
 	if baseURL == "" {
 		return caseHTTPRequest{}, fmt.Errorf("service runtime is not available for %s", execution.NodeID)

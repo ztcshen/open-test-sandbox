@@ -248,6 +248,9 @@ func normalizeEnvironmentComponentHealthCheck(component store.EnvironmentCompone
 	for key, value := range item {
 		normalized[key] = value
 	}
+	if strings.TrimSpace(valueString(normalized["service"])) == "" && strings.TrimSpace(component.ComposeService) != "" {
+		normalized["service"] = strings.TrimSpace(component.ComposeService)
+	}
 	kind := strings.TrimSpace(valueString(normalized["kind"]))
 	if kind == "" {
 		kind = strings.TrimSpace(valueString(normalized["type"]))
@@ -256,6 +259,9 @@ func normalizeEnvironmentComponentHealthCheck(component store.EnvironmentCompone
 		kind = "url"
 	}
 	normalized["kind"] = kind
+	if environmentComponentRequiresURLHealth(component) && kind != "url" {
+		return nil, strings.TrimSpace(component.Role) + " health check requires url"
+	}
 	switch kind {
 	case "url":
 		if strings.TrimSpace(valueString(normalized["url"])) == "" {
@@ -287,6 +293,12 @@ func normalizeEnvironmentComponentHealthCheck(component store.EnvironmentCompone
 		return nil, "unsupported health check kind: " + kind
 	}
 	return normalized, ""
+}
+
+func environmentComponentRequiresURLHealth(component store.EnvironmentComponent) bool {
+	role := strings.TrimSpace(strings.ToLower(component.Role))
+	kind := strings.TrimSpace(strings.ToLower(component.Kind))
+	return role == "business-service" || kind == "app"
 }
 
 func environmentComponentHealthGate(component store.EnvironmentComponent) (EnvironmentComponentHealthGate, bool) {

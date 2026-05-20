@@ -1239,7 +1239,7 @@ func TestServerEnvironmentAPIReportsComponentGraphReadiness(t *testing.T) {
 	if err := s.ReplaceEnvironmentComponentGraph(ctx, "env.component.api", store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
 			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 		},
 		Dependencies: []store.ComponentDependency{
 			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
@@ -3119,6 +3119,87 @@ JSON
 	}
 }
 
+func TestServerHydratesDashboardHealthFromEnvironmentComponentGraph(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/actuator/health" {
+			t.Fatalf("unexpected health path %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"UP"}`))
+	}))
+	defer target.Close()
+
+	now := time.Now().UTC()
+	catalog := store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: now,
+		Services: []store.CatalogService{
+			{ID: "service-alpha", DisplayName: "Service Alpha", Kind: "app", ContainerName: "sandbox-alpha", Status: "active"},
+		},
+	}
+	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+	readModel, err := controlplane.DashboardReadModel(catalog, "config.sample.001", now)
+	if err != nil {
+		t.Fatalf("build dashboard read model: %v", err)
+	}
+	if _, err := s.UpsertReadModel(ctx, readModel); err != nil {
+		t.Fatalf("upsert dashboard read model: %v", err)
+	}
+	if _, err := s.UpsertEnvironment(ctx, store.Environment{
+		ID:                     "env.sample",
+		DisplayName:            "Sample Environment",
+		Status:                 "draft",
+		VerificationWorkflowID: "workflow.sample",
+	}); err != nil {
+		t.Fatalf("upsert environment: %v", err)
+	}
+	if err := s.ReplaceEnvironmentComponentGraph(ctx, "env.sample", store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "service-alpha",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "service-alpha",
+				Required:        true,
+				HealthCheckJSON: fmt.Sprintf(`{"kind":"url","url":%q}`, target.URL+"/actuator/health"),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace component graph: %v", err)
+	}
+	fakeBin := t.TempDir()
+	docker := filepath.Join(fakeBin, "docker")
+	if err := os.WriteFile(docker, []byte(`#!/bin/sh
+cat <<'JSON'
+{"Names":"sandbox-alpha","Image":"example/service-alpha:1","State":"running","Status":"Up 12 seconds","Ports":"0.0.0.0:18080->8080/tcp"}
+JSON
+`), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/dashboard", http.StatusOK)
+	summary := payload["summary"].(map[string]any)
+	if summary["healthy"] != float64(1) || summary["unhealthy"] != float64(0) {
+		t.Fatalf("dashboard summary = %#v", summary)
+	}
+	item := payload["groups"].([]any)[0].(map[string]any)["items"].([]any)[0].(map[string]any)
+	if item["id"] != "service-alpha" || item["ok"] != true || item["health"] != "healthy" {
+		t.Fatalf("dashboard item should use component graph HTTP health: %#v", item)
+	}
+}
+
 func TestServerUsesRuntimeCatalogForDashboardSnapshot(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
@@ -4921,6 +5002,108 @@ func TestServerExecutesTestKitRunFromStoreRegisteredServicePort(t *testing.T) {
 	}
 	if receivedPath != "/ready" {
 		t.Fatalf("target received path = %q", receivedPath)
+	}
+}
+
+func TestServerPrefersStoreRegisteredServicePortOverBundleServicePort(t *testing.T) {
+	ctx := context.Background()
+	var receivedPath string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"request_id":"req-store-first"}`))
+	}))
+	defer target.Close()
+	targetURL, err := url.Parse(target.URL)
+	if err != nil {
+		t.Fatalf("parse target url: %v", err)
+	}
+	targetPort, err := strconv.Atoi(targetURL.Port())
+	if err != nil {
+		t.Fatalf("parse target port: %v", err)
+	}
+	staleBundleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "stale bundle service", http.StatusTeapot)
+	}))
+	defer staleBundleServer.Close()
+	staleURL, err := url.Parse(staleBundleServer.URL)
+	if err != nil {
+		t.Fatalf("parse stale url: %v", err)
+	}
+	stalePort, err := strconv.Atoi(staleURL.Port())
+	if err != nil {
+		t.Fatalf("parse stale port: %v", err)
+	}
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "current",
+		IndexedAt: time.Now().UTC(),
+		Services: []store.CatalogService{
+			{ID: "service.gateway", DisplayName: "Gateway", Kind: "http", ServicePort: targetPort, Status: "active"},
+		},
+		APICases: []store.CatalogAPICase{
+			{ID: "case.gateway", DisplayName: "Gateway Case", NodeID: "node.gateway", Status: "active"},
+		},
+		InterfaceNodes: []store.CatalogInterfaceNode{
+			{ID: "node.gateway", ServiceID: "service.gateway", Method: "GET", Path: "/ready", Status: "active"},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.case.gateway",
+				TemplateID: "template.case.gateway",
+				NodeID:     "node.gateway",
+				WorkflowID: "workflow.gateway",
+				ScopeType:  "step",
+				ScopeID:    "step.gateway",
+				Status:     "active",
+				ConfigJSON: `{
+					"caseId":"case.gateway",
+					"caseExecution":{
+						"method":"GET",
+						"nodeId":"service.gateway",
+						"path":"/ready",
+						"expectedHttpCodes":[200]
+					}
+				}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	bundle := profile.Bundle{
+		ID: "current",
+		Services: []profile.Service{
+			{ID: "service.gateway", DisplayName: "Stale Gateway", Kind: "http", ServicePort: stalePort, Status: "active"},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/test-kit/run", "application/json", strings.NewReader(`{
+		"caseId":"case.gateway",
+		"workflowId":"workflow.gateway",
+		"stepId":"step.gateway",
+		"timeoutSeconds":5
+	}`))
+	if err != nil {
+		t.Fatalf("post test kit run: %v", err)
+	}
+	defer resp.Body.Close()
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode test kit result: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || result["ok"] != true {
+		t.Fatalf("test kit run status=%d result=%#v", resp.StatusCode, result)
+	}
+	if receivedPath != "/ready" {
+		t.Fatalf("Store service port should win over stale bundle service, target received path = %q", receivedPath)
 	}
 }
 
@@ -8272,11 +8455,24 @@ func TestServerStartsEnvironmentAcceptanceRunWithHealthSummary(t *testing.T) {
 
 	registered := postJSONResponse(t, server.URL+"/api/environments", fmt.Sprintf(`{
   "id": "env.acceptance",
-  "verificationWorkflowId": "workflow.env.acceptance",
-  "healthChecks": [{"id":"gateway-health","kind":"url","url":%q}]
-}`, target.URL+"/health"), http.StatusOK)
+  "verificationWorkflowId": "workflow.env.acceptance"
+}`), http.StatusOK)
 	if registered["ok"] != true {
 		t.Fatalf("register environment = %#v", registered)
+	}
+	if err := s.ReplaceEnvironmentComponentGraph(ctx, "env.acceptance", store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "service.gateway",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "service-gateway",
+				Required:        true,
+				HealthCheckJSON: fmt.Sprintf(`{"kind":"url","url":%q}`, target.URL+"/health"),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace component graph: %v", err)
 	}
 
 	started := postJSONResponse(t, server.URL+"/api/environments/env.acceptance/acceptance-runs", `{"requestId":"env-acceptance-001"}`, http.StatusAccepted)

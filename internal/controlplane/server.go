@@ -1128,7 +1128,7 @@ func dashboardPayloadFromBundleWithStore(ctx context.Context, bundle profile.Bun
 		if !ok {
 			payload = dashboardPayloadFromCatalog(catalog)
 		}
-		hydrateDashboardRuntime(ctx, &payload, catalog)
+		hydrateDashboardRuntime(ctx, runtime, &payload, catalog)
 		return payload, nil
 	}
 	return dashboardPayloadFromBundle(ctx, bundle), nil
@@ -1179,10 +1179,11 @@ func dashboardPayloadFromCatalog(catalog store.ProfileCatalog) dashboardPayload 
 	}
 }
 
-func hydrateDashboardRuntime(ctx context.Context, payload *dashboardPayload, catalog store.ProfileCatalog) {
+func hydrateDashboardRuntime(ctx context.Context, runtime store.Store, payload *dashboardPayload, catalog store.ProfileCatalog) {
 	services := activeCatalogServices(catalog.Services)
 	filterDashboardPayloadServices(payload, services)
 	dockerRuntimes := dockerRuntimeByCatalogService(ctx, services)
+	componentHealthURLByService := dashboardComponentHealthURLByService(ctx, runtime, services)
 	runtimeByService := map[string]serviceRuntime{}
 	for _, runtime := range payload.ServiceRuntime {
 		runtimeByService[runtime.ServiceID] = runtime
@@ -1192,7 +1193,7 @@ func hydrateDashboardRuntime(ctx context.Context, payload *dashboardPayload, cat
 		if observed, ok := dockerRuntimes[service.ID]; ok {
 			runtime = mergeRuntime(runtime, observed)
 		}
-		runtime = applyHTTPServiceHealth(ctx, runtime, service.HealthURL)
+		runtime = applyHTTPServiceHealth(ctx, runtime, firstNonEmpty(componentHealthURLByService[service.ID], service.HealthURL))
 		runtimeByService[service.ID] = runtime
 	}
 	payload.ServiceRuntime = make([]serviceRuntime, 0, len(services))
@@ -1220,6 +1221,52 @@ func hydrateDashboardRuntime(ctx context.Context, payload *dashboardPayload, cat
 		allItems = append(allItems, group.Items...)
 	}
 	payload.Summary = dashboardSummaryForItems(allItems)
+}
+
+func dashboardComponentHealthURLByService(ctx context.Context, runtime store.Store, services []store.CatalogService) map[string]string {
+	if runtime == nil || len(services) == 0 {
+		return nil
+	}
+	serviceIDs := make(map[string]bool, len(services))
+	for _, service := range services {
+		serviceIDs[strings.TrimSpace(service.ID)] = true
+	}
+	envs, err := runtime.ListEnvironments(ctx)
+	if err != nil {
+		return nil
+	}
+	bestScore := 0
+	best := map[string]string{}
+	for _, env := range envs {
+		graph, err := runtime.GetEnvironmentComponentGraph(ctx, env.ID)
+		if err != nil {
+			continue
+		}
+		score := 0
+		urls := map[string]string{}
+		for _, component := range graph.Components {
+			id := strings.TrimSpace(component.ComponentID)
+			if !serviceIDs[id] {
+				continue
+			}
+			score++
+			check, errText := normalizeEnvironmentComponentHealthCheck(component)
+			if errText != "" {
+				continue
+			}
+			if strings.TrimSpace(valueString(check["kind"])) == "url" {
+				urls[id] = strings.TrimSpace(valueString(check["url"]))
+			}
+		}
+		if score > bestScore {
+			bestScore = score
+			best = urls
+		}
+	}
+	if bestScore == 0 {
+		return nil
+	}
+	return best
 }
 
 func activeCatalogServices(services []store.CatalogService) []store.CatalogService {

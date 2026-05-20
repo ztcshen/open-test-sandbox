@@ -1252,7 +1252,7 @@ func TestEnvironmentRestoreUsesComponentHealthChecksForReadiness(t *testing.T) {
 				ComposeService:  "app",
 				Required:        true,
 				RuntimeJSON:     `{}`,
-				HealthCheckJSON: `{"type":"compose-service"}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/actuator/health"}`,
 				SummaryJSON:     `{}`,
 			},
 		},
@@ -1264,11 +1264,53 @@ func TestEnvironmentRestoreUsesComponentHealthChecksForReadiness(t *testing.T) {
 		t.Fatalf("component health checks should be restore probes: report=%#v health=%#v", report, report.HealthChecks)
 	}
 	check, ok := report.HealthChecks[0].(map[string]any)
-	if !ok || valueString(check["kind"]) != "compose-service" || valueString(check["service"]) != "app" || valueString(check["componentId"]) != "app" {
+	if !ok || valueString(check["kind"]) != "url" || valueString(check["service"]) != "app" || valueString(check["url"]) != "http://127.0.0.1:18080/actuator/health" || valueString(check["componentId"]) != "app" {
 		t.Fatalf("component health check was not normalized: %#v", report.HealthChecks)
 	}
 	if !restoreTypedReadinessHasItem(report.Readiness.Items, "health-probes", true, "1 Store-backed health probe") {
 		t.Fatalf("readiness should count component health probes: %#v", report.Readiness.Items)
+	}
+}
+
+func TestEnvironmentRestoreRequiresURLHealthForBusinessComponents(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.component.business-health",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "mysql",
+				Kind:            "middleware",
+				Role:            "database",
+				ComposeService:  "mysql",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service"}`,
+				SummaryJSON:     `{}`,
+			},
+			{
+				ComponentID:     "app",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "app",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service"}`,
+				SummaryJSON:     `{}`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build business health restore report: %v", err)
+	}
+	if report.OK || report.ComponentGraph.OK || report.ComponentGraph.MissingHealthChecks != 1 {
+		t.Fatalf("business service compose-only health should fail readiness: %#v", report.ComponentGraph)
+	}
+	if !strings.Contains(report.ComponentGraph.Error, "app: business-service health check requires url") {
+		t.Fatalf("business health error should require url: %q", report.ComponentGraph.Error)
 	}
 }
 
@@ -1554,7 +1596,7 @@ func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.
 	}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
 			{ComponentID: "mysql", Kind: "middleware", Role: "database", Required: true, HealthCheckJSON: `{"type":"compose-service","service":"mysql"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", Required: true, HealthCheckJSON: `{"type":"compose-service","service":"app"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 		},
 		Assets: []store.ComponentConfigAsset{
 			{OwnerComponentID: "app", AssetID: "app.mysql.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/schema.sql", ContentInline: "create database app;\n", SummaryJSON: `{}`},
@@ -1584,9 +1626,9 @@ func TestEnvironmentRestoreOrdersComponentAssetsByBlockingDependencyOrder(t *tes
 		VerificationWorkflowID: "workflow.core-10",
 	}, workspace, false, false, true, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
-			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18081/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 		},
 		Dependencies: []store.ComponentDependency{
 			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
@@ -1636,8 +1678,8 @@ func TestEnvironmentComponentsReplaceRejectsBlockingDependencyCycle(t *testing.T
 	)
 	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
-			{ComponentID: "app.a", Kind: "app", Role: "business-service", ComposeService: "app-a", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app.b", Kind: "app", Role: "business-service", ComposeService: "app-b", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app.a", Kind: "app", Role: "business-service", ComposeService: "app-a", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18081/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app.b", Kind: "app", Role: "business-service", ComposeService: "app-b", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18082/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 		},
 		Dependencies: []store.ComponentDependency{
 			{ConsumerComponentID: "app.a", ProviderComponentID: "app.b", Phase: "startup", Capability: "http", Required: true, ProfileJSON: `{}`},
@@ -1681,7 +1723,7 @@ func TestEnvironmentComponentsReplaceRejectsRemoteComponentAssetWithoutURLPath(t
 	)
 	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 		},
 		Assets: []store.ComponentConfigAsset{
 			{OwnerComponentID: "app", AssetID: "app.remote-ddl", AssetKind: "mysql-ddl", TargetPath: "compose/mysql/init/app.sql", RemoteRefJSON: `{"path":"compose/mysql/init/app.sql"}`, SizeBytes: 48 * 1024, SummaryJSON: `{}`},
@@ -1705,7 +1747,7 @@ func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
 	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
 			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 		},
 		Dependencies: []store.ComponentDependency{
 			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
@@ -1749,7 +1791,7 @@ func TestEnvironmentInspectReportsComponentGraphReadiness(t *testing.T) {
 	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
 			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 		},
 		Dependencies: []store.ComponentDependency{
 			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
@@ -1785,7 +1827,7 @@ func TestEnvironmentBootstrapReportsComponentGraphReadiness(t *testing.T) {
 	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
 			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
 		},
 		Dependencies: []store.ComponentDependency{
 			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
@@ -2571,6 +2613,72 @@ func restoreCleanMachinePrereqOK(items []environmentRestoreCleanMachinePrerequis
 		if item.Name == name && item.OK {
 			return true
 		}
+	}
+	return false
+}
+
+func TestEnvironmentRestoreEffectiveHealthChecksUseStartedComposeServices(t *testing.T) {
+	checks := []any{
+		map[string]any{"id": "llt-url", "kind": "url", "url": "http://127.0.0.1:28080/health"},
+	}
+	compose := map[string]any{"services": []any{"app", "db"}}
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "app", ComposeService: "app", HealthCheckJSON: `{"type":"compose-service","service":"app"}`},
+			{ComponentID: "demo", ComposeService: "demo", HealthCheckJSON: `{"type":"compose-service","service":"demo"}`},
+			{ComponentID: "db", ComposeService: "db", HealthCheckJSON: `{"type":"compose-service","service":"db"}`},
+		},
+	}
+	effective := environmentRestoreEffectiveHealthChecks(checks, compose, graph)
+	if !restoreHealthChecksContain(effective, "url", "", "http://127.0.0.1:28080/health") {
+		t.Fatalf("explicit URL health check missing: %#v", effective)
+	}
+	if !restoreHealthChecksContain(effective, "compose-service", "app", "") || !restoreHealthChecksContain(effective, "compose-service", "db", "") {
+		t.Fatalf("started service health checks missing: %#v", effective)
+	}
+	if restoreHealthChecksContain(effective, "compose-service", "demo", "") {
+		t.Fatalf("unstarted component health check should be excluded: %#v", effective)
+	}
+}
+
+func TestEnvironmentRestoreEffectiveHealthChecksCoverBusinessURLService(t *testing.T) {
+	compose := map[string]any{"services": []any{"app"}}
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "app",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "app",
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/actuator/health"}`,
+			},
+		},
+	}
+	effective := environmentRestoreEffectiveHealthChecks(nil, compose, graph)
+	if !restoreHealthChecksContain(effective, "url", "app", "http://127.0.0.1:18080/actuator/health") {
+		t.Fatalf("business URL health check missing service binding: %#v", effective)
+	}
+	if restoreHealthChecksContain(effective, "compose-service", "app", "") {
+		t.Fatalf("business service with URL health should not add compose-only health: %#v", effective)
+	}
+}
+
+func restoreHealthChecksContain(items []any, kind string, service string, url string) bool {
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(valueString(item["kind"])) != kind {
+			continue
+		}
+		if service != "" && strings.TrimSpace(valueString(item["service"])) != service {
+			continue
+		}
+		if url != "" && strings.TrimSpace(valueString(item["url"])) != url {
+			continue
+		}
+		return true
 	}
 	return false
 }

@@ -2103,6 +2103,14 @@ func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]an
 	out := []any{}
 	covered := map[string]bool{}
 	seen := map[string]bool{}
+	startedServices := map[string]bool{}
+	for _, service := range stringSliceFromAny(compose["services"]) {
+		service = strings.TrimSpace(service)
+		if service != "" {
+			startedServices[service] = true
+		}
+	}
+	hasServiceAllowList := len(startedServices) > 0
 	addCheck := func(raw any) {
 		item, ok := raw.(map[string]any)
 		if !ok {
@@ -2120,12 +2128,20 @@ func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]an
 				covered[service] = true
 			}
 		}
+		if strings.TrimSpace(valueString(item["kind"])) == "url" || strings.TrimSpace(valueString(item["type"])) == "url" {
+			if service := strings.TrimSpace(valueString(item["service"])); service != "" {
+				covered[service] = true
+			}
+		}
 		out = append(out, raw)
 	}
 	for _, raw := range checks {
 		addCheck(raw)
 	}
 	for _, component := range graph.Components {
+		if hasServiceAllowList && strings.TrimSpace(component.ComposeService) != "" && !startedServices[strings.TrimSpace(component.ComposeService)] {
+			continue
+		}
 		item, errText := environmentRestoreNormalizeComponentHealthCheck(component)
 		if errText != "" {
 			continue
@@ -2169,6 +2185,9 @@ func environmentRestoreNormalizeComponentHealthCheck(component store.Environment
 	if componentID != "" {
 		normalized["componentId"] = componentID
 	}
+	if strings.TrimSpace(valueString(normalized["service"])) == "" && strings.TrimSpace(component.ComposeService) != "" {
+		normalized["service"] = strings.TrimSpace(component.ComposeService)
+	}
 	kind := strings.TrimSpace(valueString(normalized["kind"]))
 	if kind == "" {
 		kind = strings.TrimSpace(valueString(normalized["type"]))
@@ -2177,6 +2196,9 @@ func environmentRestoreNormalizeComponentHealthCheck(component store.Environment
 		kind = "url"
 	}
 	normalized["kind"] = kind
+	if environmentRestoreComponentRequiresURLHealth(component) && kind != "url" {
+		return nil, strings.TrimSpace(component.Role) + " health check requires url"
+	}
 	switch kind {
 	case "url":
 		if strings.TrimSpace(valueString(normalized["url"])) == "" {
@@ -2208,6 +2230,12 @@ func environmentRestoreNormalizeComponentHealthCheck(component store.Environment
 		return nil, "unsupported health check kind: " + kind
 	}
 	return normalized, ""
+}
+
+func environmentRestoreComponentRequiresURLHealth(component store.EnvironmentComponent) bool {
+	role := strings.TrimSpace(strings.ToLower(component.Role))
+	kind := strings.TrimSpace(strings.ToLower(component.Kind))
+	return role == "business-service" || kind == "app"
 }
 
 func environmentRestoreHealthCheckSignature(item map[string]any) string {

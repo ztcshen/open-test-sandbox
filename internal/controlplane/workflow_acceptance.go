@@ -136,6 +136,31 @@ func workflowAcceptanceNodeHealthChecks(ctx context.Context, runtime store.Store
 	if err != nil {
 		return []workflowAcceptanceNodeHealth{{ID: "environment", Kind: "store", OK: false, Status: "failed", Error: err.Error()}}
 	}
+	out := []workflowAcceptanceNodeHealth{}
+	seen := map[string]bool{}
+	if graph, err := runtime.GetEnvironmentComponentGraph(ctx, environmentID); err == nil {
+		for _, component := range graph.Components {
+			id := strings.TrimSpace(component.ComponentID)
+			checkMap, errText := normalizeEnvironmentComponentHealthCheck(component)
+			if errText != "" {
+				if component.Required {
+					out = append(out, workflowAcceptanceNodeHealth{ID: id, Kind: "component", OK: false, Status: "failed", Error: errText})
+				}
+				continue
+			}
+			if strings.TrimSpace(valueString(checkMap["kind"])) != "url" {
+				continue
+			}
+			check := workflowAcceptanceNodeHealth{
+				ID:      id,
+				Kind:    "url",
+				URL:     strings.TrimSpace(valueString(checkMap["url"])),
+				Service: strings.TrimSpace(valueString(checkMap["service"])),
+				Status:  "skipped",
+			}
+			out = appendWorkflowAcceptanceNodeHealthCheck(ctx, out, seen, check)
+		}
+	}
 	var raw []map[string]any
 	healthChecksJSON := strings.TrimSpace(env.HealthChecksJSON)
 	if healthChecksJSON == "" {
@@ -144,7 +169,6 @@ func workflowAcceptanceNodeHealthChecks(ctx context.Context, runtime store.Store
 	if err := json.Unmarshal([]byte(healthChecksJSON), &raw); err != nil {
 		return []workflowAcceptanceNodeHealth{{ID: "healthChecks", Kind: "json", OK: false, Status: "failed", Error: err.Error()}}
 	}
-	out := make([]workflowAcceptanceNodeHealth, 0, len(raw))
 	for _, item := range raw {
 		check := workflowAcceptanceNodeHealth{
 			ID:      strings.TrimSpace(valueString(item["id"])),
@@ -158,17 +182,26 @@ func workflowAcceptanceNodeHealthChecks(ctx context.Context, runtime store.Store
 		if check.Kind == "" && check.URL != "" {
 			check.Kind = "url"
 		}
-		switch check.Kind {
-		case "url":
-			check = workflowAcceptanceURLHealthCheck(ctx, check)
-		default:
-			check.OK = false
-			check.Status = "unsupported"
-			check.Error = "acceptance node health currently supports url checks"
-		}
-		out = append(out, check)
+		out = appendWorkflowAcceptanceNodeHealthCheck(ctx, out, seen, check)
 	}
 	return out
+}
+
+func appendWorkflowAcceptanceNodeHealthCheck(ctx context.Context, out []workflowAcceptanceNodeHealth, seen map[string]bool, check workflowAcceptanceNodeHealth) []workflowAcceptanceNodeHealth {
+	switch check.Kind {
+	case "url":
+		signature := "url:" + strings.TrimSpace(check.URL)
+		if signature == "url:" || seen[signature] {
+			return out
+		}
+		seen[signature] = true
+		check = workflowAcceptanceURLHealthCheck(ctx, check)
+	default:
+		check.OK = false
+		check.Status = "unsupported"
+		check.Error = "acceptance node health currently supports url checks"
+	}
+	return append(out, check)
 }
 
 func workflowAcceptanceURLHealthCheck(ctx context.Context, check workflowAcceptanceNodeHealth) workflowAcceptanceNodeHealth {
