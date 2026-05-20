@@ -2050,3 +2050,28 @@ Remote source policy slice:
 - This is structure-only landing. Existing environment rows are not backfilled
   into component rows yet; the next design iteration can still refine component
   fields and asset ownership before adding CLI/API writers and restore readers.
+- 2026-05-20T11:40Z design correction: the environment model should be a
+  component graph, not a middleware-vs-business-service split. Middleware can
+  depend on middleware too: examples include Grafana -> Loki, Promtail -> Loki,
+  SkyWalking UI -> OAP, OAP -> storage, Redis Sentinel -> Redis master, Apollo
+  -> its metadata store, and XXL-Job admin -> its database.
+- Rewrote the clean-machine restore plan around generic component ownership:
+  every runtime unit is an `environment_component`; dependencies should become
+  consumer -> provider edges; config assets should be owned by the consumer
+  component and target either the provider component or the consumer itself.
+  The already-landed `service_*` tables are treated as a first-step subset and
+  should be generalized to `component_dependencies` and
+  `component_config_assets` before restore is wired to the model.
+- 2026-05-20T07:55Z design correction: component graph cycle detection and
+  topological ordering are now explicitly delegated to a mature Go graph
+  library, not project-owned algorithms. The plan names Gonum
+  `graph/topo` as the implementation dependency for stable ordering and cycle
+  reporting, with Open Test Sandbox code limited to Store/API translation,
+  dependency phase filtering, provider-before-consumer graph projection, and
+  CLI/API/UI report formatting.
+- The restore plan now distinguishes blocking dependency phases
+  (`prepare`, `startup`, `readiness`, `acceptance`) from `runtime`
+  relationships. Blocking phases must pass the Gonum-backed cycle and ordering
+  check before Docker restore proceeds. Runtime cycles are allowed only when
+  every involved component has explicit health probes, bounded waits, and
+  reportable readiness gates.

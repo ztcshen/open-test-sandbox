@@ -38,23 +38,112 @@ Store and are not guaranteed to exist after cloning service repos:
 `environment restore --clean-docker-state --json` now reports these as
 `startup-assets` preflight failures before any Docker command can start.
 
-## Componentized Store Model
+## Component Graph Store Model
 
-The next Store shape separates runtime capability from service-owned
-configuration:
+The Store model should be a component graph, not a middleware-vs-service split.
+Every runtime unit in a suite is a component: middleware, platform service,
+mock, observability service, support process, or business service.
 
-- `environment_components`: one row per middleware, mock, or business service
-  in the suite.
-- `service_dependencies`: business service to component dependencies, such as
-  `scf-loan -> mysql` or `scf-loan -> apollo`.
-- `service_config_assets`: service-owned assets that target a component, such
-  as `scf-loan` DDL targeting MySQL or `scf-loan` namespace config targeting
-  Apollo.
+- `environment_components`: one row per runtime unit in the suite.
+- `component_dependencies`: directed edges from a consumer component to a
+  provider component.
+- `component_config_assets`: config assets owned by the consumer component and
+  targeted at the provider component or at the consumer's own runtime.
+- `component_connection_profiles`: provider-owned connection facts that can be
+  projected into consumers during restore.
 
-MySQL DDL and seed SQL are not owned by the MySQL component. They are owned by
-the business service that needs those schemas. Apollo follows the same rule:
-the Apollo component provides config-service capability, while each business
-service owns its appId, namespace, and key/value assets.
+The model is intentionally close to mature component/resource systems:
+
+- Dapr treats middleware integrations as interchangeable components with
+  component-specific metadata and optional secret references.
+- Kubernetes separates deployable workload shape from ConfigMap and Secret
+  material that is mounted or injected into the workload.
+- Service Binding treats provider connection details as bindable data consumed
+  by applications.
+- Backstage's system model separates systems, components, resources, and
+  dependency relationships for catalog discovery.
+- Terraform/OpenTofu resource graph design is a useful execution reference:
+  build a graph, validate cycles, then walk nodes when dependencies are ready.
+
+The ownership rule is: the provider exposes capability; the consumer owns the
+configuration it needs in order to consume that capability.
+
+Examples:
+
+- `scf-loan -> mysql`: `scf-loan` owns its database name, DDL, and seed assets.
+- `scf-loan -> apollo`: `scf-loan` owns appId, namespace, and key/value assets.
+- `redis-sentinel -> redis-master`: Sentinel owns the monitor configuration.
+- `grafana -> loki`: Grafana owns datasource provisioning that points to Loki.
+- `promtail -> loki`: Promtail owns its push endpoint configuration.
+- `skywalking-ui -> skywalking-oap`: UI owns the OAP address setting.
+- `skywalking-oap -> storage`: OAP owns its storage backend settings.
+- `xxl-job-admin -> mysql`: XXL-job owns its tables and DB connection config.
+
+MySQL DDL and seed SQL are therefore not owned by the MySQL component. They are
+owned by the component that needs those schemas. Apollo follows the same rule:
+the Apollo component provides config-service capability, while each consuming
+component owns its appId, namespace, and key/value assets.
+
+The schema that has already landed is a first step. Before wiring restore to it,
+rename and generalize `service_dependencies` to `component_dependencies`, and
+`service_config_assets` to `component_config_assets`, preserving the current
+business-service cases as a subset of the component graph.
+
+### Dependency Edge Semantics
+
+The Store edge direction remains `consumer -> provider` because it answers the
+question "which provider does this component consume?" Restore then projects
+blocking edges into an execution graph as `provider -> consumer` so topological
+ordering starts shared providers before their consumers.
+
+Each dependency edge needs an explicit phase and capability:
+
+- `prepare`: asset generation or repository preparation must happen before the
+  consumer can be prepared.
+- `startup`: provider must be started before the consumer can start.
+- `readiness`: consumer may start, but acceptance cannot proceed until the
+  provider is healthy and the consumer can reach it.
+- `runtime`: bidirectional or late-bound runtime traffic. This edge documents
+  the relationship but is excluded from startup topological ordering.
+- `acceptance`: workflow/report validation requires this provider, for example
+  real SkyWalking topology collection.
+
+Blocking phases are `prepare`, `startup`, `readiness`, and `acceptance`.
+`runtime` edges may contain cycles only when all involved components have
+explicit health probes, bounded waits, and reportable readiness gates.
+
+### Graph Algorithm Boundary
+
+Cycle detection and topological ordering are core correctness logic, so the
+project must not hand-write DFS, strongly connected component, or topological
+sort algorithms. Implement a small domain adapter over
+`gonum.org/v1/gonum/graph` and `gonum.org/v1/gonum/graph/topo` instead:
+
+- Use `simple.DirectedGraph` or a similarly small Gonum directed graph type for
+  the projected restore graph.
+- Use `topo.SortStabilized` for deterministic provider-before-consumer order.
+- Use `topo.DirectedCyclesIn` to produce reportable cycle paths for blocking
+  edges.
+- Use `topo.TarjanSCC` only when the report needs grouped strongly connected
+  components, not as a project-owned algorithm.
+
+Open Test Sandbox-owned code should do only domain translation:
+
+- read components and dependencies through Store APIs,
+- split edges by phase,
+- project blocking edges from `consumer -> provider` to
+  `provider -> consumer`,
+- call Gonum topology functions,
+- translate sorted nodes and cycle paths into CLI/API/UI restore preflight
+  output.
+
+Acceptance criteria for this adapter:
+
+- a blocking cycle fails preflight with the exact component path;
+- a pure runtime cycle is allowed only when all readiness gates are present;
+- mixed graphs ignore runtime edges for startup ordering but still report them;
+- ordering is stable across repeated runs for the same Store data;
+- all graph validation is reachable through CLI/API, never by direct Store SQL.
 
 ## Three-Layer Test Path
 
@@ -62,12 +151,16 @@ service owns its appId, namespace, and key/value assets.
    - Inspect the environment through CLI/API.
    - Confirm compact Store metadata size.
    - Confirm source repos are remote Git URLs.
-   - Confirm startup assets are either generated by Store metadata or already
-     present in the restore workspace.
+   - Confirm component graph blocking edges pass the Gonum-backed cycle check
+     and topological order check.
+   - Confirm runtime cycles, if any, have explicit health probes and bounded
+     readiness gates.
+   - Confirm startup assets are owned by consumer components and are either
+     generated by Store metadata or already present in the restore workspace.
 
 2. Isolated workspace preparation:
    - Clone all service repos into a fresh workspace.
-   - Write Store-backed startup files.
+   - Write Store-backed component assets in Gonum-derived dependency order.
    - Stop before Docker with `--prepare-repos-only`.
    - Verify no business runtime files, logs, Docker images, Maven cache, or
      Evidence payloads were written into the Store.
@@ -76,8 +169,9 @@ service owns its appId, namespace, and key/value assets.
    - Capture `docker compose ps`, `docker compose images`, and `docker compose
      config`.
    - Only after review, run the Compose-scoped cleanup for this environment.
-   - Start middleware and business services from the restored workspace.
-   - Wait for all recorded health probes.
+   - Start provider components first when possible, then consumer components,
+     using explicit readiness gates for components with runtime cycles.
+   - Wait for all recorded component health probes.
    - Trigger async acceptance with the bound 10-step workflow.
    - Publish verified only when Evidence and real SkyWalking topology are both
      complete.
