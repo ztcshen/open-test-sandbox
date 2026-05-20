@@ -27,6 +27,15 @@ function runReleaseCheck(env) {
   });
 }
 
+function runRealMySQLWrapper(env) {
+  return spawnSync("bash", ["tools/smoke/mysql-real-store-release-check.sh"], {
+    cwd: rootDir,
+    env: { ...process.env, ...env },
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+}
+
 test("release-check real SkyWalking mode requires a GraphQL URL before expensive gates", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
@@ -83,4 +92,42 @@ test("release-check real SkyWalking mode rejects empty workflow step trace ids",
   assert.match(result.stderr, /all 10 workflow steps/);
   assert.match(result.stderr, /step-02/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
+});
+
+test("real MySQL release wrapper requires a dedicated MySQL Store DSN", () => {
+  const missing = runRealMySQLWrapper({
+    OTSANDBOX_REAL_MYSQL_STORE_DSN: "",
+    OTSANDBOX_SMOKE_STORE_DSN: "",
+  });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /Set OTSANDBOX_REAL_MYSQL_STORE_DSN/);
+
+  const postgres = runRealMySQLWrapper({
+    OTSANDBOX_REAL_MYSQL_STORE_DSN: "postgres://user:secret@example.com:5432/otsandbox_smoke?sslmode=disable",
+  });
+  assert.equal(postgres.status, 1);
+  assert.match(postgres.stderr, /must be a mysql:\/\/ DSN/);
+});
+
+test("real MySQL release wrapper refuses likely business databases", () => {
+  const result = runRealMySQLWrapper({
+    OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/business_prod?tls=false",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Refusing to run release-check/);
+  assert.match(result.stderr, /business_prod/);
+});
+
+test("real MySQL release wrapper dry-run masks credentials and accepts smoke database", () => {
+  const result = runRealMySQLWrapper({
+    OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+    OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/otsandbox_smoke/);
+  assert.doesNotMatch(result.stderr, /secret/);
+  assert.match(result.stderr, /MySQL Store contract mode: existing/);
+  assert.match(result.stderr, /Would run: npm run release-check/);
 });

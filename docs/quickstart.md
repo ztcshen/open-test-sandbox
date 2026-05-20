@@ -69,6 +69,18 @@ the Store DSN at a Docker database that `environment restore` is responsible
 for starting; business databases used by the tested services belong to the
 target environment, while the sandbox Store remains independent.
 
+For the company MySQL path, validate against a dedicated sandbox Store database:
+
+```sh
+OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+npm run release-check:mysql-real
+```
+
+The wrapper rejects non-MySQL DSNs and database names that do not look dedicated
+to sandbox/smoke/test/CI validation. It uses existing-database contract mode, so
+the company account needs normal DDL/DML permissions on that dedicated Store
+database but does not need permission to create or drop databases.
+
 Daily discovery commands do not change when you switch between a local
 PostgreSQL Store, a remote team PostgreSQL Store, and a team MySQL Store. Use
 `store use NAME` to change the active Store, or `--store NAME_OR_DSN` for a

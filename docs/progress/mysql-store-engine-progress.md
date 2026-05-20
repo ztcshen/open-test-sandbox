@@ -229,3 +229,39 @@ Remaining gaps:
   DSN.
 - Run final real SkyWalking validation with `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`
   and trace ids for all 10 workflow steps.
+
+## 2026-05-21 Company MySQL Release Entry Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Added `npm run release-check:mysql-real` as the guarded company MySQL release
+  entrypoint.
+- The wrapper requires a `mysql://` DSN through `OTSANDBOX_REAL_MYSQL_STORE_DSN`,
+  masks the password in logs, and refuses database names that do not look like
+  dedicated sandbox/smoke/test/CI Stores.
+- The wrapper runs the release gate with `OTSANDBOX_MYSQL_TEST_DSN_MODE=existing`,
+  so company MySQL users can validate against an existing dedicated Store
+  database without needing `CREATE DATABASE` / `DROP DATABASE` privileges.
+- Extended the MySQL Store contract test with an existing-database mode that
+  clears the dedicated validation database, applies migrations, opens the Store,
+  and runs the shared Store contract.
+- Documented the company MySQL sign-off command and the Store-vs-business-
+  database boundary in quickstart and Store backend docs.
+
+Validated:
+
+- `bash -n tools/smoke/mysql-real-store-release-check.sh tools/release-check.sh`
+- Empty-DSN wrapper rejection.
+- Unsafe database-name wrapper rejection.
+- `node --test tools/smoke/release-check.test.mjs`
+- `go test ./internal/store -run '^TestMySQLStoreContractWithExternalDatabase$' -count=1`
+
+Current blocker:
+
+- This machine currently has no `OTSANDBOX_REAL_MYSQL_STORE_DSN`,
+  `OTSANDBOX_MYSQL_TEST_DSN`, or `OTSANDBOX_SMOKE_STORE_DSN` configured, so the
+  company MySQL release proof is still not executed. Once a dedicated company
+  MySQL Store DSN is provided, run:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check:mysql-real`.

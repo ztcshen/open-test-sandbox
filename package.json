@@ -9,6 +9,7 @@
     "build:frontend": "node control-plane/frontend/build.mjs",
     "demo:api-case": "node tools/examples/api-case-demo.mjs",
     "release-check": "bash tools/release-check.sh",
+    "release-check:mysql-real": "bash tools/smoke/mysql-real-store-release-check.sh",
     "smoke:api:mysql-store": "OTSANDBOX_DISABLE_SQLITE_STORE=1 node tools/smoke/mysql-store-api-smoke.mjs",
     "smoke:cli:sql-active": "OTSANDBOX_DISABLE_SQLITE_STORE=1 node tools/smoke/cli-active-store-smoke.mjs",
     "smoke:frontend": "OTSANDBOX_DISABLE_SQLITE_STORE=1 node tools/smoke/control-plane-smoke.mjs",

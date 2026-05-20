@@ -150,6 +150,21 @@ OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false
 npm run smoke:frontend
 ```
 
+For a company MySQL validation pass, use a dedicated sandbox Store database and
+run the guarded MySQL release wrapper:
+
+```sh
+OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+npm run release-check:mysql-real
+```
+
+The wrapper accepts only `mysql://` and refuses database names that do not look
+like a sandbox, smoke, test, or CI database. This keeps the sandbox control-plane
+Store separate from business schemas used by the services under test.
+It also runs the MySQL Store contract in existing-database mode, so the company
+account needs normal DDL/DML permissions on that dedicated database but does not
+need permission to create or drop databases.
+
 When this flag is set, any accidental SQLite Store open fails immediately.
 This is the repeatable equivalent of taking the local SQLite path offline before
 running the core workflow. When `OTSANDBOX_SMOKE_STORE_DSN` is present, the smoke
