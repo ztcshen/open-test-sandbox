@@ -107,6 +107,23 @@ func TestParseConfigFromURLCanonicalizesCommonDriverParamKeys(t *testing.T) {
 	}
 }
 
+func TestParseConfigFromURLCanonicalizesCommonDriverBoolParamKeys(t *testing.T) {
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?ALLOWNATIVEPASSWORDS=false&CHECKCONNLIVENESS=false&CLIENTFOUNDROWS=true&COLUMNSWITHALIAS=true&INTERPOLATEPARAMS=true&MULTISTATEMENTS=true&REJECTREADONLY=true")
+	if err != nil {
+		t.Fatalf("parse mysql url: %v", err)
+	}
+	for _, want := range []string{"allowNativePasswords=false", "checkConnLiveness=false", "clientFoundRows=true", "columnsWithAlias=true", "interpolateParams=true", "multiStatements=true", "rejectReadOnly=true"} {
+		if !strings.Contains(cfg.DSN, want) {
+			t.Fatalf("mysql driver dsn should canonicalize common bool driver param key %q: %q", want, cfg.DSN)
+		}
+	}
+	for _, reject := range []string{"ALLOWNATIVEPASSWORDS=false", "CHECKCONNLIVENESS=false", "CLIENTFOUNDROWS=true", "COLUMNSWITHALIAS=true", "INTERPOLATEPARAMS=true", "MULTISTATEMENTS=true", "REJECTREADONLY=true"} {
+		if strings.Contains(cfg.DSN, reject) {
+			t.Fatalf("mysql driver dsn should not keep mixed-case bool driver param key %q: %q", reject, cfg.DSN)
+		}
+	}
+}
+
 func TestParseConfigFromURLRejectsNonMySQLDSN(t *testing.T) {
 	_, err := mysql.ParseConfigFromURL("postgres://localhost/otsandbox")
 	if err == nil {

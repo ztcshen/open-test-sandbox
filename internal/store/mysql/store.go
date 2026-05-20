@@ -191,6 +191,32 @@ func canonicalMySQLParamKey(key string) string {
 		return "collation"
 	case "maxallowedpacket":
 		return "maxAllowedPacket"
+	case "allowallfiles":
+		return "allowAllFiles"
+	case "allowcleartextpasswords":
+		return "allowCleartextPasswords"
+	case "allownativepasswords":
+		return "allowNativePasswords"
+	case "allowoldpasswords":
+		return "allowOldPasswords"
+	case "checkconnliveness":
+		return "checkConnLiveness"
+	case "clientfoundrows":
+		return "clientFoundRows"
+	case "columnswithalias":
+		return "columnsWithAlias"
+	case "compress":
+		return "compress"
+	case "interpolateparams":
+		return "interpolateParams"
+	case "multistatements":
+		return "multiStatements"
+	case "rejectreadonly":
+		return "rejectReadOnly"
+	case "serverpubkey":
+		return "serverPubKey"
+	case "timetruncate":
+		return "timeTruncate"
 	default:
 		return key
 	}

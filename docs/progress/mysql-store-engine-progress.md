@@ -530,3 +530,31 @@ Current blocker:
 - A non-blocking explorer pass found remaining MySQL parity work mostly in
   DSN-gated named active Store tests for daily CLI/API paths that are still
   PostgreSQL-shaped today.
+
+## 2026-05-21 MySQL Driver Bool Param Canonicalization Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Expanded MySQL Store DSN parameter canonicalization for common
+  `go-sql-driver/mysql` boolean/options copied from company configuration
+  systems, including `allowNativePasswords`, `checkConnLiveness`,
+  `clientFoundRows`, `columnsWithAlias`, `interpolateParams`,
+  `multiStatements`, and `rejectReadOnly`.
+- Preserved operator-provided values while emitting driver-recognized key
+  casing, so mixed-case copied DSNs do not turn those options into ordinary
+  MySQL session parameters.
+- Added a focused TDD regression test that first showed uppercase option keys
+  leaking into the driver DSN, then now verifies canonical key names.
+
+Validated:
+
+- `go test ./internal/store/mysql -run 'TestParseConfigFromURLCanonicalizesCommonDriverBoolParamKeys|TestParseConfigFromURLCanonicalizesCommonDriverParamKeys|TestParseConfigFromURLCanonicalizesExplicitNetworkTimeoutKeys' -count=1`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Remaining MySQL parity work is now mostly DSN-gated daily CLI/API active
+  Store coverage, plus the real company MySQL release proof.
