@@ -3211,9 +3211,19 @@ func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.
 
 func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "restore-active-pg")
+	runEnvironmentRestoreUsesNamedActiveStore(t, "pg", "PostgreSQL")
+}
+
+func TestEnvironmentRestoreUsesNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "restore-active-mysql")
+	runEnvironmentRestoreUsesNamedActiveStore(t, "mysql", "MySQL")
+}
+
+func runEnvironmentRestoreUsesNamedActiveStore(t *testing.T, suffixLabel string, label string) {
+	t.Helper()
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	outputDir := filepath.Join(t.TempDir(), "workflow-evidence")
-	envID := uniqueTestID(t, "env.restore.pg")
+	envID := uniqueTestID(t, "env.restore."+suffixLabel)
 	fakeDockerEnv, _ := fakeDockerCommand(t)
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -3249,7 +3259,7 @@ func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
 				},
 			})
 		default:
-			t.Fatalf("unexpected active PG acceptance request: %s %s", r.Method, r.URL.Path)
+			t.Fatalf("unexpected active %s acceptance request: %s %s", label, r.Method, r.URL.Path)
 		}
 	}))
 	defer acceptanceServer.Close()
@@ -3285,10 +3295,10 @@ func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"workflow"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode active PostgreSQL restore json: %v\n%s", err, out)
+		t.Fatalf("decode active %s restore json: %v\n%s", label, err, out)
 	}
 	if !report.OK || !report.Executed || !report.Workflow.OK || report.Workflow.Action != "run-acceptance-workflow" || !report.Workflow.Acceptance.OK || report.Workflow.RunID == "" {
-		t.Fatalf("active PostgreSQL restore report = %#v", report)
+		t.Fatalf("active %s restore report = %#v", label, report)
 	}
 }
 
