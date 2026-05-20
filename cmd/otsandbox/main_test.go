@@ -8703,29 +8703,39 @@ func runCaseSuiteCommandsUseNamedActiveStore(t *testing.T, runLabel string, labe
 }
 
 func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-coverage-pg")
-	profileDir := writeCaseSuiteCoverageProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseSuiteCoverageUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-coverage-mysql")
+	runCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t, storeRef, "MySQL")
+}
+
+func runCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.T, storeRef string, label string) {
+	t.Helper()
+	ctx := context.Background()
+	fixture := writeUniqueCaseSuiteCoverageProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	base := time.Now().UTC()
 	oldDefaultRunID := uniqueTestID(t, "run.default.old")
 	latestDefaultRunID := uniqueTestID(t, "run.default.latest")
 	latestVariantRunID := uniqueTestID(t, "run.variant.latest")
-	recordCaseRunForCoverage(t, ctx, s, oldDefaultRunID, "case.default", store.StatusFailed, base.Add(-2*time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, latestDefaultRunID, "case.default", store.StatusPassed, base.Add(-time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, latestVariantRunID, "case.variant", store.StatusFailed, base)
+	recordCaseRunForCoverage(t, ctx, s, oldDefaultRunID, fixture.defaultCaseID, store.StatusFailed, base.Add(-2*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, latestDefaultRunID, fixture.defaultCaseID, store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, latestVariantRunID, fixture.variantCaseID, store.StatusFailed, base)
 	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+		t.Fatalf("close %s store: %v", label, err)
 	}
 
 	out := runCLI(t,
 		"case", "suite", "coverage",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
 		"--json",
@@ -8752,10 +8762,10 @@ func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite coverage json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite coverage json: %v\n%s", label, err, out)
 	}
 	if report.OK || report.Counts.Total != 3 || report.Counts.Passed != 1 || report.Counts.Failed != 1 || report.Counts.NotRun != 1 {
-		t.Fatalf("suite coverage report = %#v", report)
+		t.Fatalf("%s suite coverage report = %#v", label, report)
 	}
 	byCase := map[string]struct {
 		LatestStatus string
@@ -8775,22 +8785,71 @@ func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.
 			Reason       string
 		}{item.LatestStatus, item.LatestRunID, item.CaseRunID, item.DetailURL, item.HasPassed, item.Reason}
 	}
-	if byCase["case.default"].LatestStatus != store.StatusPassed || byCase["case.default"].LatestRunID != latestDefaultRunID || !byCase["case.default"].HasPassed {
-		t.Fatalf("default coverage = %#v", byCase["case.default"])
+	if byCase[fixture.defaultCaseID].LatestStatus != store.StatusPassed || byCase[fixture.defaultCaseID].LatestRunID != latestDefaultRunID || !byCase[fixture.defaultCaseID].HasPassed {
+		t.Fatalf("%s default coverage = %#v", label, byCase[fixture.defaultCaseID])
 	}
-	if byCase["case.variant"].LatestStatus != store.StatusFailed || byCase["case.variant"].CaseRunID != latestVariantRunID+".case" || byCase["case.variant"].DetailURL == "" || byCase["case.variant"].HasPassed {
-		t.Fatalf("variant coverage = %#v", byCase["case.variant"])
+	if byCase[fixture.variantCaseID].LatestStatus != store.StatusFailed || byCase[fixture.variantCaseID].CaseRunID != latestVariantRunID+".case" || byCase[fixture.variantCaseID].DetailURL == "" || byCase[fixture.variantCaseID].HasPassed {
+		t.Fatalf("%s variant coverage = %#v", label, byCase[fixture.variantCaseID])
 	}
-	if byCase["case.unrun"].LatestStatus != "not-run" || byCase["case.unrun"].Reason != "no run recorded in Store" {
-		t.Fatalf("unrun coverage = %#v", byCase["case.unrun"])
+	if byCase[fixture.unrunCaseID].LatestStatus != "not-run" || byCase[fixture.unrunCaseID].Reason != "no run recorded in Store" {
+		t.Fatalf("%s unrun coverage = %#v", label, byCase[fixture.unrunCaseID])
 	}
 
-	textOut := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--tag", "regression")
-	for _, want := range []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", "case.variant", latestVariantRunID + ".case"} {
+	textOut := runCLI(t, "case", "suite", "coverage", "--profile", fixture.profileDir, "--tag", "regression")
+	for _, want := range []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", fixture.variantCaseID, latestVariantRunID + ".case"} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("coverage text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s coverage text missing %q:\n%s", label, want, textOut)
 		}
 	}
+}
+
+type caseSuiteCoverageFixture struct {
+	profileDir    string
+	profileID     string
+	nodeID        string
+	defaultCaseID string
+	variantCaseID string
+	unrunCaseID   string
+	configID      string
+}
+
+func writeUniqueCaseSuiteCoverageProfile(t *testing.T) caseSuiteCoverageFixture {
+	t.Helper()
+	fixture := caseSuiteCoverageFixture{
+		profileDir:    t.TempDir(),
+		profileID:     uniqueTestID(t, "profile.case-suite-coverage"),
+		nodeID:        uniqueTestID(t, "node.case-suite-coverage"),
+		defaultCaseID: uniqueTestID(t, "case.default"),
+		variantCaseID: uniqueTestID(t, "case.variant"),
+		unrunCaseID:   uniqueTestID(t, "case.unrun"),
+		configID:      uniqueTestID(t, "config.case.variant"),
+	}
+	writeFile(t, filepath.Join(fixture.profileDir, "profile.json"), fmt.Sprintf(`{
+  "id": %q,
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "workflows": [],
+  "interfaceNodes": [{"id":%q,"displayName":"Node Alpha","serviceId":"service.alpha","operation":"Alpha","method":"GET","path":"/alpha"}],
+  "apiCases": [
+    {"id":%q,"displayName":"Default Case","nodeId":%q,"sortOrder":1,"tags":["regression","smoke"],"priority":"p0","owner":"team-a","description":"Default maintained case.","casePath":"cases/default.json"},
+    {"id":%q,"displayName":"Variant Case","nodeId":%q,"sortOrder":2,"tags":["regression"],"priority":"p1","owner":"team-a","description":"Variant maintained case."},
+    {"id":%q,"displayName":"Unrun Case","nodeId":%q,"sortOrder":3,"tags":["regression"],"priority":"p2","owner":"team-b","description":"Unrun maintained case."}
+  ],
+  "requestTemplates": [],
+  "templateConfigs": [
+    {
+      "id": %q,
+      "scopeType": "case",
+      "scopeId": %q,
+      "status": "active",
+      "configJson": %q
+    }
+  ],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`, fixture.profileID, fixture.nodeID, fixture.defaultCaseID, fixture.nodeID, fixture.variantCaseID, fixture.nodeID, fixture.unrunCaseID, fixture.nodeID, fixture.configID, fixture.variantCaseID, fmt.Sprintf(`{"caseId":%q,"caseExecution":{"method":"GET","nodeId":%q,"path":"/alpha","expectedHttpCodes":[200]}}`, fixture.variantCaseID, fixture.nodeID)))
+	return fixture
 }
 
 func TestCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T) {
