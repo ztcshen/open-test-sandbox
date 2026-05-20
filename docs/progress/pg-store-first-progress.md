@@ -2002,3 +2002,33 @@ Remote source policy slice:
   `templateId=environment.workflow.skywalking.v1`, and
   `topologyProvider=skywalking`; `publish-verified` again reports
   `status=verified`, `evidenceComplete=true`, and `topologyComplete=true`.
+- 2026-05-20T10:55Z correction: Store inspection and restore evidence for this
+  line must come through `otsandbox` CLI/API surfaces, not direct database-client
+  SQL. This keeps the Environment Catalog contract Store-neutral if the backing
+  implementation later changes from PostgreSQL to another supported database.
+- Added a Docker startup-asset preflight to `environment restore`. For any path
+  that Docker Compose would bind from the host before service startup, restore
+  now checks that the asset already exists under the restore workspace or is
+  present in Store-backed `compose.generatedFiles`. The check is skipped for
+  `--prepare-repos-only` and `--use-existing-containers` because those paths do
+  not start Docker.
+- CLI-only inspection of `scf-chain-core10-local-docker` shows the current
+  Store-backed startup payload is still just two generated compose files:
+  `compose/docker-compose.yml` at 4,973 bytes and
+  `compose/docker-compose.apps.yml` at 12,729 bytes, totaling 17,702 bytes.
+  This remains compact metadata, but it is not enough for a clean workspace.
+- CLI-only clean-machine dry-run:
+  `environment restore --store local-pg --workspace /tmp/ots-restore-isolated
+  --clean-docker-state --json scf-chain-core10-local-docker` now blocks before
+  Docker with `preflight.ok=false`, `docker.action=skipped-due-to-preflight`,
+  and a `startup-assets` readiness failure. Missing required assets include
+  MySQL init SQL, Redis Sentinel config, WireMock files/mappings, Apollo and
+  XXL-Job mappings, Loki/Promtail/Grafana config, and six
+  `compose/scripts/run-*.sh` launch scripts.
+- Real clean-machine Docker deletion or image removal is still paused. The next
+  non-destructive slice should decide how to provide the bounded text assets
+  through Store metadata while keeping large binaries, runtime databases, logs,
+  Evidence payloads, Docker images, Maven caches, and generated code out of the
+  sandbox Store. The current 5.6 MB WireMock dependency jar is especially not a
+  Store candidate; it should come from an image, remote artifact, or remote repo
+  build path.
