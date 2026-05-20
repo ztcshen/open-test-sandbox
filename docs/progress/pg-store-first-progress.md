@@ -2190,3 +2190,16 @@ Remote source policy slice:
   26 Store-backed post-start health probes. The remaining failed readiness
   items are still only `docker-container-conflicts` and `docker-start-plan` on
   this already-running machine.
+- 2026-05-20T08:49Z implementation slice: blocking component dependency
+  ordering now uses Gonum `graph/topo` instead of project-owned DFS/topology
+  code. Restore projects blocking phases (`prepare`, `startup`, `readiness`,
+  and `acceptance`, plus empty phases) as provider -> consumer edges, reports a
+  deterministic `blockingOrder`, and rejects blocking cycles with reportable
+  component paths. Runtime edges remain outside the startup ordering gate and
+  are allowed only under the separate component health/readiness model.
+- Verified the active `local-pg` environment with a non-destructive restore
+  plan after the dependency-gate change. It reports 24 components,
+  47 dependency edges, 41 blocking edges, 6 runtime edges, a 24-component
+  blocking order, and zero blocking cycles. The only failed readiness items on
+  this already-running machine remain `docker-container-conflicts` and
+  `docker-start-plan`.

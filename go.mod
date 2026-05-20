@@ -6,6 +6,7 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/text v0.35.0
+	gonum.org/v1/gonum v0.17.0
 )
 
 require (

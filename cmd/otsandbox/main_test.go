@@ -1083,8 +1083,106 @@ func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
 	if !report.ComponentGraph.Configured || !report.ComponentGraph.OK || report.ComponentGraph.Components != 2 || report.ComponentGraph.BlockingDependencies != 1 || report.ComponentGraph.Assets != 1 || report.ComponentGraph.MissingHealthChecks != 0 {
 		t.Fatalf("component graph report = %#v", report.ComponentGraph)
 	}
+	if strings.Join(report.ComponentGraph.BlockingOrder, ",") != "mysql,service.alpha" {
+		t.Fatalf("blocking dependency order = %#v", report.ComponentGraph.BlockingOrder)
+	}
 	if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-graph", true, "2 component(s)") {
 		t.Fatalf("readiness should include component graph item: %#v", report.Readiness.Items)
+	}
+}
+
+func TestEnvironmentRestoreRejectsBlockingComponentDependencyCycle(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.component.cycle",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "app.a",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "app-a",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service"}`,
+				SummaryJSON:     `{}`,
+			},
+			{
+				ComponentID:     "app.b",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "app-b",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service"}`,
+				SummaryJSON:     `{}`,
+			},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app.a", ProviderComponentID: "app.b", Phase: "startup", Capability: "http", Required: true, ProfileJSON: `{}`},
+			{ConsumerComponentID: "app.b", ProviderComponentID: "app.a", Phase: "startup", Capability: "http", Required: true, ProfileJSON: `{}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build component cycle restore report: %v", err)
+	}
+	if report.OK || report.ComponentGraph.OK || len(report.ComponentGraph.BlockingCycles) == 0 {
+		t.Fatalf("blocking dependency cycle should fail restore graph: %#v", report.ComponentGraph)
+	}
+	if !strings.Contains(report.ComponentGraph.Error, "cycle") || !strings.Contains(report.ComponentGraph.Error, "app.a") || !strings.Contains(report.ComponentGraph.Error, "app.b") {
+		t.Fatalf("cycle error should name the component path: %q", report.ComponentGraph.Error)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-graph", false, "cycle") {
+		t.Fatalf("readiness should include component cycle failure: %#v", report.Readiness.Items)
+	}
+}
+
+func TestEnvironmentRestoreAllowsRuntimeComponentDependencyCycle(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.component.runtime-cycle",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{
+				ComponentID:     "app.a",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "app-a",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service"}`,
+				SummaryJSON:     `{}`,
+			},
+			{
+				ComponentID:     "app.b",
+				Kind:            "app",
+				Role:            "business-service",
+				ComposeService:  "app-b",
+				Required:        true,
+				RuntimeJSON:     `{}`,
+				HealthCheckJSON: `{"type":"compose-service"}`,
+				SummaryJSON:     `{}`,
+			},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app.a", ProviderComponentID: "app.b", Phase: "runtime", Capability: "http", Required: true, ProfileJSON: `{}`},
+			{ConsumerComponentID: "app.b", ProviderComponentID: "app.a", Phase: "runtime", Capability: "http", Required: true, ProfileJSON: `{}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build runtime cycle restore report: %v", err)
+	}
+	if !report.OK || !report.ComponentGraph.OK || report.ComponentGraph.BlockingDependencies != 0 || report.ComponentGraph.RuntimeDependencies != 2 || len(report.ComponentGraph.BlockingCycles) != 0 {
+		t.Fatalf("runtime dependency cycle should be allowed by blocking graph gate: %#v", report.ComponentGraph)
+	}
+	if strings.Join(report.ComponentGraph.BlockingOrder, ",") != "app.a,app.b" {
+		t.Fatalf("runtime-only graph should have stable component order: %#v", report.ComponentGraph.BlockingOrder)
 	}
 }
 

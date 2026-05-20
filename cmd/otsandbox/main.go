@@ -19,6 +19,10 @@ import (
 	"strings"
 	"time"
 
+	gonumgraph "gonum.org/v1/gonum/graph"
+	"gonum.org/v1/gonum/graph/simple"
+	"gonum.org/v1/gonum/graph/topo"
+
 	"open-test-sandbox/internal/apicase"
 	"open-test-sandbox/internal/casesuite"
 	"open-test-sandbox/internal/controlplane"
@@ -866,22 +870,24 @@ type environmentRestoreSourcePolicy struct {
 }
 
 type environmentRestoreComponentGraph struct {
-	Configured              bool   `json:"configured"`
-	OK                      bool   `json:"ok"`
-	Components              int    `json:"components"`
-	Dependencies            int    `json:"dependencies"`
-	BlockingDependencies    int    `json:"blockingDependencies"`
-	RuntimeDependencies     int    `json:"runtimeDependencies"`
-	Assets                  int    `json:"assets"`
-	InlineAssetBytes        int64  `json:"inlineAssetBytes"`
-	RemoteAssets            int    `json:"remoteAssets"`
-	RemoteAssetBytes        int64  `json:"remoteAssetBytes"`
-	MissingRemoteAssetRefs  int    `json:"missingRemoteAssetRefs"`
-	RequiredHealthChecks    int    `json:"requiredHealthChecks"`
-	MissingHealthChecks     int    `json:"missingHealthChecks"`
-	LargestInlineAssetID    string `json:"largestInlineAssetId,omitempty"`
-	LargestInlineAssetBytes int64  `json:"largestInlineAssetBytes,omitempty"`
-	Error                   string `json:"error,omitempty"`
+	Configured              bool       `json:"configured"`
+	OK                      bool       `json:"ok"`
+	Components              int        `json:"components"`
+	Dependencies            int        `json:"dependencies"`
+	BlockingDependencies    int        `json:"blockingDependencies"`
+	RuntimeDependencies     int        `json:"runtimeDependencies"`
+	Assets                  int        `json:"assets"`
+	InlineAssetBytes        int64      `json:"inlineAssetBytes"`
+	RemoteAssets            int        `json:"remoteAssets"`
+	RemoteAssetBytes        int64      `json:"remoteAssetBytes"`
+	MissingRemoteAssetRefs  int        `json:"missingRemoteAssetRefs"`
+	RequiredHealthChecks    int        `json:"requiredHealthChecks"`
+	MissingHealthChecks     int        `json:"missingHealthChecks"`
+	BlockingOrder           []string   `json:"blockingOrder,omitempty"`
+	BlockingCycles          [][]string `json:"blockingCycles,omitempty"`
+	LargestInlineAssetID    string     `json:"largestInlineAssetId,omitempty"`
+	LargestInlineAssetBytes int64      `json:"largestInlineAssetBytes,omitempty"`
+	Error                   string     `json:"error,omitempty"`
 }
 
 type environmentRestoreComponentAsset struct {
@@ -1951,6 +1957,7 @@ func environmentRestoreComponentGraphReport(envID string, graph store.Environmen
 		report.Error = err.Error()
 		return report
 	}
+	graphErrors := []string{}
 	componentHealthErrors := []string{}
 	for _, component := range graph.Components {
 		if component.Required {
@@ -1968,6 +1975,12 @@ func environmentRestoreComponentGraphReport(envID string, graph store.Environmen
 			report.BlockingDependencies++
 		}
 	}
+	blockingOrder, blockingCycles, blockingErr := environmentRestoreBlockingDependencyOrder(graph)
+	report.BlockingOrder = blockingOrder
+	report.BlockingCycles = blockingCycles
+	if blockingErr != "" {
+		graphErrors = append(graphErrors, blockingErr)
+	}
 	for _, asset := range graph.Assets {
 		size := int64(len(asset.ContentInline))
 		report.InlineAssetBytes += size
@@ -1984,17 +1997,119 @@ func environmentRestoreComponentGraphReport(envID string, graph store.Environmen
 		}
 	}
 	if report.MissingHealthChecks > 0 {
-		report.OK = false
-		report.Error = fmt.Sprintf("%d required component(s) are missing valid Store-backed health checks", report.MissingHealthChecks)
+		detail := fmt.Sprintf("%d required component(s) are missing valid Store-backed health checks", report.MissingHealthChecks)
 		if len(componentHealthErrors) > 0 {
-			report.Error += ": " + strings.Join(componentHealthErrors, "; ")
+			detail += ": " + strings.Join(componentHealthErrors, "; ")
 		}
+		graphErrors = append(graphErrors, detail)
 	}
 	if report.MissingRemoteAssetRefs > 0 {
+		graphErrors = append(graphErrors, fmt.Sprintf("%d remote component asset(s) are missing remote Git URL/path metadata", report.MissingRemoteAssetRefs))
+	}
+	if len(graphErrors) > 0 {
 		report.OK = false
-		report.Error = fmt.Sprintf("%d remote component asset(s) are missing remote Git URL/path metadata", report.MissingRemoteAssetRefs)
+		report.Error = strings.Join(graphErrors, "; ")
 	}
 	return report
+}
+
+func environmentRestoreBlockingDependencyOrder(g store.EnvironmentComponentGraph) ([]string, [][]string, string) {
+	if len(g.Components) == 0 {
+		return nil, nil, ""
+	}
+	directed := simple.NewDirectedGraph()
+	idByNode := map[int64]string{}
+	nodeByID := map[string]gonumgraph.Node{}
+	for i, component := range g.Components {
+		id := strings.TrimSpace(component.ComponentID)
+		if id == "" {
+			continue
+		}
+		node := simple.Node(i + 1)
+		directed.AddNode(node)
+		idByNode[node.ID()] = id
+		nodeByID[id] = node
+	}
+	orderNodes := func(nodes []gonumgraph.Node) {
+		sort.Slice(nodes, func(i, j int) bool {
+			return idByNode[nodes[i].ID()] < idByNode[nodes[j].ID()]
+		})
+	}
+	selfCycles := [][]string{}
+	for _, dep := range g.Dependencies {
+		if strings.EqualFold(strings.TrimSpace(dep.Phase), "runtime") {
+			continue
+		}
+		consumer := strings.TrimSpace(dep.ConsumerComponentID)
+		provider := strings.TrimSpace(dep.ProviderComponentID)
+		from := nodeByID[provider]
+		to := nodeByID[consumer]
+		if from == nil || to == nil {
+			continue
+		}
+		if from.ID() == to.ID() {
+			selfCycles = append(selfCycles, []string{provider, consumer})
+			continue
+		}
+		directed.SetEdge(directed.NewEdge(from, to))
+	}
+	sorted, err := topo.SortStabilized(directed, orderNodes)
+	order := make([]string, 0, len(sorted))
+	for _, node := range sorted {
+		if node == nil {
+			continue
+		}
+		if id := idByNode[node.ID()]; id != "" {
+			order = append(order, id)
+		}
+	}
+	cycles := selfCycles
+	if err != nil {
+		for _, cycle := range topo.DirectedCyclesIn(directed) {
+			cycles = append(cycles, environmentRestoreGonumNodeIDs(cycle, idByNode))
+		}
+		var unorderable topo.Unorderable
+		if len(cycles) == 0 && errors.As(err, &unorderable) {
+			for _, component := range unorderable {
+				cycles = append(cycles, environmentRestoreGonumNodeIDs(component, idByNode))
+			}
+		}
+	}
+	if len(cycles) > 0 {
+		return order, cycles, "blocking component dependencies contain cycle(s): " + environmentRestoreCycleText(cycles)
+	}
+	if err != nil {
+		return order, cycles, err.Error()
+	}
+	return order, nil, ""
+}
+
+func environmentRestoreGonumNodeIDs(nodes []gonumgraph.Node, idByNode map[int64]string) []string {
+	out := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		if id := idByNode[node.ID()]; id != "" {
+			out = append(out, id)
+		}
+	}
+	if len(out) > 1 && out[0] != out[len(out)-1] {
+		out = append(out, out[0])
+	}
+	return out
+}
+
+func environmentRestoreCycleText(cycles [][]string) string {
+	parts := make([]string, 0, len(cycles))
+	for _, cycle := range cycles {
+		if len(cycle) == 0 {
+			continue
+		}
+		parts = append(parts, strings.Join(cycle, " -> "))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "; ")
 }
 
 func environmentRestoreComponentAssetRemoteRefOK(asset store.ComponentConfigAsset) bool {
