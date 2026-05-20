@@ -80,6 +80,7 @@ publishing it to the verified discovery list:
 ./bin/otsandbox.sh environment inspect --store local-personal local-sample
 ./bin/otsandbox.sh environment bootstrap --store local-personal local-sample
 ./bin/otsandbox.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --json
+./bin/otsandbox.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --execute --run-workflow --base-url http://127.0.0.1:8080 --json
 ./bin/otsandbox.sh environment verify --store local-personal local-sample --run RUN_ID --status passed --evidence-complete --topology-complete
 ./bin/otsandbox.sh environment publish-verified --store local-personal local-sample
 ```
@@ -101,9 +102,11 @@ under `--workspace`, shows Git clone commands when repos are recorded, and
 prints the Docker Compose pull/build/up plan plus recorded health checks. Add
 `--execute` to clone missing remote repositories, run Docker Compose, and wait
 for recorded health checks. Add `--pull` with `--execute` to update existing
-checkouts using `git pull --ff-only`. The final workflow run remains anchored
-to the recorded verification workflow, so a restored environment is validated
-against the same workflow that qualified it.
+checkouts using `git pull --ff-only`. Add `--run-workflow` with `--execute` to
+run the recorded verification workflow after Docker health checks pass; the run,
+case runs, and Evidence indexes are written to the selected Store. Use
+`--base-url` for the restored target endpoint and `--workflow-output-dir` when
+you want a fixed local report directory.
 
 ## Create and Install a Import Bundle
 

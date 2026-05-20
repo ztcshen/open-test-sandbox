@@ -249,7 +249,7 @@ Usage:
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
-  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--health-timeout-seconds N] [--json]
+  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--run-workflow] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
   otsandbox environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
   otsandbox environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
@@ -599,6 +599,7 @@ type environmentRestoreReport struct {
 	Compose              map[string]any                 `json:"compose"`
 	HealthChecks         []any                          `json:"healthChecks"`
 	Docker               environmentRestoreDockerReport `json:"docker"`
+	Workflow             environmentRestoreWorkflowRun  `json:"workflow"`
 	NextActions          []string                       `json:"nextActions"`
 }
 
@@ -641,6 +642,23 @@ type environmentRestoreHealthCheckReport struct {
 	Error      string `json:"error,omitempty"`
 }
 
+type environmentRestoreWorkflowRun struct {
+	OK         bool                     `json:"ok"`
+	Action     string                   `json:"action"`
+	WorkflowID string                   `json:"workflowId"`
+	RunID      string                   `json:"runId,omitempty"`
+	OutputDir  string                   `json:"outputDir,omitempty"`
+	Counts     workflowCaseReportCounts `json:"counts,omitempty"`
+	Error      string                   `json:"error,omitempty"`
+}
+
+type environmentRestoreWorkflowOptions struct {
+	Run       bool
+	StoreURL  string
+	BaseURL   string
+	OutputDir string
+}
+
 func runEnvironmentRestore(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("environment restore", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -649,6 +667,9 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	workspace := flags.String("workspace", "", "Local workspace for cloned or existing service checkouts")
 	execute := flags.Bool("execute", false, "Clone or update service repositories, run Docker Compose, and wait for health checks")
 	pull := flags.Bool("pull", false, "Run git pull --ff-only for existing checkouts when --execute is set")
+	runWorkflow := flags.Bool("run-workflow", false, "Run the environment verification workflow after Docker health checks pass")
+	baseURL := flags.String("base-url", "", "Base URL for verification workflow execution")
+	workflowOutputDir := flags.String("workflow-output-dir", "", "Verification workflow report output directory")
 	healthTimeoutSeconds := flags.Int("health-timeout-seconds", 60, "Seconds to wait for recorded Docker service health checks")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
@@ -664,11 +685,28 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if *healthTimeoutSeconds <= 0 {
 		return errors.New("--health-timeout-seconds must be positive")
 	}
-	env, err := loadEnvironmentForCLI(ctx, *storeRef, *storeURL, id)
+	if *runWorkflow && !*execute {
+		return errors.New("--run-workflow requires --execute")
+	}
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	report, err := buildEnvironmentRestoreReport(ctx, env, *workspace, *execute, *pull, time.Duration(*healthTimeoutSeconds)*time.Second)
+	runtime, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = runtime.Close() }()
+	env, err := runtime.GetEnvironment(ctx, id)
+	if err != nil {
+		return err
+	}
+	report, err := buildEnvironmentRestoreReport(ctx, env, *workspace, *execute, *pull, time.Duration(*healthTimeoutSeconds)*time.Second, environmentRestoreWorkflowOptions{
+		Run:       *runWorkflow,
+		StoreURL:  resolvedStoreURL,
+		BaseURL:   *baseURL,
+		OutputDir: *workflowOutputDir,
+	})
 	if err != nil {
 		return err
 	}
@@ -685,7 +723,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	return nil
 }
 
-func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, healthTimeout time.Duration) (environmentRestoreReport, error) {
+func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions) (environmentRestoreReport, error) {
 	workflowID := strings.TrimSpace(env.VerificationWorkflowID)
 	if workflowID == "" {
 		return environmentRestoreReport{}, fmt.Errorf("environment %s has no verification workflow; restore must be anchored to a verified workflow", env.ID)
@@ -705,6 +743,11 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Workspace:            workspace,
 		Compose:              compose,
 		HealthChecks:         healthChecks,
+		Workflow: environmentRestoreWorkflowRun{
+			OK:         !workflowOptions.Run,
+			Action:     "not-requested",
+			WorkflowID: workflowID,
+		},
 		NextActions: []string{
 			"run verification workflow " + workflowID,
 		},
@@ -727,6 +770,12 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 			Action:  "skipped-due-to-repository-error",
 			Workdir: workspace,
 			Error:   "repository preparation did not complete",
+		}
+	}
+	if report.OK && workflowOptions.Run {
+		report.Workflow = environmentRestoreRunWorkflow(ctx, workflowID, workspace, workflowOptions)
+		if !report.Workflow.OK {
+			report.OK = false
 		}
 	}
 	if !execute {
@@ -896,6 +945,41 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 	return report
 }
 
+func environmentRestoreRunWorkflow(ctx context.Context, workflowID string, workspace string, options environmentRestoreWorkflowOptions) environmentRestoreWorkflowRun {
+	report := environmentRestoreWorkflowRun{
+		WorkflowID: workflowID,
+		Action:     "run-verification-workflow",
+	}
+	outputDir := strings.TrimSpace(options.OutputDir)
+	if outputDir == "" {
+		outputDir = filepath.Join(workspace, ".otsandbox", "reports", "workflow."+safeReportID(workflowID)+"."+time.Now().UTC().Format("20060102T150405.000000000Z"))
+	}
+	absOutputDir, err := filepath.Abs(outputDir)
+	if err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, "", "", options.StoreURL)
+	if err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	defer cleanup()
+	workflowReport, err := executeWorkflowCaseReport(ctx, bundle, sourceStore, workflowID, absOutputDir, options.BaseURL)
+	if err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	report.OK = workflowReport.OK
+	report.RunID = workflowReport.RunID
+	report.OutputDir = absOutputDir
+	report.Counts = workflowReport.Counts
+	if !workflowReport.OK {
+		report.Error = "verification workflow did not pass"
+	}
+	return report
+}
+
 func restoreGitCloneArgs(spec environmentRestoreRepoSpec) []string {
 	args := []string{"clone"}
 	if strings.TrimSpace(spec.Branch) != "" {
@@ -1050,6 +1134,16 @@ func printEnvironmentRestoreReport(report environmentRestoreReport) {
 	}
 	if report.Docker.Error != "" {
 		fmt.Printf("  error: %s\n", report.Docker.Error)
+	}
+	fmt.Printf("Workflow: %s [%s]\n", report.Workflow.WorkflowID, report.Workflow.Action)
+	if report.Workflow.RunID != "" {
+		fmt.Printf("  run: %s\n", report.Workflow.RunID)
+	}
+	if report.Workflow.OutputDir != "" {
+		fmt.Printf("  report: %s\n", report.Workflow.OutputDir)
+	}
+	if report.Workflow.Error != "" {
+		fmt.Printf("  error: %s\n", report.Workflow.Error)
 	}
 	for _, action := range report.NextActions {
 		fmt.Printf("Next: %s\n", action)

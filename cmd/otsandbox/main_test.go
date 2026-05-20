@@ -718,6 +718,83 @@ func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) 
 	}
 }
 
+func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	outputDir := filepath.Join(t.TempDir(), "workflow-report")
+	fakeDockerEnv, _ := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/first":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"item_id":"item-001"}`)
+		case "/second":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer targetServer.Close()
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	runCLI(t, "config", "publish", "--from", writeWorkflowBatchReportProfile(t), "--store", "sqlite://"+storePath)
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.workflow.restore",
+		"--compose-file", "compose.yml",
+		"--health-url", healthServer.URL+"/ready",
+		"--verification-workflow", "workflow.alpha",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv,
+		"environment", "restore",
+		"--store", "sqlite://"+storePath,
+		"--workspace", workspace,
+		"--execute",
+		"--run-workflow",
+		"--base-url", targetServer.URL,
+		"--workflow-output-dir", outputDir,
+		"--json",
+		"env.workflow.restore",
+	)
+	var report struct {
+		OK       bool `json:"ok"`
+		Executed bool `json:"executed"`
+		Docker   struct {
+			OK bool `json:"ok"`
+		} `json:"docker"`
+		Workflow struct {
+			OK         bool   `json:"ok"`
+			Action     string `json:"action"`
+			WorkflowID string `json:"workflowId"`
+			RunID      string `json:"runId"`
+			OutputDir  string `json:"outputDir"`
+			Counts     struct {
+				Total  int `json:"total"`
+				Passed int `json:"passed"`
+				Failed int `json:"failed"`
+			} `json:"counts"`
+		} `json:"workflow"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode restore workflow json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Executed || !report.Docker.OK || !report.Workflow.OK || report.Workflow.Action != "run-verification-workflow" || report.Workflow.WorkflowID != "workflow.alpha" || report.Workflow.RunID == "" {
+		t.Fatalf("restore workflow report = %#v", report)
+	}
+	if report.Workflow.OutputDir != outputDir || report.Workflow.Counts.Total != 2 || report.Workflow.Counts.Passed != 2 || report.Workflow.Counts.Failed != 0 {
+		t.Fatalf("restore workflow counts/output = %#v", report.Workflow)
+	}
+	caseRunsOut := runCLI(t, "case", "runs", "--store", "sqlite://"+storePath, "--run", report.Workflow.RunID, "--json")
+	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
+		t.Fatalf("restore workflow did not persist case runs: %s", caseRunsOut)
+	}
+}
+
 func TestEnvironmentRestoreRequiresVerificationWorkflow(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	runCLI(t, "environment", "register",
