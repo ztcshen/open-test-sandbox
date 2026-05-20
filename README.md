@@ -16,10 +16,11 @@ The current product direction is Store-first:
 
 - Test engineers use the sandbox through APIs and UI. They do not maintain a
   separate sandbox project or repeatedly edit external configuration.
-- PostgreSQL is the default active Store for current sandbox state, runtime
-  facts, workflow catalog, execution state, Evidence indexes, and verification
-  results. Local and remote PostgreSQL databases use the same daily commands;
-  users switch the active database through named Store config.
+- SQL Store is the active Store for current sandbox state, runtime facts,
+  workflow catalog, execution state, Evidence indexes, and verification
+  results. PostgreSQL remains the default, and MySQL is supported for teams
+  whose test environments require it. Local and remote SQL Stores use the same
+  daily commands; users switch the active database through named Store config.
 - SQLite is retained for old local data import, compatibility checks, and tests.
   It is not the product path for new daily workflows.
 - Optional template packages may exist only for import, export, sharing, review,
@@ -44,7 +45,7 @@ and validation tools all read the same facts.
 
 | Capability | What it means |
 | --- | --- |
-| PostgreSQL Store-first | Named PostgreSQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
+| SQL Store-first | Named PostgreSQL or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through sandbox APIs and UI discovery. |
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
@@ -72,14 +73,16 @@ npm ci
 ./bin/otsandbox.sh version
 OTSANDBOX_DEMO_STORE='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
+# MySQL is also supported:
+OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
 ```
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
-`examples/api-cases/create-item.json` case against the active PostgreSQL Store
-or `OTSANDBOX_DEMO_STORE=postgres://...`, and prints the Evidence bundle path.
-The release gate requires a PostgreSQL smoke Store DSN. It runs whitespace
-checks, generated-state checks, source-domain guardrails, Go tests, the demo,
-the React build, active PostgreSQL CLI smoke tests, and PostgreSQL-only
+`examples/api-cases/create-item.json` case against the active SQL Store or
+`OTSANDBOX_DEMO_STORE=postgres://...` / `mysql://...`, and prints the Evidence
+bundle path. The release gate requires a PostgreSQL or MySQL smoke Store DSN.
+It runs whitespace checks, generated-state checks, source-domain guardrails, Go
+tests, the demo, the React build, active SQL Store CLI smoke tests, and
 headless browser smoke tests.
 
 By default, smoke tests use a deterministic synthetic SkyWalking GraphQL
@@ -96,7 +99,7 @@ report unavailable, failed, or skipped status instead of inventing a topology.
 
 ```text
 Sandbox APIs and UI
-  -> active PostgreSQL Store
+  -> active SQL Store (PostgreSQL or MySQL)
   -> catalog read-models
   -> CLI discovery, Control plane APIs, React workbench
   -> case and workflow execution
@@ -110,6 +113,7 @@ Core packages stay generic:
 - `cmd/otsandbox/`: CLI entrypoint and command orchestration.
 - `internal/store/`: Store contract and runtime records.
 - `internal/store/postgres/`: default product Store backend.
+- `internal/store/mysql/`: MySQL product Store backend.
 - `internal/store/sqlite/`: legacy compatibility and migration backend.
 - `internal/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.
 - `internal/apicase/`: HTTP case runner and Evidence writer.
@@ -132,8 +136,8 @@ Core packages stay generic:
 ## Project Principles
 
 - Keep the default developer experience local and lightweight while using a
-  named PostgreSQL Store for daily product flows.
-- Keep local and remote PostgreSQL usage command-compatible: switch the active
+  named SQL Store for daily product flows.
+- Keep local and remote SQL Store usage command-compatible: switch the active
   Store instead of changing daily commands.
 - Test engineers should call sandbox APIs or use the UI, not maintain separate
   configuration projects.
@@ -155,7 +159,8 @@ Current working areas:
   workflow reports;
 - Evidence: request, response, assertions, summaries, logs, topology, timing;
 - workbench: local React pages backed by Control plane APIs;
-- release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`.
+- release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`
+  or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`.
 
 Next areas are Store-first registration APIs, a cleaner current-state workbench,
 stronger post-process scheduling, verified environment bootstrap, and richer
@@ -167,6 +172,8 @@ Run the full local gate before publishing a change:
 
 ```sh
 OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
+# or
+OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and

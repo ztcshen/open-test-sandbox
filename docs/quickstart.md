@@ -35,9 +35,9 @@ bundle. For final live topology sign-off, add
 `step-01` through `step-10` so release-check fails instead of using the
 synthetic SkyWalking provider or a partial trace-id set.
 The demo command starts a temporary local HTTP endpoint, runs the generic
-`examples/api-cases/create-item.json` case against the active PostgreSQL Store
-or MySQL Store, or `OTSANDBOX_DEMO_STORE=postgres://...` /
-`OTSANDBOX_DEMO_STORE=mysql://...`, and prints the Evidence bundle path.
+`examples/api-cases/create-item.json` case against the active SQL Store, or
+`OTSANDBOX_DEMO_STORE=postgres://...` / `OTSANDBOX_DEMO_STORE=mysql://...`, and
+prints the Evidence bundle path.
 Demo output is kept under the system temp directory so you can inspect it after
 the command exits. Set `OTSANDBOX_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.
@@ -198,17 +198,16 @@ commands and never adds volume deletion flags. These review commands are a
 state snapshot for human inspection, not a backup of volumes, databases, or
 runtime data. During `--execute`, requested cleanup is blocked unless
 `--allow-destructive-docker-cleanup` is also present. This cleanup applies only
-to the recorded target Compose project; the sandbox PostgreSQL control-plane
-Store must stay outside that Docker environment.
+to the recorded target Compose project; the sandbox SQL control-plane Store
+must stay outside that Docker environment.
 
 When you want to evaluate a new colleague machine without touching the current
 machine's running target containers, use `--assume-clean-docker` on a dry-run.
 That mode assumes the target Docker containers do not exist on the colleague
 machine, skips local fixed-name container conflict blocking, and still checks
-the PostgreSQL Store boundary, remote service repositories, Store-generated
-startup files, component startup batches, Docker Compose commands, and health
-gates. It cannot be combined with `--execute`, container adoption, or cleanup
-flags.
+the SQL Store boundary, remote service repositories, Store-generated startup
+files, component startup batches, Docker Compose commands, and health gates. It
+cannot be combined with `--execute`, container adoption, or cleanup flags.
 
 The control-plane API exposes the same recovery shape through
 `GET /api/environments/{environmentId}/bootstrap`: repository steps, Docker
@@ -245,8 +244,8 @@ API cases, templates, fixtures, and bindings.
 
 Open `http://127.0.0.1:18191/`.
 
-The PostgreSQL Store is the target for daily testing workflows. The same CLI
-commands work for a local PostgreSQL database or a remote team PostgreSQL
+SQL Store is the target for daily testing workflows. The same CLI commands work
+for a local PostgreSQL/MySQL database or a remote team PostgreSQL/MySQL
 database; switch the selected Store with `store use NAME` or override one
 command with `--store NAME_OR_DSN`.
 

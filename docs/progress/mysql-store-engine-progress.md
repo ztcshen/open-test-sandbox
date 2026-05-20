@@ -85,3 +85,53 @@ Remaining gaps:
   MySQL test environment DSN.
 - Decide whether the public release gate should support both PostgreSQL and
   MySQL in one command or keep separate environment-specific release gates.
+
+## 2026-05-20 MySQL API Store Smoke Slice
+
+Progress: `[##################--] 90%`
+
+Implemented:
+
+- Added `tools/smoke/mysql-store-api-smoke.mjs`, a focused HTTP/API smoke for
+  named MySQL Stores.
+- Added `npm run smoke:api:mysql-store`.
+- Updated README, docs index, quickstart, and backend capability wording so the
+  documented daily Store path is SQL Store-first with PostgreSQL as default and
+  MySQL as a supported product Store.
+- The smoke builds one temporary `otsandbox` binary, registers a named
+  `api-mysql` Store, runs schema upgrade, starts `serve --store api-mysql`, and
+  verifies the active control-plane APIs use the MySQL Store path.
+- The smoke asserts:
+  - `/api/store/current` reports the named MySQL Store and masks the password;
+  - `/api/template-packages/catalog-index` and `/api/catalog` read the published
+    smoke profile from Store;
+  - `/api/workflows?filter=workflow.alpha` returns the 10-step workflow from
+    Store;
+  - `/api/sandbox/services` writes a new service and `/api/catalog` reads it
+    back from the Store-backed catalog.
+
+Validated with a temporary local MySQL 8.0 container on
+`127.0.0.1:54160`:
+
+- `OTSANDBOX_MYSQL_API_SMOKE_DSN='mysql://root:...@127.0.0.1:54160/otsandbox_api_smoke?tls=false' npm run smoke:api:mysql-store`
+- `node --test tools/smoke/control-plane-smoke.test.mjs`
+- `go test ./internal/store/... -count=1`
+- `git diff --check`
+- `tools/guardrails/check_store_first_contracts.sh`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+
+Release-check status:
+
+- MySQL `npm run release-check` was rerun with the temporary MySQL Store DSN.
+  It again reached `tools/guardrails/check_no_source_domain_core.sh` and stopped
+  on existing source-domain terms in docs/progress, docs/plans,
+  `cmd/otsandbox/main_test.go`, and `internal/controlplane/api_case_batch_run.go`.
+  This remains outside the MySQL Store engine slice, but keeps full
+  release-check incomplete.
+
+Remaining gaps:
+
+- Run MySQL contract, CLI active Store smoke, and API Store smoke against the
+  company's real MySQL test environment DSN.
+- Full release-check needs the existing source-domain guardrail violation
+  cleaned up or scoped before this goal can be marked complete.
