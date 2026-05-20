@@ -19,6 +19,10 @@ func TestMySQLStoreContractWithExternalDatabase(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set OTSANDBOX_MYSQL_TEST_DSN to run the MySQL Store contract")
 	}
+	mode, err := parseMySQLTestDSNMode(os.Getenv("OTSANDBOX_MYSQL_TEST_DSN_MODE"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	adminCfg, err := mysql.ParseConfigFromURL(dsn)
 	if err != nil {
@@ -33,10 +37,6 @@ func TestMySQLStoreContractWithExternalDatabase(t *testing.T) {
 		t.Fatalf("ping mysql test database: %v", err)
 	}
 	cfg := adminCfg
-	mode, err := parseMySQLTestDSNMode(os.Getenv("OTSANDBOX_MYSQL_TEST_DSN_MODE"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	if mode == "existing" {
 		databaseName := mysqlTestDatabaseName(t, dsn)
 		if !isDedicatedMySQLTestDatabase(databaseName) {

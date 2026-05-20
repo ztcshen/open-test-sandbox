@@ -39,12 +39,19 @@ fi
 
 node tools/smoke/skywalking-release-guard.mjs "npm run release-check:mysql-real"
 
+requested_contract_mode="${OTSANDBOX_MYSQL_TEST_DSN_MODE:-existing}"
+if [[ "$requested_contract_mode" != "existing" ]]; then
+  echo "npm run release-check:mysql-real requires OTSANDBOX_MYSQL_TEST_DSN_MODE=existing." >&2
+  echo "Use generic release-check with an explicitly isolated local admin database for create-drop contract tests." >&2
+  exit 1
+fi
+
 echo "Running MySQL release-check against dedicated Store: $masked" >&2
 echo "Real SkyWalking release mode: required" >&2
 export OTSANDBOX_SMOKE_STORE_DSN="$raw_dsn"
 export OTSANDBOX_MYSQL_TEST_DSN="${OTSANDBOX_MYSQL_TEST_DSN:-$raw_dsn}"
-export OTSANDBOX_MYSQL_TEST_DSN_MODE="${OTSANDBOX_MYSQL_TEST_DSN_MODE:-existing}"
-echo "MySQL Store contract mode: $OTSANDBOX_MYSQL_TEST_DSN_MODE" >&2
+export OTSANDBOX_MYSQL_TEST_DSN_MODE="existing"
+echo "MySQL Store contract mode: existing" >&2
 if [[ "${OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN:-}" == "1" ]]; then
   echo "Validated MySQL release-check Store: $masked" >&2
   echo "Would run: npm run release-check" >&2

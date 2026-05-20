@@ -1157,3 +1157,33 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Real Wrapper Existing Contract Mode Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Moved live MySQL contract mode validation before any MySQL DSN parse, open,
+  or ping, so missing or unknown `OTSANDBOX_MYSQL_TEST_DSN_MODE` fails before
+  touching the database.
+- Tightened `npm run release-check:mysql-real` so company final sign-off always
+  requires `OTSANDBOX_MYSQL_TEST_DSN_MODE=existing` and rejects `create-drop`
+  overrides before it advertises or runs the release gate.
+- Kept generic MySQL `npm run release-check` able to default to `existing`,
+  while reserving `create-drop` for explicit local admin-only contract tests.
+- Updated quickstart, Store backend, and release checklist docs to spell out
+  that the MySQL real wrapper is existing-database only.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs`
+- `go test ./internal/store -run 'TestParseMySQLTestDSNMode|TestMySQLStoreContractWithExternalDatabase' -count=1`
+- `bash -n tools/release-check.sh tools/smoke/mysql-real-store-release-check.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.

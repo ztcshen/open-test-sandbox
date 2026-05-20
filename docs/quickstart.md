@@ -87,7 +87,8 @@ the company account needs normal DDL/DML permissions on that dedicated Store
 database but does not need permission to create or drop databases. It also
 requires the real SkyWalking release mode and trace ids for all 10 workflow
 steps; `OTS_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic
-topology smoke is not accepted by this wrapper.
+topology smoke is not accepted by this wrapper, and
+`OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop` overrides are rejected.
 Direct Go MySQL contract tests also require an explicit
 `OTSANDBOX_MYSQL_TEST_DSN_MODE`; use `existing` for company smoke databases and
 reserve `create-drop` for local admin-only tests.

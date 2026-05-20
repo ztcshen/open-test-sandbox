@@ -172,7 +172,8 @@ account needs normal DDL/DML permissions on that dedicated database but does not
 need permission to create or drop databases. This wrapper is final-signoff
 oriented: it also requires `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
 an `http` or `https` `OTS_TRACE_GRAPHQL_URL`, and `OTS_SMOKE_TRACE_IDS` for all
-10 workflow steps.
+10 workflow steps. It rejects `OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop`
+overrides.
 Direct Go contract tests require an explicit `OTSANDBOX_MYSQL_TEST_DSN_MODE`.
 Use `existing` for company smoke databases. Use `create-drop` only for local
 admin-only contract tests where the account is allowed to create and drop
