@@ -718,6 +718,22 @@ func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) 
 	}
 }
 
+func TestEnvironmentRestoreFailsBeforeDockerWhenComposeFileIsMissing(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.missing.compose",
+		"--compose-file", "missing-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFails(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.missing.compose")
+	if !strings.Contains(out, "missing-compose-file") || !strings.Contains(out, "missing-compose.yml") {
+		t.Fatalf("missing compose restore output = %q", out)
+	}
+}
+
 func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")
@@ -795,6 +811,68 @@ func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.
 	}
 }
 
+func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "restore-active-pg")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	outputDir := filepath.Join(t.TempDir(), "workflow-report")
+	envID := uniqueTestID(t, "env.restore.pg")
+	fakeDockerEnv, _ := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/first":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"item_id":"item-001"}`)
+		case "/second":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer targetServer.Close()
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	runCLI(t, "config", "publish", "--from", writeWorkflowBatchReportProfile(t))
+	runCLI(t, "environment", "register",
+		"--id", envID,
+		"--compose-file", "compose.yml",
+		"--health-url", healthServer.URL+"/ready",
+		"--verification-workflow", "workflow.alpha",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv,
+		"environment", "restore",
+		envID,
+		"--workspace", workspace,
+		"--execute",
+		"--run-workflow",
+		"--base-url", targetServer.URL,
+		"--workflow-output-dir", outputDir,
+		"--json",
+	)
+	var report struct {
+		OK       bool `json:"ok"`
+		Executed bool `json:"executed"`
+		Workflow struct {
+			OK    bool   `json:"ok"`
+			RunID string `json:"runId"`
+		} `json:"workflow"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode active PostgreSQL restore json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Executed || !report.Workflow.OK || report.Workflow.RunID == "" {
+		t.Fatalf("active PostgreSQL restore report = %#v", report)
+	}
+	caseRunsOut := runCLI(t, "case", "runs", "--run", report.Workflow.RunID, "--json")
+	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
+		t.Fatalf("active PostgreSQL restore did not persist case runs: %s", caseRunsOut)
+	}
+}
+
 func TestEnvironmentRestoreRequiresVerificationWorkflow(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	runCLI(t, "environment", "register",
@@ -844,6 +922,41 @@ func TestEnvironmentRestorePullsExistingCheckoutWhenRequested(t *testing.T) {
 	}
 	if strings.Join(report.Repos[0].Command, " ") != "git -C "+checkout+" pull --ff-only" {
 		t.Fatalf("restore pull command = %#v", report.Repos[0].Command)
+	}
+}
+
+func TestEnvironmentRestoreAcceptsExistingCheckoutWithoutRepoURL(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	checkout := filepath.Join(workspace, "entry-gateway")
+	fakeDockerEnv, _ := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(checkout, "README.md"), "# existing checkout\n")
+	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.existing.checkout",
+		"--service", "entry-gateway",
+		"--checkout", "entry-gateway=entry-gateway",
+		"--compose-file", "docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.existing.checkout")
+	var report struct {
+		OK    bool `json:"ok"`
+		Repos []struct {
+			ServiceID string `json:"serviceId"`
+			Action    string `json:"action"`
+			Exists    bool   `json:"exists"`
+			OK        bool   `json:"ok"`
+		} `json:"repos"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode existing checkout restore json: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Repos) != 1 || report.Repos[0].ServiceID != "entry-gateway" || report.Repos[0].Action != "use-existing-checkout" || !report.Repos[0].Exists || !report.Repos[0].OK {
+		t.Fatalf("existing checkout restore report = %#v", report)
 	}
 }
 

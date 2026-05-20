@@ -106,7 +106,9 @@ checkouts using `git pull --ff-only`. Add `--run-workflow` with `--execute` to
 run the recorded verification workflow after Docker health checks pass; the run,
 case runs, and Evidence indexes are written to the selected Store. Use
 `--base-url` for the restored target endpoint and `--workflow-output-dir` when
-you want a fixed local report directory.
+you want a fixed local report directory. When `composeFile` is recorded, the
+file must exist under `--workspace` after optional repository preparation;
+restore fails before invoking Docker if it is missing.
 
 ## Create and Install a Import Bundle
 

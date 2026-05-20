@@ -847,15 +847,9 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 		Checkout:  spec.Checkout,
 		OK:        true,
 	}
-	if strings.TrimSpace(spec.URL) == "" {
-		report.OK = false
-		report.Action = "missing-repo-url"
-		report.Error = "repository url is required for restore"
-		return report
-	}
 	if stat, err := os.Stat(spec.Checkout); err == nil && stat.IsDir() {
 		report.Exists = true
-		if !execute || !pull {
+		if strings.TrimSpace(spec.URL) == "" || !execute || !pull {
 			report.Action = "use-existing-checkout"
 			return report
 		}
@@ -864,6 +858,12 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 		report.Command = append([]string{"git"}, args...)
 		report.Output, report.Error = runRestoreGitCommand(ctx, args...)
 		report.OK = report.Error == ""
+		return report
+	}
+	if strings.TrimSpace(spec.URL) == "" {
+		report.OK = false
+		report.Action = "missing-repo-url"
+		report.Error = "repository url is required when checkout is missing"
 		return report
 	}
 	if !execute {
@@ -919,6 +919,19 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 		report.Action = "prepare-workspace"
 		report.Error = err.Error()
 		return report
+	}
+	if report.ComposeFile != "" {
+		if stat, err := os.Stat(report.ComposeFile); err != nil {
+			report.OK = false
+			report.Action = "missing-compose-file"
+			report.Error = fmt.Sprintf("compose file is required before Docker execution: %s", report.ComposeFile)
+			return report
+		} else if stat.IsDir() {
+			report.OK = false
+			report.Action = "invalid-compose-file"
+			report.Error = fmt.Sprintf("compose file path is a directory: %s", report.ComposeFile)
+			return report
+		}
 	}
 	if report.Action == "plan-docker-compose" {
 		report.Action = "run-docker-compose"
