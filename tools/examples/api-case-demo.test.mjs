@@ -19,6 +19,13 @@ describe("api-case demo Store selection", () => {
     assert.deepEqual(store.upgradeArgs, ["--store", store.label]);
   });
 
+  it("uses an explicit MySQL demo Store", () => {
+    const store = demoStore("/tmp/ots-demo", { OTSANDBOX_DEMO_STORE: "mysql://user:secret@example.com:3306/ots?tls=false" });
+    assert.equal(store.label, "mysql://user:secret@example.com:3306/ots?tls=false");
+    assert.deepEqual(store.storeArgs, ["--store", store.label]);
+    assert.deepEqual(store.upgradeArgs, ["--store", store.label]);
+  });
+
   it("uses a named Store and lets the CLI resolve it", () => {
     const store = demoStore("/tmp/ots-demo", { OTSANDBOX_DEMO_STORE: "local-personal" });
     assert.equal(store.label, "local-personal");

@@ -310,3 +310,25 @@ Current blocker:
 
 - Real company MySQL Store DSN is still required for
   `npm run release-check:mysql-real` and final completion.
+
+## 2026-05-21 MySQL Demo Smoke Contract Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Added explicit MySQL Store coverage to the API case demo Store selection
+  tests, matching the documented `OTSANDBOX_DEMO_STORE=mysql://...` product
+  path.
+- Renamed the active SQL Store CLI smoke temporary workspace prefix from a
+  PostgreSQL-specific name to a SQL Store name so MySQL smoke runs no longer
+  carry misleading PG-only runtime labels.
+
+Validated:
+
+- `node --test tools/examples/api-case-demo.test.mjs`
+
+Current blocker:
+
+- Still requires a dedicated company MySQL Store DSN to run
+  `npm run release-check:mysql-real` against the real company test environment.

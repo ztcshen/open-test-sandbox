@@ -140,7 +140,7 @@ async function main() {
   const dsn = requiredSQLStoreDSN();
 	const backend = storeBackend(dsn);
 	const storeName = backend === "mysql" ? "active-mysql" : "active-pg";
-	const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-cli-pg-smoke-"));
+	const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-cli-sql-smoke-"));
   const targetPort = await freePort();
   let targetServer;
   let traceProvider;
