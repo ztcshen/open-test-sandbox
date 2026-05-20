@@ -79,8 +79,9 @@ OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or
-`OTSANDBOX_DEMO_STORE=postgres://...` / `mysql://...`, and prints the Evidence
-bundle path. The release gate requires a PostgreSQL or MySQL smoke Store DSN.
+`OTSANDBOX_DEMO_STORE=postgres://...` /
+`OTSANDBOX_DEMO_STORE=mysql://...`, and prints the Evidence bundle path. The
+release gate requires a PostgreSQL or MySQL smoke Store DSN.
 It runs whitespace checks, generated-state checks, source-domain guardrails, Go
 tests, the demo, the React build, active SQL Store CLI smoke tests, and
 headless browser smoke tests.

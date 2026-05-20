@@ -68,7 +68,8 @@ OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false
 
 `demo:api-case` 会启动一个临时本地 HTTP 服务，执行
 `examples/api-cases/create-item.json`，写入 active SQL Store 或
-`OTSANDBOX_DEMO_STORE=postgres://...` / `mysql://...`，并打印 Evidence 目录。
+`OTSANDBOX_DEMO_STORE=postgres://...` /
+`OTSANDBOX_DEMO_STORE=mysql://...`，并打印 Evidence 目录。
 `release-check` 要求提供 PostgreSQL 或 MySQL smoke Store DSN，会运行空白检查、
 生成态检查、核心守卫、Go 测试、demo、React build、active SQL Store CLI smoke
 和无头浏览器冒烟。

@@ -63,7 +63,8 @@ What to point out:
 
 - `demo:api-case` starts a temporary local HTTP service and writes Evidence
   indexes to the active PostgreSQL/MySQL Store or an explicit
-  `OTSANDBOX_DEMO_STORE=postgres://...` / `mysql://...`.
+  `OTSANDBOX_DEMO_STORE=postgres://...` /
+  `OTSANDBOX_DEMO_STORE=mysql://...`.
 - `release-check` requires a PostgreSQL or MySQL smoke Store DSN, then runs
   guardrails, Go tests, the demo, the React build, active SQL Store CLI smoke,
   and SQL Store headless browser smoke tests.
@@ -78,7 +79,7 @@ What to point out:
 
 - `demo:api-case` 会启动临时本地 HTTP 服务，并把 Evidence 索引写入 active
   PostgreSQL/MySQL Store 或显式 `OTSANDBOX_DEMO_STORE=postgres://...` /
-  `mysql://...`。
+  `OTSANDBOX_DEMO_STORE=mysql://...`。
 - `release-check` 要求提供 PostgreSQL 或 MySQL smoke Store DSN，然后运行守卫、
   Go 测试、demo、React build、active SQL Store CLI smoke 和 SQL Store 无头浏览器冒烟。
 - 真实 SkyWalking 验证是更严格的 sign-off 模式：设置

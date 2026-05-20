@@ -35,7 +35,7 @@ describe("api-case demo Store selection", () => {
   it("rejects an explicit SQLite Store unless compatibility mode is enabled", () => {
     assert.throws(
       () => demoStore("/tmp/ots-demo", { OTSANDBOX_DEMO_STORE: "sqlite:///tmp/ots-demo/store.sqlite" }),
-      /OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO/,
+      /OTSANDBOX_DEMO_STORE=mysql:\/\/\.\.\./,
     );
   });
 

@@ -611,3 +611,31 @@ Current blocker:
   to add beyond Store guidance.
 - A non-blocking scan found follow-up MySQL guidance cleanup in demo/share docs
   and `tools/examples/api-case-demo.mjs`; that is queued as a separate slice.
+
+## 2026-05-21 Demo MySQL Guidance Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Updated the API case demo SQLite rejection errors so the MySQL product path is
+  shown as the complete `OTSANDBOX_DEMO_STORE=mysql://...` environment entry.
+- Updated README, README.zh-CN, and share-kit demo wording so PostgreSQL and
+  MySQL demo Store examples use matching full `OTSANDBOX_DEMO_STORE=...`
+  prefixes.
+- Added a focused regression test proving the SQLite demo rejection now points
+  users at a complete MySQL demo Store entry unless explicit SQLite
+  compatibility mode is enabled.
+
+Validated:
+
+- `node --test tools/examples/api-case-demo.test.mjs`
+- Targeted scan of README/share-kit/api-case-demo guidance for half-written
+  MySQL demo Store examples.
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Daily CLI/API named active Store parity still has deeper DSN-gated coverage
+  to add beyond Store guidance.

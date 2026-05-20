@@ -90,10 +90,10 @@ export function demoStore(tempDir, env = process.env) {
   const sqliteCompat = flagEnabled(env.OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO);
   if (explicitStore.trim()) {
     if (isSQLiteStore(explicitStore) && !sqliteCompat) {
-      throw new Error("SQLite demo Store requires OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1; use OTSANDBOX_DEMO_STORE=postgres://... or mysql://... for the product path");
+      throw new Error("SQLite demo Store requires OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1; use OTSANDBOX_DEMO_STORE=postgres://... or OTSANDBOX_DEMO_STORE=mysql://... for the product path");
     }
     if (explicitStore.includes("://") && !isProductSQLStore(explicitStore) && !sqliteCompat) {
-      throw new Error("Demo Store must be postgres://... or mysql://... unless SQLite compatibility is explicit");
+      throw new Error("Demo Store must be OTSANDBOX_DEMO_STORE=postgres://... or OTSANDBOX_DEMO_STORE=mysql://... unless SQLite compatibility is explicit");
     }
     return { label: explicitStore, storeArgs: ["--store", explicitStore], upgradeArgs: ["--store", explicitStore] };
   }
