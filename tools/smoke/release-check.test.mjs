@@ -36,6 +36,18 @@ function runRealMySQLWrapper(env) {
   });
 }
 
+test("release-check missing Store guidance lists every supported smoke Store env", () => {
+  const result = runReleaseCheck(releaseCheckEnv({
+    OTSANDBOX_SMOKE_STORE_DSN: "",
+    OTSANDBOX_SMOKE_STORE: "",
+  }));
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE is required/);
+  assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE='mysql:\/\/user:pass@host:3306\/otsandbox_smoke\?tls=false'/);
+  assert.doesNotMatch(result.stdout, /checking SkyWalking smoke provider mode/);
+});
+
 test("release-check real SkyWalking mode requires a GraphQL URL before expensive gates", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",

@@ -21,9 +21,9 @@ git diff --check
 
 step "checking SQL smoke Store"
 if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
-  echo "OTSANDBOX_SMOKE_STORE_DSN is required for release-check." >&2
+  echo "OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE is required for release-check." >&2
   echo "Example: OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check" >&2
-  echo "MySQL is also supported: OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check" >&2
+  echo "MySQL is also supported: OTSANDBOX_SMOKE_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check" >&2
   exit 1
 fi
 smoke_store_dsn="${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}"
@@ -32,7 +32,7 @@ if is_postgres_store_dsn "$smoke_store_dsn"; then
 elif is_mysql_store_dsn "$smoke_store_dsn"; then
   export OTSANDBOX_MYSQL_TEST_DSN="${OTSANDBOX_MYSQL_TEST_DSN:-$smoke_store_dsn}"
 else
-  echo "OTSANDBOX_SMOKE_STORE_DSN must be postgres://, postgresql://, or mysql://." >&2
+  echo "OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be postgres://, postgresql://, or mysql://." >&2
   exit 1
 fi
 

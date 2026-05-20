@@ -609,8 +609,6 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Daily CLI/API named active Store parity still has deeper DSN-gated coverage
   to add beyond Store guidance.
-- A non-blocking scan found follow-up MySQL guidance cleanup in demo/share docs
-  and `tools/examples/api-case-demo.mjs`; that is queued as a separate slice.
 
 ## 2026-05-21 Demo MySQL Guidance Slice
 
@@ -632,6 +630,33 @@ Validated:
 - `node --test tools/examples/api-case-demo.test.mjs`
 - Targeted scan of README/share-kit/api-case-demo guidance for half-written
   MySQL demo Store examples.
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Daily CLI/API named active Store parity still has deeper DSN-gated coverage
+  to add beyond Store guidance.
+
+## 2026-05-21 Release Gate Shared Store Env Guidance Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Updated `tools/release-check.sh` missing/invalid Store guidance to list both
+  supported release Store env names: `OTSANDBOX_SMOKE_STORE_DSN` and
+  `OTSANDBOX_SMOKE_STORE`.
+- Added a focused regression test proving the release gate stops before
+  expensive checks when no Store env is configured and prints a complete MySQL
+  shared Store example.
+- Kept the actual Store selection logic unchanged: PostgreSQL and MySQL DSNs are
+  still accepted from either shared release Store env.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs`
+- `bash -n tools/release-check.sh tools/smoke/mysql-real-store-release-check.sh`
 
 Current blocker:
 
