@@ -8550,6 +8550,16 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 
 func TestCaseSuiteCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "daily-suite-pg")
+	runCaseSuiteCommandsUseNamedActiveStore(t, "pg", "PostgreSQL")
+}
+
+func TestCaseSuiteCommandsUseNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-suite-mysql")
+	runCaseSuiteCommandsUseNamedActiveStore(t, "mysql", "MySQL")
+}
+
+func runCaseSuiteCommandsUseNamedActiveStore(t *testing.T, runLabel string, label string) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("mode") {
 		case "bad":
@@ -8569,7 +8579,7 @@ func TestCaseSuiteCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		"--tag", "smoke",
 		"--owner", "team-a",
 		"--base-url", server.URL,
-		"--output-dir", filepath.Join(t.TempDir(), "pg-suite-report"),
+		"--output-dir", filepath.Join(t.TempDir(), runLabel+"-suite-report"),
 		"--json",
 	)
 	var suiteReport struct {
@@ -8586,20 +8596,20 @@ func TestCaseSuiteCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(reportOut), &suiteReport); err != nil {
-		t.Fatalf("decode PostgreSQL suite report json: %v\n%s", err, reportOut)
+		t.Fatalf("decode %s suite report json: %v\n%s", label, err, reportOut)
 	}
 	if !suiteReport.OK || suiteReport.Counts.Total != 1 || suiteReport.Counts.Passed != 1 || suiteReport.Counts.Failed != 0 || len(suiteReport.Results) != 1 {
-		t.Fatalf("PostgreSQL suite report = %#v", suiteReport)
+		t.Fatalf("%s suite report = %#v", label, suiteReport)
 	}
 	if suiteReport.Results[0].CaseID != "case.alpha.default" || suiteReport.Results[0].CaseRunID == "" || suiteReport.Results[0].DetailURL == "" {
-		t.Fatalf("PostgreSQL suite report result = %#v", suiteReport.Results[0])
+		t.Fatalf("%s suite report result = %#v", label, suiteReport.Results[0])
 	}
 
 	variantOut := runCLI(t,
 		"case", "suite", "report",
 		"--tag", "negative",
 		"--base-url", server.URL,
-		"--output-dir", filepath.Join(t.TempDir(), "pg-variant-suite-report"),
+		"--output-dir", filepath.Join(t.TempDir(), runLabel+"-variant-suite-report"),
 		"--json",
 	)
 	var variantReport struct {
@@ -8615,13 +8625,13 @@ func TestCaseSuiteCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(variantOut), &variantReport); err != nil {
-		t.Fatalf("decode PostgreSQL variant suite report json: %v\n%s", err, variantOut)
+		t.Fatalf("decode %s variant suite report json: %v\n%s", label, err, variantOut)
 	}
 	if !variantReport.OK || variantReport.Counts.Total != 1 || variantReport.Counts.Passed != 1 || variantReport.Counts.DerivedConfigs != 1 {
-		t.Fatalf("PostgreSQL variant suite report = %#v", variantReport)
+		t.Fatalf("%s variant suite report = %#v", label, variantReport)
 	}
 	if len(variantReport.Results) != 1 || variantReport.Results[0].CaseID != "case.alpha.variant" || variantReport.Results[0].HTTPCode != http.StatusBadRequest {
-		t.Fatalf("PostgreSQL variant suite result = %#v", variantReport.Results)
+		t.Fatalf("%s variant suite result = %#v", label, variantReport.Results)
 	}
 
 	coverageOut := runCLI(t, "case", "suite", "coverage", "--status", "active", "--json")
@@ -8635,17 +8645,17 @@ func TestCaseSuiteCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"counts"`
 	}
 	if err := json.Unmarshal([]byte(coverageOut), &coverage); err != nil {
-		t.Fatalf("decode PostgreSQL suite coverage json: %v\n%s", err, coverageOut)
+		t.Fatalf("decode %s suite coverage json: %v\n%s", label, err, coverageOut)
 	}
 	if !coverage.OK || coverage.Counts.Total != 2 || coverage.Counts.Passed != 2 || coverage.Counts.Failed != 0 || coverage.Counts.NotRun != 0 {
-		t.Fatalf("PostgreSQL suite coverage = %#v", coverage)
+		t.Fatalf("%s suite coverage = %#v", label, coverage)
 	}
 
 	priorityOut := runCLI(t,
 		"case", "suite", "priority",
 		"--signal", "Alpha",
 		"--limit", "2",
-		"--request-id", "pg-change-001",
+		"--request-id", runLabel+"-change-001",
 		"--base-url", server.URL,
 		"--json",
 	)
@@ -8663,13 +8673,13 @@ func TestCaseSuiteCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"batchRequest"`
 	}
 	if err := json.Unmarshal([]byte(priorityOut), &priority); err != nil {
-		t.Fatalf("decode PostgreSQL suite priority json: %v\n%s", err, priorityOut)
+		t.Fatalf("decode %s suite priority json: %v\n%s", label, err, priorityOut)
 	}
-	if !priority.OK || priority.Counts.Selected != 2 || priority.Counts.Blocked != 0 || priority.BatchRequest.RequestID != "pg-change-001" || priority.BatchRequest.BaseURL != server.URL {
-		t.Fatalf("PostgreSQL suite priority = %#v", priority)
+	if !priority.OK || priority.Counts.Selected != 2 || priority.Counts.Blocked != 0 || priority.BatchRequest.RequestID != runLabel+"-change-001" || priority.BatchRequest.BaseURL != server.URL {
+		t.Fatalf("%s suite priority = %#v", label, priority)
 	}
 	if strings.Join(priority.BatchRequest.CaseIDs, ",") != strings.Join(priority.CaseIDs, ",") || len(priority.CaseIDs) != 2 {
-		t.Fatalf("PostgreSQL suite priority case ids = %#v batch=%#v", priority.CaseIDs, priority.BatchRequest.CaseIDs)
+		t.Fatalf("%s suite priority case ids = %#v batch=%#v", label, priority.CaseIDs, priority.BatchRequest.CaseIDs)
 	}
 
 	briefOut := runCLI(t, "case", "suite", "brief", "--signal", "Alpha", "--limit", "2", "--base-url", server.URL, "--json")
@@ -8685,10 +8695,10 @@ func TestCaseSuiteCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"recommended"`
 	}
 	if err := json.Unmarshal([]byte(briefOut), &brief); err != nil {
-		t.Fatalf("decode PostgreSQL suite brief json: %v\n%s", err, briefOut)
+		t.Fatalf("decode %s suite brief json: %v\n%s", label, err, briefOut)
 	}
 	if !brief.OK || brief.Counts.Ready != 2 || brief.Counts.Blocked != 0 || brief.Counts.PrioritySelected != 2 || len(brief.Recommended) != 2 {
-		t.Fatalf("PostgreSQL suite brief = %#v", brief)
+		t.Fatalf("%s suite brief = %#v", label, brief)
 	}
 }
 
