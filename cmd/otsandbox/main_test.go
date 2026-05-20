@@ -2440,7 +2440,18 @@ func TestEnvironmentRestoreAssumeCleanDockerIgnoresLocalContainerConflicts(t *te
 		ComposeJSON:            `{"composeFile":"compose.yml","generatedFiles":{"compose.yml":"services:\n  mysql:\n    image: mysql:8\n    container_name: sandbox-mysql\n"}}`,
 		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
 		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{AssumeCleanDocker: true})
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{AssumeCleanDocker: true}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql", Required: true, HealthCheckJSON: `{"kind":"compose-service","service":"mysql"}`},
+			{ComponentID: "gateway", Kind: "app", Role: "business-service", ComposeService: "gateway", Required: true, HealthCheckJSON: `{"kind":"url","url":"http://127.0.0.1:18080/health"}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "gateway", ProviderComponentID: "mysql", Required: true},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "mysql", AssetID: "mysql.schema", AssetKind: "mysql-ddl", TargetPath: "mysql/init/schema.sql", ContentInline: "create table demo(id bigint);"},
+		},
+	})
 	if err != nil {
 		t.Fatalf("build clean-machine restore report: %v", err)
 	}
@@ -2464,6 +2475,12 @@ func TestEnvironmentRestoreAssumeCleanDockerIgnoresLocalContainerConflicts(t *te
 	}
 	if !restoreCleanMachinePrereqOK(report.CleanMachine.Prerequisites, "tool:docker") || !restoreCleanMachinePrereqOK(report.CleanMachine.Prerequisites, "docker-start-plan") {
 		t.Fatalf("clean-machine prerequisites = %#v", report.CleanMachine.Prerequisites)
+	}
+	if report.CleanMachine.Summary.Components != 2 || report.CleanMachine.Summary.StartupBatches != 2 || report.CleanMachine.Summary.HealthGates != 2 {
+		t.Fatalf("clean-machine component summary = %#v", report.CleanMachine.Summary)
+	}
+	if report.CleanMachine.Summary.InlineAssetBytes == 0 || report.CleanMachine.Summary.GraphMetadataLimitBytes != store.ComponentGraphMaxBytes || report.CleanMachine.Summary.DockerImagesStored || report.CleanMachine.Summary.LargeBinariesStored {
+		t.Fatalf("clean-machine storage summary = %#v", report.CleanMachine.Summary)
 	}
 }
 

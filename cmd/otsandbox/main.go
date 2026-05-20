@@ -889,10 +889,28 @@ type environmentRestoreReport struct {
 
 type environmentRestoreCleanMachinePlan struct {
 	Ready          bool                                         `json:"ready"`
+	Summary        environmentRestoreCleanMachineSummary        `json:"summary,omitempty"`
 	PrepareCommand []string                                     `json:"prepareCommand,omitempty"`
 	ExecuteCommand []string                                     `json:"executeCommand,omitempty"`
 	Prerequisites  []environmentRestoreCleanMachinePrerequisite `json:"prerequisites,omitempty"`
 	Notes          []string                                     `json:"notes,omitempty"`
+}
+
+type environmentRestoreCleanMachineSummary struct {
+	EnvironmentID           string `json:"environmentId,omitempty"`
+	VerificationWorkflow    string `json:"verificationWorkflow,omitempty"`
+	Components              int    `json:"components"`
+	StartupBatches          int    `json:"startupBatches"`
+	HealthGates             int    `json:"healthGates"`
+	ServiceRepositories     int    `json:"serviceRepositories"`
+	StartupAssets           int    `json:"startupAssets"`
+	RemoteComponentAssets   int    `json:"remoteComponentAssets"`
+	InlineAssetBytes        int64  `json:"inlineAssetBytes"`
+	RemoteAssetBytes        int64  `json:"remoteAssetBytes"`
+	GraphMetadataLimitBytes int    `json:"graphMetadataLimitBytes"`
+	InlineAssetLimitBytes   int    `json:"inlineAssetLimitBytes"`
+	DockerImagesStored      bool   `json:"dockerImagesStored"`
+	LargeBinariesStored     bool   `json:"largeBinariesStored"`
 }
 
 type environmentRestoreCleanMachinePrerequisite struct {
@@ -1473,6 +1491,22 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 	}
 	plan := environmentRestoreCleanMachinePlan{
 		Ready: report.OK,
+		Summary: environmentRestoreCleanMachineSummary{
+			EnvironmentID:           report.EnvironmentID,
+			VerificationWorkflow:    report.VerificationWorkflow,
+			Components:              report.ComponentGraph.Components,
+			StartupBatches:          len(report.ComponentStartupPlan.Batches),
+			HealthGates:             len(report.ComponentStartupPlan.HealthGates),
+			ServiceRepositories:     len(report.Repos),
+			StartupAssets:           len(report.Preflight.StartupAssets),
+			RemoteComponentAssets:   report.ComponentGraph.RemoteAssets,
+			InlineAssetBytes:        report.ComponentGraph.InlineAssetBytes,
+			RemoteAssetBytes:        report.ComponentGraph.RemoteAssetBytes,
+			GraphMetadataLimitBytes: store.ComponentGraphMaxBytes,
+			InlineAssetLimitBytes:   store.ComponentAssetInlineMaxBytes,
+			DockerImagesStored:      false,
+			LargeBinariesStored:     false,
+		},
 		PrepareCommand: []string{
 			"otsandbox",
 			"environment",

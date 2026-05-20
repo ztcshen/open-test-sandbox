@@ -2389,3 +2389,21 @@ Remote source policy slice:
   Docker-side business environment, and gate it with health checks. CLI/API
   parity polish, frontend refinements, and richer report/topology details stay
   secondary unless they directly unblock that one-click restore path.
+- 2026-05-20T10:01Z implementation slice: `cleanMachine.summary` now exposes
+  a compact machine-readable restore footprint for the new-machine path:
+  environment id, verification workflow, component count, startup batch count,
+  health gate count, service repository count, startup asset count, remote
+  component asset count, inline/remote asset byte counters, Store metadata
+  limits, and explicit `dockerImagesStored=false` /
+  `largeBinariesStored=false` flags. This keeps the PG-driven restore plan
+  honest: PostgreSQL stores compact component/startup metadata and small
+  deterministic startup text, while Docker images, code, large binaries, logs,
+  runtime databases, and Evidence payloads stay outside the sandbox Store.
+- Verification: focused clean-machine CLI coverage passed with a component
+  graph containing middleware, a business service, a blocking dependency, two
+  health gates, and an inline DDL asset. A real `local-pg` clean-machine
+  dry-run for `scf-chain-core10-local-docker` returned `ok=true`,
+  `cleanMachine.ready=true`, 24 components, two startup batches, 24 health
+  gates, seven service repositories, 15 startup assets, four remote component
+  assets, 27,150 inline asset bytes, a 65,536 byte graph metadata limit, and
+  no failed readiness items.
