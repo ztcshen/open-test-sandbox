@@ -12,32 +12,13 @@ if [[ -z "$raw_dsn" ]]; then
   exit 1
 fi
 
-dsn_info=$(RAW_DSN="$raw_dsn" node <<'NODE'
-const raw = String(process.env.RAW_DSN || "").trim();
-try {
-  const parsed = new URL(raw);
-  const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
-  const masked = new URL(raw);
-  if (masked.password) masked.password = "xxxxx";
-  const safeName = /(^|[_-])otsandbox([_-]|$)|(^|[_-])(smoke|test|ci)([_-]|$)/i.test(database);
-  console.log(JSON.stringify({
-    ok: true,
-    scheme: parsed.protocol.replace(/:$/, "").toLowerCase(),
-    database,
-    safeName,
-    masked: masked.toString(),
-  }));
-} catch (error) {
-  console.log(JSON.stringify({ ok: false, error: error.message }));
-}
-NODE
-)
+dsn_info=$(node tools/smoke/mysql-store-dsn-guard.mjs "$raw_dsn")
 
 scheme=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(p.scheme || '')" "$dsn_info")
 database=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(p.database || '')" "$dsn_info")
 safe_name=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(String(!!p.safeName))" "$dsn_info")
 masked=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(p.masked || '')" "$dsn_info")
-parse_ok=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(String(!!p.ok))" "$dsn_info")
+parse_ok=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(String(!!p.parseOK))" "$dsn_info")
 
 if [[ "$parse_ok" != "true" || "$scheme" != "mysql" || -z "$database" ]]; then
   echo "OTSANDBOX_REAL_MYSQL_STORE_DSN must be a mysql:// DSN with a database path." >&2

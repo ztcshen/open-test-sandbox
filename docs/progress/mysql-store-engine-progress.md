@@ -927,6 +927,35 @@ Current blocker:
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
 
+## 2026-05-21 Shared MySQL Smoke DSN Guard Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added a shared MySQL smoke Store DSN guard for release tooling so MySQL URL
+  parsing, password masking, database-path checks, and dedicated
+  sandbox/smoke/test/CI database-name checks use one rule.
+- Rewired generic `npm run release-check`, guarded
+  `npm run release-check:mysql-real`, and standalone
+  `npm run smoke:api:mysql-store` to call the shared guard instead of carrying
+  separate parsing logic.
+- Added focused unit coverage for the guard, including uppercase MySQL schemes,
+  missing database paths, non-MySQL DSNs, unsafe database names, and credential
+  masking.
+
+Validated:
+
+- `node --test tools/smoke/mysql-store-dsn-guard.test.mjs tools/smoke/release-check.test.mjs tools/smoke/mysql-store-api-smoke.test.mjs`
+- `bash -n tools/release-check.sh tools/smoke/mysql-real-store-release-check.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.
+
 ## 2026-05-21 MySQL Smoke Store Safe Database Guard Slice
 
 Progress: `[###################-] 98%`

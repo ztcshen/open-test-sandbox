@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { prepareSmokeTraceProvider, writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const workflowStepCount = 10;
@@ -16,23 +17,7 @@ export function requiredMySQLDSN(env = process.env) {
   if (!dsn.trim()) {
     throw new Error("Set OTSANDBOX_MYSQL_API_SMOKE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to run the MySQL Store API smoke");
   }
-  let parsed;
-  try {
-    parsed = new URL(dsn);
-  } catch {
-    throw new Error("The MySQL Store API smoke requires a mysql:// Store DSN with a database path");
-  }
-  if (parsed.protocol.toLowerCase() !== "mysql:") {
-    throw new Error("The MySQL Store API smoke requires a mysql:// Store DSN");
-  }
-  const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
-  if (!database) {
-    throw new Error("The MySQL Store API smoke requires a mysql:// Store DSN with a database path");
-  }
-  const safeName = /(^|[_-])otsandbox([_-]|$)|(^|[_-])(smoke|test|ci)([_-]|$)/i.test(database);
-  if (!safeName) {
-    throw new Error(`The MySQL Store API smoke refuses database '${database}'; use a dedicated sandbox/smoke/test/ci database name`);
-  }
+  requireSafeMySQLStoreDSN(dsn, { label: "The MySQL Store API smoke" });
   return dsn;
 }
 
