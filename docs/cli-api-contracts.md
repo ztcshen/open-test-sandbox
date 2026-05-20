@@ -92,6 +92,14 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
 | `GET` | `/api/dashboard` | Return dashboard summary, Store-aware when available. |
 | `GET` | `/api/catalog` | Return catalog payload, Store-aware when available. |
 | `GET` | `/api/interface-nodes` | List interface nodes; accepts `serviceId`, `operation`, and `filter`, matching `interface-node discover`. |
+
+Environment health checks are Store-backed JSON objects. Supported restore
+probe shapes are `{"kind":"url","url":"https://..."}` for GET 2xx,
+`{"kind":"tcp","address":"HOST:PORT"}` for socket readiness,
+`{"kind":"command","command":"..."}` for workspace-local command exit 0, and
+`{"kind":"compose-service","service":"NAME"}` for Docker Compose service state.
+CLI registration exposes the same shapes through `--health-url`,
+`--health-tcp`, `--health-command`, and `--health-compose-service`.
 | `GET` | `/api/interface-node` | Return interface-node detail; accepts `id`, plus optional run context. |
 | `GET` | `/api/interface-node/coverage` | Return workflow/interface coverage. |
 | `GET` | `/api/interface-node/coverage-gaps` | Return coverage gaps. |

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -623,7 +624,7 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	)
 	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
 
-	dryRunOut := runCLI(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.restore")
+	dryRunOut := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.restore")
 	var dryRun struct {
 		OK                   bool   `json:"ok"`
 		Executed             bool   `json:"executed"`
@@ -868,6 +869,100 @@ func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) 
 	}
 }
 
+func TestEnvironmentRestoreRunsMixedHealthProbes(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, _ := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp health: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.health.mixed",
+		"--compose-file", "compose.yml",
+		"--health-url", healthServer.URL+"/ready",
+		"--health-tcp", listener.Addr().String(),
+		"--health-command", "test -f compose.yml",
+		"--health-compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.health.mixed")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			HealthChecks []struct {
+				Kind    string `json:"kind"`
+				OK      bool   `json:"ok"`
+				State   string `json:"state"`
+				Health  string `json:"health"`
+				Service string `json:"service"`
+			} `json:"healthChecks"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode mixed health restore json: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Docker.HealthChecks) != 4 {
+		t.Fatalf("mixed health report = %#v", report)
+	}
+	seen := map[string]bool{}
+	for _, check := range report.Docker.HealthChecks {
+		if !check.OK {
+			t.Fatalf("mixed health check failed: %#v", check)
+		}
+		seen[check.Kind] = true
+		if check.Kind == "compose-service" && (check.Service != "web" || check.State != "running" || check.Health != "healthy") {
+			t.Fatalf("compose service health = %#v", check)
+		}
+	}
+	for _, kind := range []string{"url", "tcp", "command", "compose-service"} {
+		if !seen[kind] {
+			t.Fatalf("missing health kind %s in %#v", kind, report.Docker.HealthChecks)
+		}
+	}
+}
+
+func TestEnvironmentRestoreFailsWhenHealthProbeFails(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, _ := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.health.fail",
+		"--compose-file", "compose.yml",
+		"--health-command", "echo nope && exit 7",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--health-timeout-seconds", "1", "--json", "env.health.fail")
+	if !strings.Contains(out, `"kind": "command"`) || !strings.Contains(out, "exit status 7") {
+		t.Fatalf("health failure output = %q", out)
+	}
+	inspectOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.health.fail")
+	if !strings.Contains(inspectOut, `"phase": "health-check"`) {
+		t.Fatalf("health failure should persist health-check phase: %s", inspectOut)
+	}
+}
+
 func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")
@@ -924,6 +1019,7 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, _ := fakeDockerCommand(t)
 	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
 	runCLI(t, "environment", "register",
 		"--store", "sqlite://"+storePath,
@@ -934,7 +1030,7 @@ func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 		"--verification-workflow", "workflow.core-10",
 	)
 
-	out := runCLI(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--clean-docker-state", "--clean-docker-images", "--json", "env.cleanup.plan")
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--clean-docker-state", "--clean-docker-images", "--json", "env.cleanup.plan")
 	var report struct {
 		OK     bool `json:"ok"`
 		Docker struct {
@@ -1330,6 +1426,39 @@ func TestEnvironmentRestoreRejectsExistingCheckoutWithDifferentOrigin(t *testing
 	}
 }
 
+func TestEnvironmentRestoreStopsBeforeDockerWhenRepositoryPrecheckFails(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.restore.repo.precheck",
+		"--repo", "entry-gateway="+filepath.Join(t.TempDir(), "missing.git"),
+		"--checkout", "entry-gateway=entry-gateway",
+		"--compose-file", "compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.restore.repo.precheck")
+	if !strings.Contains(out, "skipped-due-to-repository-error") || !strings.Contains(out, "repository") {
+		t.Fatalf("repo precheck restore output = %q", out)
+	}
+	if raw, err := os.ReadFile(dockerCallsPath); err == nil {
+		calls := string(raw)
+		for _, forbidden := range []string{" pull", " build", " up -d", " down "} {
+			if strings.Contains(calls, forbidden) {
+				t.Fatalf("repo precheck failure should not run docker command %q:\n%s", forbidden, calls)
+			}
+		}
+	}
+	inspectOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.restore.repo.precheck")
+	if !strings.Contains(inspectOut, `"phase": "repository"`) {
+		t.Fatalf("repo precheck failure should persist repository phase: %s", inspectOut)
+	}
+}
+
 func TestEnvironmentRestoreChecksOutRequestedRefAfterClone(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	remoteRepo := createBareGitRepo(t, "main")
@@ -1480,6 +1609,7 @@ func TestEnvironmentRestorePreflightRequiresGitForExistingCheckoutRef(t *testing
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	remoteRepo := createBareGitRepo(t, "main")
 	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, _ := fakeDockerCommand(t)
 	checkout := filepath.Join(workspace, "entry-gateway")
 	runGit(t, "", "clone", "--branch", "main", remoteRepo, checkout)
 	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
@@ -1494,7 +1624,7 @@ func TestEnvironmentRestorePreflightRequiresGitForExistingCheckoutRef(t *testing
 		"--verification-workflow", "workflow.core-10",
 	)
 
-	out := runCLI(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.restore.preflight.existing.ref")
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.restore.preflight.existing.ref")
 	var report struct {
 		Preflight struct {
 			Tools []struct {
@@ -7950,7 +8080,7 @@ func fakeDockerCommand(t *testing.T) ([]string, string) {
 	dir := t.TempDir()
 	callsPath := filepath.Join(dir, "docker-calls.txt")
 	dockerPath := filepath.Join(dir, "docker")
-	writeFile(t, dockerPath, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DOCKER_CALLS_FILE\"\n")
+	writeFile(t, dockerPath, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DOCKER_CALLS_FILE\"\nif [ \"$1\" = \"compose\" ]; then\n  prev=\"\"\n  service=\"\"\n  for arg in \"$@\"; do\n    if [ \"$prev\" = \"--format\" ] && [ \"$arg\" = \"json\" ]; then\n      service=\"__next__\"\n    elif [ \"$service\" = \"__next__\" ]; then\n      service=\"$arg\"\n    fi\n    prev=\"$arg\"\n  done\n  if [ -n \"$service\" ] && [ \"$service\" != \"__next__\" ]; then\n    printf '{\"Name\":\"%s\",\"Service\":\"%s\",\"State\":\"running\",\"Health\":\"healthy\"}\\n' \"$service\" \"$service\"\n  fi\nfi\n")
 	if err := os.Chmod(dockerPath, 0o755); err != nil {
 		t.Fatalf("chmod fake docker: %v", err)
 	}

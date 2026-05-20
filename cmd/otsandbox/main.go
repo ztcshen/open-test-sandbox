@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"html"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -246,7 +247,7 @@ Usage:
   otsandbox store status [--store NAME_OR_DSN]
   otsandbox store upgrade [--store NAME_OR_DSN]
   otsandbox store ddl [--backend postgres]
-  otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--compose-file PATH] [--start-command TEXT] [--health-url URL] [--verification-workflow ID] [--json]
+  otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--compose-file PATH] [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
@@ -464,7 +465,7 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	composeSkipBuild := flags.Bool("compose-skip-build", false, "Skip Docker Compose build during restore")
 	startCommand := flags.String("start-command", "", "Local startup command")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	var services, repos, branches, repoRefs, checkouts, healthURLs, composeEnvFiles, composeProfiles, composeServices stringListFlag
+	var services, repos, branches, repoRefs, checkouts, healthURLs, healthTCPs, healthCommands, healthComposeServices, composeEnvFiles, composeProfiles, composeServices stringListFlag
 	flags.Var(&services, "service", "Service id; repeat for multiple services")
 	flags.Var(&repos, "repo", "Service repo as SERVICE=PATH_OR_URL; repeat for multiple services")
 	flags.Var(&branches, "branch", "Service branch as SERVICE=BRANCH; repeat for multiple services")
@@ -474,6 +475,9 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	flags.Var(&composeProfiles, "compose-profile", "Docker Compose profile; repeat for multiple profiles")
 	flags.Var(&composeServices, "compose-service", "Docker Compose service to start; repeat for multiple services")
 	flags.Var(&healthURLs, "health-url", "Health check URL; repeat for multiple checks")
+	flags.Var(&healthTCPs, "health-tcp", "TCP health check address as HOST:PORT; repeat for multiple checks")
+	flags.Var(&healthCommands, "health-command", "Shell command health check; repeat for multiple checks")
+	flags.Var(&healthComposeServices, "health-compose-service", "Docker Compose service health check; repeat for multiple services")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -493,7 +497,7 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		ServicesJSON:           mustCompactJSON(environmentServices(services, repos, branches, repoRefs, checkouts)),
 		ReposJSON:              mustCompactJSON(environmentRepoMap(repos, branches, repoRefs, checkouts)),
 		ComposeJSON:            mustCompactJSON(environmentComposeConfig(*composeFile, *startCommand, *composeProjectName, composeEnvFiles, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild)),
-		HealthChecksJSON:       mustCompactJSON(environmentHealthChecks(healthURLs)),
+		HealthChecksJSON:       mustCompactJSON(environmentHealthChecks(healthURLs, healthTCPs, healthCommands, healthComposeServices)),
 		VerificationWorkflowID: strings.TrimSpace(*verificationWorkflowID),
 		SummaryJSON:            mustCompactJSON(map[string]any{"source": "cli"}),
 	}
@@ -673,9 +677,16 @@ type environmentRestoreDockerCleanupReport struct {
 
 type environmentRestoreHealthCheckReport struct {
 	ID         string `json:"id,omitempty"`
+	Kind       string `json:"kind"`
 	URL        string `json:"url"`
+	Address    string `json:"address,omitempty"`
+	Command    string `json:"command,omitempty"`
+	Service    string `json:"service,omitempty"`
 	OK         bool   `json:"ok"`
 	StatusCode int    `json:"statusCode,omitempty"`
+	State      string `json:"state,omitempty"`
+	Health     string `json:"health,omitempty"`
+	Output     string `json:"output,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
 
@@ -1004,9 +1015,31 @@ func environmentRestoreSummaryDocker(report environmentRestoreDockerReport) map[
 		"commandCount":   len(report.Commands),
 		"healthChecks":   len(report.HealthChecks),
 		"healthPassed":   passedHealth,
+		"healthFailed":   environmentRestoreSummaryFailedHealth(report.HealthChecks),
 		"cleanup":        environmentRestoreSummaryCleanup(report.Cleanup),
 		"error":          report.Error,
 		"capturedOutput": len(report.Output),
+	}
+	return out
+}
+
+func environmentRestoreSummaryFailedHealth(checks []environmentRestoreHealthCheckReport) []map[string]any {
+	out := []map[string]any{}
+	for _, item := range checks {
+		if item.OK {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":         item.ID,
+			"kind":       item.Kind,
+			"url":        redaction.URL(item.URL),
+			"address":    item.Address,
+			"service":    item.Service,
+			"statusCode": item.StatusCode,
+			"state":      item.State,
+			"health":     item.Health,
+			"error":      item.Error,
+		})
 	}
 	return out
 }
@@ -1335,11 +1368,13 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 	}
 	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
 	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
+	composeBaseArgs := []string{}
 	switch {
 	case composeFile != "":
 		report.Action = "plan-docker-compose"
 		report.ComposeFile = restoreWorkspacePath(workspace, composeFile)
 		baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, report.ComposeFile)
+		composeBaseArgs = baseArgs
 		services := stringSliceFromAny(compose["services"])
 		report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions)
 		if !boolFromReportAny(compose["skipPull"]) {
@@ -1430,7 +1465,7 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 			return report
 		}
 	}
-	report.HealthChecks = waitEnvironmentRestoreHealthChecks(ctx, healthChecks, healthTimeout)
+	report.HealthChecks = waitEnvironmentRestoreHealthChecks(ctx, healthChecks, healthTimeout, workspace, composeBaseArgs)
 	for _, check := range report.HealthChecks {
 		if !check.OK {
 			report.OK = false
@@ -1579,26 +1614,55 @@ func runRestoreCommand(ctx context.Context, workdir string, command []string) (s
 	return output, ""
 }
 
-func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeout time.Duration) []environmentRestoreHealthCheckReport {
+func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeout time.Duration, workspace string, composeBaseArgs []string) []environmentRestoreHealthCheckReport {
 	out := make([]environmentRestoreHealthCheckReport, 0, len(checks))
 	for _, raw := range checks {
 		item, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		url := strings.TrimSpace(valueString(item["url"]))
-		if url == "" {
-			continue
+		kind := strings.TrimSpace(valueString(item["kind"]))
+		if kind == "" && strings.TrimSpace(valueString(item["url"])) != "" {
+			kind = "url"
 		}
-		out = append(out, waitEnvironmentRestoreHealthCheck(ctx, environmentRestoreHealthCheckReport{
-			ID:  strings.TrimSpace(valueString(item["id"])),
-			URL: url,
-		}, timeout))
+		check := environmentRestoreHealthCheckReport{
+			ID:      strings.TrimSpace(valueString(item["id"])),
+			Kind:    kind,
+			URL:     strings.TrimSpace(valueString(item["url"])),
+			Address: strings.TrimSpace(valueString(item["address"])),
+			Command: strings.TrimSpace(valueString(item["command"])),
+			Service: strings.TrimSpace(valueString(item["service"])),
+		}
+		switch check.Kind {
+		case "url", "":
+			if check.URL == "" {
+				continue
+			}
+			out = append(out, waitEnvironmentRestoreURLHealthCheck(ctx, check, timeout))
+		case "tcp":
+			if check.Address == "" {
+				continue
+			}
+			out = append(out, waitEnvironmentRestoreTCPHealthCheck(ctx, check, timeout))
+		case "command":
+			if check.Command == "" {
+				continue
+			}
+			out = append(out, waitEnvironmentRestoreCommandHealthCheck(ctx, check, timeout, workspace))
+		case "compose-service":
+			if check.Service == "" {
+				continue
+			}
+			out = append(out, waitEnvironmentRestoreComposeServiceHealthCheck(ctx, check, timeout, workspace, composeBaseArgs))
+		default:
+			check.Error = "unsupported health check kind: " + check.Kind
+			out = append(out, check)
+		}
 	}
 	return out
 }
 
-func waitEnvironmentRestoreHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
+func waitEnvironmentRestoreURLHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
 	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(timeout)
 	var lastErr string
@@ -1632,6 +1696,124 @@ func waitEnvironmentRestoreHealthCheck(ctx context.Context, check environmentRes
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+func waitEnvironmentRestoreTCPHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
+	deadline := time.Now().Add(timeout)
+	var lastErr string
+	for {
+		dialer := net.Dialer{Timeout: 2 * time.Second}
+		conn, err := dialer.DialContext(ctx, "tcp", check.Address)
+		if err == nil {
+			_ = conn.Close()
+			check.OK = true
+			check.Error = ""
+			return check
+		}
+		lastErr = err.Error()
+		if time.Now().After(deadline) {
+			check.Error = lastErr
+			return check
+		}
+		select {
+		case <-ctx.Done():
+			check.Error = ctx.Err().Error()
+			return check
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+func waitEnvironmentRestoreCommandHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration, workspace string) environmentRestoreHealthCheckReport {
+	return waitEnvironmentRestoreCommand(ctx, check, timeout, workspace, []string{"/bin/sh", "-c", check.Command}, func(check *environmentRestoreHealthCheckReport, output string) bool {
+		check.Output = truncateReportText(output, 200)
+		return true
+	})
+}
+
+func waitEnvironmentRestoreComposeServiceHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration, workspace string, composeBaseArgs []string) environmentRestoreHealthCheckReport {
+	if len(composeBaseArgs) == 0 {
+		check.Error = "compose service health check requires composeFile"
+		return check
+	}
+	command := append(append([]string{"docker", "compose"}, composeBaseArgs...), "ps", "--format", "json", check.Service)
+	return waitEnvironmentRestoreCommand(ctx, check, timeout, workspace, command, func(check *environmentRestoreHealthCheckReport, output string) bool {
+		check.Output = truncateReportText(output, 200)
+		state, health := parseComposeServiceHealth(output)
+		check.State = state
+		check.Health = health
+		return state == "running" && (health == "" || health == "healthy")
+	})
+}
+
+func waitEnvironmentRestoreCommand(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration, workspace string, command []string, ok func(*environmentRestoreHealthCheckReport, string) bool) environmentRestoreHealthCheckReport {
+	deadline := time.Now().Add(timeout)
+	var lastErr string
+	for {
+		output, errText := runRestoreCommand(ctx, workspace, command)
+		if errText == "" && ok(&check, output) {
+			check.OK = true
+			check.Error = ""
+			if check.Output == "" {
+				check.Output = truncateReportText(output, 200)
+			}
+			return check
+		}
+		if errText != "" {
+			lastErr = errText
+		} else {
+			lastErr = "health command did not report ready"
+		}
+		if time.Now().After(deadline) {
+			check.Error = lastErr
+			if check.Output == "" {
+				check.Output = truncateReportText(output, 200)
+			}
+			return check
+		}
+		select {
+		case <-ctx.Done():
+			check.Error = ctx.Err().Error()
+			return check
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+func parseComposeServiceHealth(output string) (string, string) {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "", ""
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(output), &object); err == nil && object != nil {
+		return strings.ToLower(valueString(firstNonNil(object["State"], object["state"]))), strings.ToLower(valueString(firstNonNil(object["Health"], object["health"])))
+	}
+	var array []map[string]any
+	if err := json.Unmarshal([]byte(output), &array); err == nil && len(array) > 0 {
+		return strings.ToLower(valueString(firstNonNil(array[0]["State"], array[0]["state"]))), strings.ToLower(valueString(firstNonNil(array[0]["Health"], array[0]["health"])))
+	}
+	lower := strings.ToLower(output)
+	state := ""
+	health := ""
+	if strings.Contains(lower, "running") {
+		state = "running"
+	}
+	if strings.Contains(lower, "unhealthy") {
+		health = "unhealthy"
+	} else if strings.Contains(lower, "healthy") {
+		health = "healthy"
+	}
+	return state, health
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func safeCheckoutDirName(value string) string {
@@ -1993,11 +2175,24 @@ func environmentComposeConfig(composeFile string, startCommand string, projectNa
 	return out
 }
 
-func environmentHealthChecks(values stringListFlag) []map[string]any {
-	checks := values.Values()
-	out := make([]map[string]any, 0, len(checks))
-	for index, url := range checks {
-		out = append(out, map[string]any{"id": fmt.Sprintf("health-%02d", index+1), "url": url})
+func environmentHealthChecks(urls stringListFlag, tcpAddresses stringListFlag, commands stringListFlag, composeServices stringListFlag) []map[string]any {
+	out := make([]map[string]any, 0, len(urls.Values())+len(tcpAddresses.Values())+len(commands.Values())+len(composeServices.Values()))
+	index := 1
+	for _, url := range urls.Values() {
+		out = append(out, map[string]any{"id": fmt.Sprintf("health-%02d", index), "kind": "url", "url": url})
+		index++
+	}
+	for _, address := range tcpAddresses.Values() {
+		out = append(out, map[string]any{"id": fmt.Sprintf("health-%02d", index), "kind": "tcp", "address": address})
+		index++
+	}
+	for _, command := range commands.Values() {
+		out = append(out, map[string]any{"id": fmt.Sprintf("health-%02d", index), "kind": "command", "command": command})
+		index++
+	}
+	for _, service := range composeServices.Values() {
+		out = append(out, map[string]any{"id": fmt.Sprintf("health-%02d", index), "kind": "compose-service", "service": service})
+		index++
 	}
 	return out
 }

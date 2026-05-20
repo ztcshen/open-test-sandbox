@@ -406,18 +406,44 @@ func environmentBootstrapHealthPlan(checks []any) []map[string]any {
 	out := make([]map[string]any, 0, len(checks))
 	for _, raw := range checks {
 		item := environmentPlanMap(raw)
-		url := strings.TrimSpace(valueString(item["url"]))
-		if url == "" {
+		kind := strings.TrimSpace(valueString(item["kind"]))
+		if kind == "" && strings.TrimSpace(valueString(item["url"])) != "" {
+			kind = "url"
+		}
+		if kind == "" {
 			continue
 		}
-		out = append(out, map[string]any{
+		plan := map[string]any{
 			"id":     strings.TrimSpace(valueString(item["id"])),
-			"url":    url,
-			"method": "GET",
-			"expect": "2xx",
-		})
+			"kind":   kind,
+			"expect": environmentBootstrapHealthExpectation(kind),
+		}
+		for _, field := range []string{"url", "address", "command", "service"} {
+			if value := strings.TrimSpace(valueString(item[field])); value != "" {
+				plan[field] = value
+			}
+		}
+		if kind == "url" {
+			plan["method"] = "GET"
+		}
+		out = append(out, plan)
 	}
 	return out
+}
+
+func environmentBootstrapHealthExpectation(kind string) string {
+	switch kind {
+	case "url":
+		return "2xx"
+	case "tcp":
+		return "connect"
+	case "command":
+		return "exit 0"
+	case "compose-service":
+		return "running and healthy if health is reported"
+	default:
+		return "supported health check"
+	}
 }
 
 func environmentBootstrapSteps(repos []map[string]any, docker map[string]any, healthChecks []any, workflowID string) []map[string]any {

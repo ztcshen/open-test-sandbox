@@ -141,6 +141,16 @@ summary must not contain credentials, raw DSNs, or full logs. This keeps
 dry-runs, blocked cleanup attempts, and successful executions visible through
 `environment inspect` and the control-plane API.
 
+Health checks are Store-backed probes, not only HTTP pings. Use `--health-url`
+for GET 2xx checks, `--health-tcp HOST:PORT` for port readiness,
+`--health-command CMD` for workspace-local command probes, and
+`--health-compose-service SERVICE` to inspect a Docker Compose service after
+startup. Restore does not run probes during dry-run. During `--execute`, all
+registered service repositories must clone, fetch, and ref-prepare first; only
+then does restore run Compose pull/build/up, wait for health probes, and run the
+verification workflow. A failed repository precheck stops before Docker startup,
+and a failed probe records `phase=health-check` in `summary.lastRestore`.
+
 For a colleague-machine simulation, add `--clean-docker-state` during dry-run
 review to include a Compose-scoped cleanup plan before startup. Add
 `--clean-docker-images` only when local images should also be removed with the

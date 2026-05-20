@@ -1585,7 +1585,7 @@ Incomplete work:
 
 ## 2026-05-20 Environment Restore Goal Ledger
 
-Estimated overall new-machine environment restore progress: 96%.
+Estimated overall new-machine environment restore progress: 98%.
 
 Completed evidence:
 
@@ -1643,6 +1643,14 @@ Completed evidence:
   id, phase, preflight, repository actions, Docker/cleanup status, health check
   counts, workflow action, and next actions for later `environment inspect` or
   API review.
+- Restore health checks now support Store-backed URL, TCP, workspace command,
+  and Docker Compose service probes. Dry-run keeps probes as plan data; execute
+  waits for all probes after Docker startup and records failed probe details in
+  restore diagnostics.
+- Restore now has an explicit repository precheck regression: registered
+  business service repositories must clone/fetch/ref-prepare before Docker
+  pull/build/up starts, so missing or mismatched code stops before target Docker
+  startup.
 
 Latest light validation:
 
@@ -1657,6 +1665,10 @@ Latest light validation:
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore' -count=1`
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(ClonesRemoteReposForVerifiedWorkflow|BlocksDockerCleanupWithoutExplicitAllow)' -count=1`
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(RunsMixedHealthProbes|FailsWhenHealthProbeFails|ExecutesDockerComposeWithoutRepository)' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(StopsBeforeDockerWhenRepositoryPrecheckFails|RunsMixedHealthProbes|FailsWhenHealthProbeFails)' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore' -count=1`
+- `go test ./internal/controlplane -run 'TestServerManagesVerifiedEnvironmentCatalogFromStore' -count=1`
 - `rg -n -i 'fall''back' . --glob '!node_modules/**'`
 - `git diff --check`
 
@@ -1670,6 +1682,5 @@ Incomplete work:
 - Docker restore still needs a real operator-approved clean-machine proof;
   destructive cleanup policy guardrails are now present at CLI level but not
   live-validated against real Docker state.
-- Health checks are still HTTP GET 2xx only; future work should add Compose
-  service health, port probes, command probes, dependency ordering, and more
-  durable restore-run records.
+- Future restore hardening should add explicit dependency ordering and richer
+  per-service readiness policies beyond the current Store-backed probes.
