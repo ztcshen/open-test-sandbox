@@ -873,6 +873,9 @@ type environmentRestoreComponentGraph struct {
 	RuntimeDependencies     int    `json:"runtimeDependencies"`
 	Assets                  int    `json:"assets"`
 	InlineAssetBytes        int64  `json:"inlineAssetBytes"`
+	RemoteAssets            int    `json:"remoteAssets"`
+	RemoteAssetBytes        int64  `json:"remoteAssetBytes"`
+	MissingRemoteAssetRefs  int    `json:"missingRemoteAssetRefs"`
 	RequiredHealthChecks    int    `json:"requiredHealthChecks"`
 	MissingHealthChecks     int    `json:"missingHealthChecks"`
 	LargestInlineAssetID    string `json:"largestInlineAssetId,omitempty"`
@@ -1844,12 +1847,36 @@ func environmentRestoreComponentGraphReport(envID string, graph store.Environmen
 			report.LargestInlineAssetBytes = size
 			report.LargestInlineAssetID = asset.AssetID
 		}
+		if strings.TrimSpace(asset.ContentInline) == "" && strings.TrimSpace(asset.RemoteRefJSON) != "" {
+			report.RemoteAssets++
+			report.RemoteAssetBytes += asset.SizeBytes
+			if !environmentRestoreComponentAssetRemoteRefOK(asset) {
+				report.MissingRemoteAssetRefs++
+			}
+		}
 	}
 	if report.MissingHealthChecks > 0 {
 		report.OK = false
 		report.Error = fmt.Sprintf("%d required component(s) are missing Store-backed health checks", report.MissingHealthChecks)
 	}
+	if report.MissingRemoteAssetRefs > 0 {
+		report.OK = false
+		report.Error = fmt.Sprintf("%d remote component asset(s) are missing remote Git URL/path metadata", report.MissingRemoteAssetRefs)
+	}
 	return report
+}
+
+func environmentRestoreComponentAssetRemoteRefOK(asset store.ComponentConfigAsset) bool {
+	ref := jsonObjectString(asset.RemoteRefJSON)
+	path := strings.TrimSpace(valueString(ref["path"]))
+	if path == "" {
+		path = strings.TrimSpace(asset.TargetPath)
+	}
+	if path == "" || filepath.IsAbs(path) || strings.HasPrefix(filepath.Clean(path), ".."+string(os.PathSeparator)) {
+		return false
+	}
+	rawURL := strings.TrimSpace(valueString(ref["url"]))
+	return environmentRestoreIsRemoteGitURL(rawURL)
 }
 
 func environmentRestoreComposeWithComponentAssets(compose map[string]any, graph store.EnvironmentComponentGraph) map[string]any {
@@ -2080,9 +2107,9 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	addItem("store-boundary", true, true, "sandbox PostgreSQL Store must stay outside the restored Docker target environment")
 	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
 	if report.ComponentGraph.Configured {
-		detail := fmt.Sprintf("%d component(s), %d blocking dependency edge(s), %d runtime edge(s), %d asset(s), %d inline asset bytes",
+		detail := fmt.Sprintf("%d component(s), %d blocking dependency edge(s), %d runtime edge(s), %d asset(s), %d inline asset bytes, %d remote asset(s)",
 			report.ComponentGraph.Components, report.ComponentGraph.BlockingDependencies, report.ComponentGraph.RuntimeDependencies,
-			report.ComponentGraph.Assets, report.ComponentGraph.InlineAssetBytes)
+			report.ComponentGraph.Assets, report.ComponentGraph.InlineAssetBytes, report.ComponentGraph.RemoteAssets)
 		if strings.TrimSpace(report.ComponentGraph.Error) != "" {
 			detail = report.ComponentGraph.Error
 		}

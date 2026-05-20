@@ -2151,3 +2151,14 @@ Remote source policy slice:
 - Restore still does not proceed by default on this live machine because
   fixed-name Docker containers already exist. That remaining block is the
   intended non-destructive Docker conflict gate, not a component asset gap.
+- 2026-05-20T08:24Z implementation slice: component graph readiness now
+  validates remote component asset references. An asset that is not stored
+  inline must have remote Git URL plus relative path metadata; otherwise the
+  `component-graph` readiness item fails before Docker startup. This makes the
+  large-DDL path explicit without putting those files into PostgreSQL.
+- Updated the active `scf-chain-core10-local-docker` component graph through
+  the CLI so the four large MySQL DDL assets point at remote Git source
+  `git@github-personal:ztcshen/open-test-sandbox-validation.git` with their
+  compose-relative paths. A non-destructive restore plan now reports
+  `remoteAssets=4`, `remoteAssetBytes=106813`, and
+  `missingRemoteAssetRefs=0`, while keeping inline payload at 27,150 bytes.
