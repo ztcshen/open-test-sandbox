@@ -11,6 +11,11 @@ OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmod
 OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
 ```
 
+The public GitHub Actions CI runs this same gate against a temporary MySQL 8.0
+service container and the `otsandbox_ci_smoke` Store database. That proves the
+generic release gate is executable without relying on a developer laptop or a
+company network.
+
 For real SkyWalking validation, add an `http` or `https`
 `OTS_TRACE_GRAPHQL_URL` and `OTS_SMOKE_TRACE_IDS` step-to-trace mappings.
 Without that URL the smoke uses a deterministic synthetic SkyWalking GraphQL
@@ -40,6 +45,12 @@ unless `OTSANDBOX_MYSQL_TEST_DSN_MODE` is explicitly provided; `create-drop` is
 for local admin-only contract tests. The `release-check:mysql-real` wrapper
 rejects `create-drop` overrides and always signs off with an existing dedicated
 company smoke Store database.
+
+CI also exposes a manual `workflow_dispatch` path named
+`mysql-real-signoff`. It is intentionally separate from pull requests and only
+runs when the operator selects `mysql_real_signoff=true`; it expects repository
+secrets for `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+`OTS_SMOKE_TRACE_IDS`.
 
 The gate verifies:
 

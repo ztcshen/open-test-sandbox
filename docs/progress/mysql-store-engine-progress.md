@@ -1187,3 +1187,31 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL CI Release Gate Wiring Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Wired public GitHub Actions CI to run `npm run release-check` with a MySQL
+  8.0 service container and a dedicated `otsandbox_ci_smoke` Store database.
+- Added a manual `workflow_dispatch` `mysql-real-signoff` job for guarded
+  company MySQL final sign-off, fed only by repository secrets and requiring
+  real SkyWalking mode.
+- Documented the CI split: ordinary PR/push release gate uses temporary MySQL,
+  while company MySQL final sign-off remains explicit and manual.
+
+Validated:
+
+- `ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml'); puts 'ci yaml ok'"`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_no_source_domain_core.sh && tools/guardrails/check_store_first_contracts.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
