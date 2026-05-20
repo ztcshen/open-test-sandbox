@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { prepareSmokeTraceProvider, writeSmokeProfile } from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const workflowStepCount = 10;
@@ -36,6 +36,11 @@ async function freePort() {
 async function startTargetServer(port) {
   const server = createServer((request, response) => {
     const pathname = new URL(request.url || "/", `http://127.0.0.1:${port}`).pathname;
+    if (pathname === "/health") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: true, status: "healthy" }));
+      return;
+    }
     const match = pathname.match(/^\/v1\/items\/(step-\d{2})$/);
     if (!match) {
       response.writeHead(404, { "content-type": "application/json" });
@@ -214,6 +219,37 @@ export function assertEnvironmentCatalogPayload({ registered, discoverAll, inspe
   }
 }
 
+export function assertEnvironmentAcceptancePayload({ report, inspect }, {
+  environmentID = "env.mysql-api-smoke",
+  workflowID = "workflow.alpha",
+  expectedSteps = workflowStepCount,
+} = {}) {
+  if (!report?.ok || report.environmentId !== environmentID || report.workflowId !== workflowID || report.status !== "passed") {
+    throw new Error(`unexpected MySQL Environment acceptance report: ${JSON.stringify(report)}`);
+  }
+  if (report.total !== expectedSteps || report.completed !== expectedSteps || report.passed !== expectedSteps || report.failed !== 0) {
+    throw new Error(`MySQL Environment acceptance counts are not ${expectedSteps}/0: ${JSON.stringify(report)}`);
+  }
+  const acceptance = report.acceptance || {};
+  if (!acceptance.ok || acceptance.workflowId !== workflowID || acceptance.topologyProvider !== "skywalking") {
+    throw new Error(`MySQL Environment acceptance did not pass the SkyWalking template: ${JSON.stringify(acceptance)}`);
+  }
+  if (acceptance.expectedSteps !== expectedSteps || acceptance.completedSteps !== expectedSteps || acceptance.passedSteps !== expectedSteps || acceptance.failedSteps !== 0) {
+    throw new Error(`MySQL Environment acceptance step counts are not ${expectedSteps}/0: ${JSON.stringify(acceptance)}`);
+  }
+  if (acceptance.healthSummary?.failed !== 0 || Number(acceptance.healthSummary?.passed || 0) < 1) {
+    throw new Error(`MySQL Environment acceptance health checks did not pass: ${JSON.stringify(acceptance.healthSummary)}`);
+  }
+  const steps = Array.isArray(acceptance.steps) ? acceptance.steps : [];
+  if (steps.length !== expectedSteps || steps.some((step) => step.evidenceComplete !== true || step.topologyComplete !== true)) {
+    throw new Error(`MySQL Environment acceptance did not prove Evidence and topology for all steps: ${JSON.stringify(steps)}`);
+  }
+  const env = inspect?.environment || {};
+  if (!inspect?.ok || env.id !== environmentID || env.status !== "verified-ready" || env.lastVerificationRunId !== report.batchRunId || env.lastVerificationStatus !== "passed" || env.evidenceComplete !== true || env.topologyComplete !== true) {
+    throw new Error(`MySQL Environment acceptance status was not persisted: ${JSON.stringify(inspect)}`);
+  }
+}
+
 async function waitForWorkflowBatchReport(baseURL, reportURL, timeoutMs = 30000) {
   if (!reportURL) {
     throw new Error("workflow batch start did not return reportUrl");
@@ -234,6 +270,27 @@ async function waitForWorkflowBatchReport(baseURL, reportURL, timeoutMs = 30000)
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw lastError || new Error(`timed out waiting for workflow batch report: ${JSON.stringify(lastReport)}`);
+}
+
+async function waitForEnvironmentAcceptanceReport(baseURL, reportURL, timeoutMs = 30000) {
+  if (!reportURL) {
+    throw new Error("environment acceptance start did not return reportUrl");
+  }
+  const deadline = Date.now() + timeoutMs;
+  let lastReport;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      lastReport = await waitForJSON(`${baseURL}${reportURL}`, 5000);
+      if (lastReport.status !== "running") {
+        return lastReport;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw lastError || new Error(`timed out waiting for environment acceptance report: ${JSON.stringify(lastReport)}`);
 }
 
 async function stopServer(server) {
@@ -281,6 +338,7 @@ async function main() {
   const storeName = "api-mysql";
   let server;
   let targetServer;
+  let traceProvider;
   try {
     const cliBin = path.join(tempDir, "otsandbox");
     await buildCLI(cliBin);
@@ -300,6 +358,7 @@ async function main() {
 
     const targetPort = await freePort();
     targetServer = await startTargetServer(targetPort);
+    traceProvider = await prepareSmokeTraceProvider();
     const profileDir = await writeSmokeProfile(tempDir, targetPort);
     const profileHome = path.join(tempDir, "profile-home");
     const port = await freePort();
@@ -318,7 +377,7 @@ async function main() {
       String(port),
     ], {
       cwd: rootDir,
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...env, OTS_TRACE_GRAPHQL_URL: traceProvider.graphQLURL },
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -435,7 +494,7 @@ async function main() {
         composeFile: "docker-compose.yml",
         startCommand: "docker compose up -d",
       },
-      healthChecks: [{ id: "mysql-api-smoke-health", url: "http://127.0.0.1:19090/health" }],
+      healthChecks: [{ id: "mysql-api-smoke-health", url: `http://127.0.0.1:${targetPort}/health` }],
       verificationWorkflowId: "workflow.alpha",
     });
     const environmentDiscoverAll = await waitForJSON(`${baseURL}/api/environments?all=true`);
@@ -447,7 +506,24 @@ async function main() {
       inspect: environmentInspect,
       bootstrap: environmentBootstrap,
     });
+
+    const acceptanceStart = await postJSON(`${baseURL}/api/environments/env.mysql-api-smoke/acceptance-runs`, {
+      requestId: "mysql-api-smoke-acceptance",
+      baseUrl: `http://127.0.0.1:${targetPort}`,
+      evidenceDir: path.join(tempDir, "environment-acceptance-evidence"),
+      timeoutSeconds: 10,
+    });
+    if (acceptanceStart.environmentId !== "env.mysql-api-smoke" || acceptanceStart.workflowId !== "workflow.alpha" || !acceptanceStart.reportUrl) {
+      throw new Error(`unexpected MySQL Environment acceptance start payload: ${JSON.stringify(acceptanceStart)}`);
+    }
+    const acceptanceReport = await waitForEnvironmentAcceptanceReport(baseURL, acceptanceStart.reportUrl);
+    const environmentAfterAcceptance = await waitForJSON(`${baseURL}/api/environments/env.mysql-api-smoke`);
+    assertEnvironmentAcceptancePayload({
+      report: acceptanceReport,
+      inspect: environmentAfterAcceptance,
+    });
   } finally {
+    await closeHTTPServer(traceProvider?.server);
     await closeHTTPServer(targetServer);
     await stopServer(server);
     await rm(tempDir, { recursive: true, force: true });

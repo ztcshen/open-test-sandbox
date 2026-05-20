@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { assertCaseEvidencePayload, assertEnvironmentCatalogPayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
+import { assertCaseEvidencePayload, assertEnvironmentAcceptancePayload, assertEnvironmentCatalogPayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
 
 test("MySQL API smoke accepts the shared SQL smoke Store env", () => {
   assert.equal(
@@ -126,6 +126,48 @@ test("MySQL API smoke validates Environment Catalog registration payloads", () =
       plan: {
         verificationWorkflow: "workflow.alpha",
         restore: { docker: { action: "docker-compose" } },
+      },
+    },
+  });
+});
+
+test("MySQL API smoke validates Environment acceptance report payloads", () => {
+  assertEnvironmentAcceptancePayload({
+    report: {
+      ok: true,
+      environmentId: "env.mysql-api-smoke",
+      batchRunId: "batch.mysql-api-smoke",
+      workflowId: "workflow.alpha",
+      status: "passed",
+      total: 10,
+      completed: 10,
+      passed: 10,
+      failed: 0,
+      acceptance: {
+        ok: true,
+        workflowId: "workflow.alpha",
+        expectedSteps: 10,
+        completedSteps: 10,
+        passedSteps: 10,
+        failedSteps: 0,
+        topologyProvider: "skywalking",
+        healthSummary: { total: 1, passed: 1, failed: 0 },
+        steps: Array.from({ length: 10 }, (_, index) => ({
+          stepId: `step-${String(index + 1).padStart(2, "0")}`,
+          evidenceComplete: true,
+          topologyComplete: true,
+        })),
+      },
+    },
+    inspect: {
+      ok: true,
+      environment: {
+        id: "env.mysql-api-smoke",
+        status: "verified-ready",
+        lastVerificationRunId: "batch.mysql-api-smoke",
+        lastVerificationStatus: "passed",
+        evidenceComplete: true,
+        topologyComplete: true,
       },
     },
   });

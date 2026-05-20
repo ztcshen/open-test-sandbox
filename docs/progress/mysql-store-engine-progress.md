@@ -831,3 +831,36 @@ Current blocker:
   for all 10 workflow steps.
 - Remaining MySQL daily parity work is now concentrated around final live
   release proof and any deeper DSN-gated environment publish/acceptance checks.
+
+## 2026-05-21 MySQL API Environment Acceptance Smoke Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Extended the MySQL Store API smoke to run the registered Environment Catalog
+  entry through `/api/environments/{id}/acceptance-runs`.
+- The smoke now starts a local target health endpoint and a SkyWalking smoke
+  GraphQL provider, waits for the environment acceptance report, and verifies
+  the SkyWalking acceptance template passes for all 10 workflow steps.
+- The smoke now re-inspects the environment and verifies that the acceptance run
+  wrote back `verified-ready`, last verification run/status, Evidence complete,
+  and topology complete flags to the MySQL-backed Environment Catalog entry.
+- Added focused helper coverage so the smoke fails clearly if acceptance report
+  counts, health checks, Evidence completeness, topology completeness, or
+  environment status persistence drift.
+
+Validated:
+
+- `node --test tools/smoke/mysql-store-api-smoke.test.mjs`
+- `node --check tools/smoke/mysql-store-api-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Final release proof still requires real SkyWalking:
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
+  for all 10 workflow steps.
+- Remaining MySQL daily parity work is now mostly final live release proof and
+  optional deeper publish-verified DSN smoke coverage.
