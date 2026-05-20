@@ -2253,3 +2253,14 @@ Remote source policy slice:
   24 ordered blocking components, zero blocking cycles, 20 required health
   checks, zero missing health checks, four remote assets, and zero missing
   remote asset refs.
+- 2026-05-20T09:16Z implementation slice: Environment Catalog API inspect and
+  bootstrap now expose component graph restore-readiness too. `GET
+  /api/environments/{id}` returns a top-level `componentGraph` readiness
+  summary, and `GET /api/environments/{id}/bootstrap` returns the same summary
+  at `plan.componentGraph` and `plan.restore.componentGraph`. The control-plane
+  helper uses the same Gonum-backed blocking order/cycle model and the same
+  required health/remote asset readiness rules as the CLI path.
+- Updated the CLI/API contract doc so API inspect/bootstrap explicitly include
+  component graph restore-readiness. Focused control-plane coverage verifies
+  the API inspect and bootstrap response shapes with a two-component
+  provider-before-consumer graph.

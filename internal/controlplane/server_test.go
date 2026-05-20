@@ -1217,6 +1217,58 @@ func TestServerManagesVerifiedEnvironmentCatalogFromStore(t *testing.T) {
 	}
 }
 
+func TestServerEnvironmentAPIReportsComponentGraphReadiness(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "sandbox.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	registered := postJSONResponse(t, server.URL+"/api/environments", `{
+  "id": "env.component.api",
+  "compose": {"startCommand":"true"},
+  "verificationWorkflowId": "workflow.core-10"
+}`, http.StatusOK)
+	if registered["ok"] != true {
+		t.Fatalf("register environment = %#v", registered)
+	}
+	if err := s.ReplaceEnvironmentComponentGraph(ctx, "env.component.api", store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "app.schema", AssetKind: "mysql-ddl", TargetComponentID: "db", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app;\n", ApplyOrder: 10, SummaryJSON: `{}`},
+		},
+	}); err != nil {
+		t.Fatalf("replace component graph: %v", err)
+	}
+
+	inspect := decodeJSONResponse(t, server.URL+"/api/environments/env.component.api", http.StatusOK)
+	componentGraph := inspect["componentGraph"].(map[string]any)
+	if componentGraph["ok"] != true || componentGraph["components"] != float64(2) || componentGraph["blockingDependencies"] != float64(1) || strings.Join(jsonStringSlice(componentGraph["blockingOrder"]), ",") != "db,app" {
+		t.Fatalf("inspect component graph readiness = %#v", componentGraph)
+	}
+
+	bootstrap := decodeJSONResponse(t, server.URL+"/api/environments/env.component.api/bootstrap", http.StatusOK)
+	plan := bootstrap["plan"].(map[string]any)
+	planGraph := plan["componentGraph"].(map[string]any)
+	restoreGraph := plan["restore"].(map[string]any)["componentGraph"].(map[string]any)
+	if planGraph["ok"] != true || strings.Join(jsonStringSlice(planGraph["blockingOrder"]), ",") != "db,app" {
+		t.Fatalf("bootstrap component graph readiness = %#v", planGraph)
+	}
+	if restoreGraph["ok"] != true || strings.Join(jsonStringSlice(restoreGraph["blockingOrder"]), ",") != "db,app" {
+		t.Fatalf("bootstrap restore component graph readiness = %#v", restoreGraph)
+	}
+}
+
 func TestServerListsInstalledProfilesFromProfileHome(t *testing.T) {
 	profileHome := t.TempDir()
 	installedDir := filepath.Join(profileHome, "sample")
@@ -8614,6 +8666,20 @@ func hasJSONFailedCheck(items []any, name string) bool {
 		}
 	}
 	return false
+}
+
+func jsonStringSlice(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if value, ok := item.(string); ok {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func sqliteCountRows(t *testing.T, dbPath string, table string) int {

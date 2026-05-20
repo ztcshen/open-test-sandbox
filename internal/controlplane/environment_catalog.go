@@ -87,13 +87,27 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		if !ok {
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env)})
+		componentGraph, graphOK := loadEnvironmentComponentGraphAPI(w, r, runtime, id)
+		if !graphOK {
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "componentGraph": EnvironmentComponentGraphReadinessReport(env.ID, componentGraph)})
 	case action == "bootstrap" && r.Method == http.MethodGet:
 		env, ok := loadEnvironmentAPI(w, r, runtime, id)
 		if !ok {
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "plan": EnvironmentBootstrapPlan(env)})
+		componentGraph, graphOK := loadEnvironmentComponentGraphAPI(w, r, runtime, id)
+		if !graphOK {
+			return
+		}
+		plan := EnvironmentBootstrapPlan(env)
+		componentReadiness := EnvironmentComponentGraphReadinessReport(env.ID, componentGraph)
+		plan["componentGraph"] = componentReadiness
+		if restorePlan, ok := plan["restore"].(map[string]any); ok {
+			restorePlan["componentGraph"] = componentReadiness
+		}
+		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "plan": plan})
 	case action == "verify" && r.Method == http.MethodPost:
 		handleEnvironmentVerifyAPI(w, r, runtime, id)
 	case action == "publish-verified" && r.Method == http.MethodPost:
@@ -291,6 +305,15 @@ func loadEnvironmentAPI(w http.ResponseWriter, r *http.Request, runtime store.St
 		return store.Environment{}, false
 	}
 	return env, true
+}
+
+func loadEnvironmentComponentGraphAPI(w http.ResponseWriter, r *http.Request, runtime store.Store, id string) (store.EnvironmentComponentGraph, bool) {
+	graph, err := runtime.GetEnvironmentComponentGraph(r.Context(), id)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return store.EnvironmentComponentGraph{}, false
+	}
+	return graph, true
 }
 
 func environmentFromAPIPayload(payload map[string]any) (store.Environment, error) {
