@@ -9701,16 +9701,28 @@ func TestServeHandlerPublishesInstalledProfileIDBeforeServing(t *testing.T) {
 }
 
 func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
-	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-serve-pg")
-	runID := "run.tasks.pg." + time.Now().UTC().Format("20060102150405.000000000")
+	storeName := "daily-serve-pg"
+	storeRef := configureNamedPostgreSQLActiveStore(t, storeName)
+	runServeAndEvidenceTasksUseNamedActiveStore(t, storeRef, storeName, "postgres", "pg", "PostgreSQL")
+}
+
+func TestServeAndEvidenceTasksUseNamedMySQLActiveStore(t *testing.T) {
+	storeName := "daily-serve-mysql"
+	storeRef := configureNamedMySQLActiveStore(t, storeName)
+	runServeAndEvidenceTasksUseNamedActiveStore(t, storeRef, storeName, "mysql", "mysql", "MySQL")
+}
+
+func runServeAndEvidenceTasksUseNamedActiveStore(t *testing.T, storeRef string, storeName string, backend string, runLabel string, label string) {
+	t.Helper()
+	runID := "run.tasks." + runLabel + "." + time.Now().UTC().Format("20060102150405.000000000")
 	ctx := context.Background()
 	runtime, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open PostgreSQL task store: %v", err)
+		t.Fatalf("open %s task store: %v", label, err)
 	}
 	seedPostProcessTaskFixture(t, ctx, runtime, runID, runID+".")
 	if err := runtime.Close(); err != nil {
-		t.Fatalf("close PostgreSQL task store: %v", err)
+		t.Fatalf("close %s task store: %v", label, err)
 	}
 
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
@@ -9724,10 +9736,10 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal([]byte(listOut), &evidenceReport); err != nil {
-		t.Fatalf("decode PostgreSQL evidence list json: %v\n%s", err, listOut)
+		t.Fatalf("decode %s evidence list json: %v\n%s", label, err, listOut)
 	}
 	if len(evidenceReport.Runs) != 1 || evidenceReport.Runs[0].ID != runID || evidenceReport.Runs[0].EvidenceCount != 1 {
-		t.Fatalf("PostgreSQL evidence list report = %#v", evidenceReport.Runs)
+		t.Fatalf("%s evidence list report = %#v", label, evidenceReport.Runs)
 	}
 
 	tasksOut := runCLI(t,
@@ -9750,13 +9762,13 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"tasks"`
 	}
 	if err := json.Unmarshal([]byte(tasksOut), &tasksReport); err != nil {
-		t.Fatalf("decode PostgreSQL evidence tasks json: %v\n%s", err, tasksOut)
+		t.Fatalf("decode %s evidence tasks json: %v\n%s", label, err, tasksOut)
 	}
 	if tasksReport.RunID != runID || tasksReport.Counts.Total != 1 || tasksReport.Counts.Passed != 1 || len(tasksReport.Tasks) != 1 {
-		t.Fatalf("PostgreSQL evidence tasks report = %#v", tasksReport)
+		t.Fatalf("%s evidence tasks report = %#v", label, tasksReport)
 	}
 	if !strings.Contains(tasksReport.Tasks[0].ID, "task.trace") || tasksReport.Tasks[0].StepID != "step-a" || tasksReport.Tasks[0].DisplayStatus != "passed: completed" {
-		t.Fatalf("PostgreSQL evidence task = %#v", tasksReport.Tasks[0])
+		t.Fatalf("%s evidence task = %#v", label, tasksReport.Tasks[0])
 	}
 
 	handler, cleanup, err := serveHandlerFromArgs(nil)
@@ -9778,16 +9790,16 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 		Source     string `json:"source"`
 	}
 	if err := json.Unmarshal(current.Body.Bytes(), &storeInfo); err != nil {
-		t.Fatalf("decode PostgreSQL store current payload: %v\n%s", err, current.Body.String())
+		t.Fatalf("decode %s store current payload: %v\n%s", label, err, current.Body.String())
 	}
-	if !storeInfo.OK || !storeInfo.Configured || storeInfo.Name != "daily-serve-pg" || storeInfo.Backend != "postgres" || storeInfo.Source != "active-config" {
-		t.Fatalf("PostgreSQL store current payload = %#v", storeInfo)
+	if !storeInfo.OK || !storeInfo.Configured || storeInfo.Name != storeName || storeInfo.Backend != backend || storeInfo.Source != "active-config" {
+		t.Fatalf("%s store current payload = %#v", label, storeInfo)
 	}
 
 	runs := httptest.NewRecorder()
 	handler.ServeHTTP(runs, httptest.NewRequest(http.MethodGet, "/api/runs", nil))
 	if runs.Code != http.StatusOK || !strings.Contains(runs.Body.String(), runID) {
-		t.Fatalf("serve runs via active SQL Store = %d %s", runs.Code, runs.Body.String())
+		t.Fatalf("%s serve runs via active SQL Store = %d %s", label, runs.Code, runs.Body.String())
 	}
 
 	nodes := httptest.NewRecorder()
@@ -9805,10 +9817,10 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(nodes.Body.Bytes(), &nodesPayload); err != nil {
-		t.Fatalf("decode PostgreSQL interface nodes payload: %v\n%s", err, nodes.Body.String())
+		t.Fatalf("decode %s interface nodes payload: %v\n%s", label, err, nodes.Body.String())
 	}
 	if nodesPayload.Source.ID != "sample" || nodesPayload.Source.Kind != "store" || len(nodesPayload.Items) != 1 || nodesPayload.Items[0].ID != "node.alpha" {
-		t.Fatalf("PostgreSQL serve catalog payload = %#v", nodesPayload)
+		t.Fatalf("%s serve catalog payload = %#v", label, nodesPayload)
 	}
 
 	apiImportDir := writeEmptyProfileBundle(t)
@@ -9823,10 +9835,10 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 		ReadModels []string `json:"readModels"`
 	}
 	if err := json.Unmarshal(importRec.Body.Bytes(), &importPayload); err != nil {
-		t.Fatalf("decode PostgreSQL serve profile import payload: %v\n%s", err, importRec.Body.String())
+		t.Fatalf("decode %s serve profile import payload: %v\n%s", label, err, importRec.Body.String())
 	}
 	if importPayload.ProfileID != "empty" || importPayload.BundlePath != apiImportDir || strings.Join(importPayload.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
-		t.Fatalf("PostgreSQL serve profile import payload = %#v", importPayload)
+		t.Fatalf("%s serve profile import payload = %#v", label, importPayload)
 	}
 
 	apiVerifyDir := writeInterfaceNodeCaseProfile(t)
@@ -9848,37 +9860,37 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal(verifyRec.Body.Bytes(), &verifyPayload); err != nil {
-		t.Fatalf("decode PostgreSQL serve profile verify payload: %v\n%s", err, verifyRec.Body.String())
+		t.Fatalf("decode %s serve profile verify payload: %v\n%s", label, err, verifyRec.Body.String())
 	}
 	if !verifyPayload.OK || verifyPayload.ProfileID != "sample" || verifyPayload.Publish.ProfileID != "sample" || verifyPayload.Publish.BundlePath != apiVerifyDir || strings.Join(verifyPayload.Publish.ReadModels, ",") != "interface-nodes,catalog,dashboard" || verifyPayload.Summary.FailedChecks != 0 {
-		t.Fatalf("PostgreSQL serve profile verify payload = %#v", verifyPayload)
+		t.Fatalf("%s serve profile verify payload = %#v", label, verifyPayload)
 	}
 
 	runtime, err = openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("reopen PostgreSQL serve profile Store: %v", err)
+		t.Fatalf("reopen %s serve profile Store: %v", label, err)
 	}
 	defer runtime.Close()
 	verifiedIndex, err := runtime.GetProfileIndex(ctx, "sample")
 	if err != nil {
-		t.Fatalf("get PostgreSQL serve profile index: %v", err)
+		t.Fatalf("get %s serve profile index: %v", label, err)
 	}
 	if verifiedIndex.BundlePath != apiVerifyDir || !strings.HasPrefix(verifiedIndex.BundleDigest, "sha256:") {
-		t.Fatalf("PostgreSQL serve profile index = %#v", verifiedIndex)
+		t.Fatalf("%s serve profile index = %#v", label, verifiedIndex)
 	}
 	verifiedCatalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil {
-		t.Fatalf("get PostgreSQL serve profile catalog: %v", err)
+		t.Fatalf("get %s serve profile catalog: %v", label, err)
 	}
 	if verifiedCatalog.ProfileID != "sample" || len(verifiedCatalog.APICases) != 2 {
-		t.Fatalf("PostgreSQL serve profile catalog = %#v", verifiedCatalog)
+		t.Fatalf("%s serve profile catalog = %#v", label, verifiedCatalog)
 	}
 
 	apiLegacyPath := filepath.Join(t.TempDir(), "legacy-api.sqlite")
 	apiLegacySuffix := time.Now().UTC().UnixNano()
 	apiLegacyWorkflowID := apiLegacySuffix
 	apiLegacyCaseID := apiLegacySuffix + 1
-	apiLegacyParentRunID := fmt.Sprintf("case-run-parent-api-pg-%d", apiLegacySuffix)
+	apiLegacyParentRunID := fmt.Sprintf("case-run-parent-api-%s-%d", runLabel, apiLegacySuffix)
 	createLegacyRuntimeDBWithIDs(t, apiLegacyPath, apiLegacyWorkflowID, apiLegacyCaseID, apiLegacyParentRunID)
 	importEvidenceRec := httptest.NewRecorder()
 	handler.ServeHTTP(importEvidenceRec, httptest.NewRequest(http.MethodPost, "/api/evidence/import", strings.NewReader(`{"sourcePath":`+mustJSON(t, apiLegacyPath)+`,"profileId":"sample"}`)))
@@ -9894,10 +9906,10 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 		EvidenceCount   int    `json:"evidenceCount"`
 	}
 	if err := json.Unmarshal(importEvidenceRec.Body.Bytes(), &importEvidencePayload); err != nil {
-		t.Fatalf("decode PostgreSQL serve evidence import payload: %v\n%s", err, importEvidenceRec.Body.String())
+		t.Fatalf("decode %s serve evidence import payload: %v\n%s", label, err, importEvidenceRec.Body.String())
 	}
 	if !importEvidencePayload.OK || importEvidencePayload.SourcePath != apiLegacyPath || importEvidencePayload.ProfileID != "sample" || importEvidencePayload.RunCount != 2 || importEvidencePayload.APICaseRunCount != 1 || importEvidencePayload.EvidenceCount != 1 {
-		t.Fatalf("PostgreSQL serve evidence import payload = %#v", importEvidencePayload)
+		t.Fatalf("%s serve evidence import payload = %#v", label, importEvidencePayload)
 	}
 	evidenceListRec := httptest.NewRecorder()
 	handler.ServeHTTP(evidenceListRec, httptest.NewRequest(http.MethodGet, "/api/evidence/list?run="+apiLegacyParentRunID, nil))
@@ -9918,14 +9930,14 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal(evidenceListRec.Body.Bytes(), &importedEvidencePayload); err != nil {
-		t.Fatalf("decode PostgreSQL serve evidence list payload: %v\n%s", err, evidenceListRec.Body.String())
+		t.Fatalf("decode %s serve evidence list payload: %v\n%s", label, err, evidenceListRec.Body.String())
 	}
 	if len(importedEvidencePayload.Runs) != 1 || importedEvidencePayload.Runs[0].ID != apiLegacyParentRunID || importedEvidencePayload.Runs[0].APICaseRunCount != 1 || importedEvidencePayload.Runs[0].EvidenceCount != 1 || len(importedEvidencePayload.Runs[0].EvidenceRecords) != 1 {
-		t.Fatalf("PostgreSQL serve evidence list payload = %#v", importedEvidencePayload.Runs)
+		t.Fatalf("%s serve evidence list payload = %#v", label, importedEvidencePayload.Runs)
 	}
 	importedRecord := importedEvidencePayload.Runs[0].EvidenceRecords[0]
 	if importedRecord.ID != fmt.Sprintf("legacy-evidence-%d", apiLegacyCaseID) || importedRecord.CaseRunID != fmt.Sprintf("legacy-case-run-%d", apiLegacyCaseID) || importedRecord.Kind != "case-run" || importedRecord.URI != ".runtime/cases/"+apiLegacyParentRunID {
-		t.Fatalf("PostgreSQL serve evidence list record = %#v", importedRecord)
+		t.Fatalf("%s serve evidence list record = %#v", label, importedRecord)
 	}
 }
 

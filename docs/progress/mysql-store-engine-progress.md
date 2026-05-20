@@ -1358,3 +1358,29 @@ Current blocker:
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - More daily-path CLI parity remains valuable, especially serve/evidence task
   inspection.
+
+## 2026-05-21 MySQL Serve and Evidence Task Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for serve/API and Evidence
+  task inspection.
+- Shared the existing PostgreSQL scenario across PostgreSQL and MySQL:
+  `evidence list`, `evidence tasks`, `/api/store/current`, `/api/runs`,
+  `/api/interface-nodes`, `/api/profile/import`, `/api/profile/verify`,
+  `/api/evidence/import`, and `/api/evidence/list`.
+- Asserted `/api/store/current` reports the correct active Store name and
+  backend for both PostgreSQL and MySQL.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run 'TestServeAndEvidenceTasksUseNamed(PostgreSQL|MySQL)ActiveStore' -count=1`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
