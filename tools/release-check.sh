@@ -45,6 +45,7 @@ elif is_mysql_store_dsn "$smoke_store_dsn"; then
     exit 1
   fi
   export OTSANDBOX_MYSQL_TEST_DSN="${OTSANDBOX_MYSQL_TEST_DSN:-$smoke_store_dsn}"
+  export OTSANDBOX_MYSQL_TEST_DSN_MODE="${OTSANDBOX_MYSQL_TEST_DSN_MODE:-existing}"
 else
   echo "OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be postgres://, postgresql://, or mysql://." >&2
   exit 1

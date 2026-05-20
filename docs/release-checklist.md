@@ -35,6 +35,9 @@ even in dry-run mode.
 The generic MySQL `npm run release-check` path also refuses MySQL database
 names that do not look dedicated to sandbox/smoke/test/CI validation before it
 runs Store migrations, tests, CLI smoke, API smoke, or frontend smoke writes.
+MySQL release-check sets the Store contract to existing-database mode unless
+`OTSANDBOX_MYSQL_TEST_DSN_MODE` is explicitly provided; `create-drop` is for
+local admin-only contract tests, not company smoke sign-off.
 
 The gate verifies:
 

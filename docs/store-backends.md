@@ -173,6 +173,10 @@ need permission to create or drop databases. This wrapper is final-signoff
 oriented: it also requires `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
 an `http` or `https` `OTS_TRACE_GRAPHQL_URL`, and `OTS_SMOKE_TRACE_IDS` for all
 10 workflow steps.
+Direct Go contract tests require an explicit `OTSANDBOX_MYSQL_TEST_DSN_MODE`.
+Use `existing` for company smoke databases. Use `create-drop` only for local
+admin-only contract tests where the account is allowed to create and drop
+temporary databases.
 
 When this flag is set, any accidental SQLite Store open fails immediately.
 This is the repeatable equivalent of taking the local SQLite path offline before

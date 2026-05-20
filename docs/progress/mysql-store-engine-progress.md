@@ -927,6 +927,34 @@ Current blocker:
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
 
+## 2026-05-21 Explicit MySQL Contract Mode Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Tightened `TestMySQLStoreContractWithExternalDatabase` so a live
+  `OTSANDBOX_MYSQL_TEST_DSN` must now pair with an explicit
+  `OTSANDBOX_MYSQL_TEST_DSN_MODE`.
+- Preserved company-safe behavior by making generic MySQL `npm run release-check`
+  default the contract mode to `existing`, matching the guarded
+  `npm run release-check:mysql-real` wrapper.
+- Kept `create-drop` available only as an explicit local admin-only contract
+  mode for accounts allowed to create and drop temporary databases.
+- Added mode parser coverage and documented the `existing` vs `create-drop`
+  split in quickstart, Store backend docs, and release checklist.
+
+Validated:
+
+- `go test ./internal/store -run 'TestParseMySQLTestDSNMode|TestMySQLStoreContractWithExternalDatabase' -count=1`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.
+
 ## 2026-05-21 MySQL API Demo DSN Guard Slice
 
 Progress: `[###################-] 98%`

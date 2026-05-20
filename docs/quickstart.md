@@ -88,6 +88,9 @@ database but does not need permission to create or drop databases. It also
 requires the real SkyWalking release mode and trace ids for all 10 workflow
 steps; `OTS_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic
 topology smoke is not accepted by this wrapper.
+Direct Go MySQL contract tests also require an explicit
+`OTSANDBOX_MYSQL_TEST_DSN_MODE`; use `existing` for company smoke databases and
+reserve `create-drop` for local admin-only tests.
 The generic MySQL release-check path, CLI smoke, frontend smoke, and standalone
 MySQL API smoke apply the same dedicated database-name guard before running
 Store upgrades or smoke writes, so do not point them at a business schema.
