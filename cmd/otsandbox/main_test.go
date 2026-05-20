@@ -9723,6 +9723,17 @@ func runWorkflowReportWritesReportWhenStepFails(t *testing.T, _ string, label st
 }
 
 func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-incomplete-batches-pg")
+	runCaseIncompleteBatchesCommandReportsNotRunCases(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseIncompleteBatchesUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-incomplete-batches-mysql")
+	runCaseIncompleteBatchesCommandReportsNotRunCases(t, storeRef, "MySQL")
+}
+
+func runCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T, _ string, label string) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{"status":"created"}`)
@@ -9771,13 +9782,12 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
   "fixtures": []
 }`, alphaCaseID, alphaPath, betaCaseID, betaPath))
 
-	configureNamedPostgreSQLActiveStore(t, "daily-incomplete-batches-pg")
 	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", runID, "--profile", "sample")
 
 	out := runCLI(t, "case", "incomplete-batches", "--profile", profileDir)
 	for _, want := range []string{"Incomplete API Cases: 1", betaCaseID, "not-run", betaPath} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("incomplete case output missing %q: %q", want, out)
+			t.Fatalf("%s incomplete case output missing %q: %q", label, want, out)
 		}
 	}
 
@@ -9792,23 +9802,23 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(jsonOut), &report); err != nil {
-		t.Fatalf("decode incomplete cases report: %v\n%s", err, jsonOut)
+		t.Fatalf("decode %s incomplete cases report: %v\n%s", label, err, jsonOut)
 	}
 	if !report.OK || report.Count != 1 || len(report.Items) != 1 {
-		t.Fatalf("incomplete cases report = %#v", report)
+		t.Fatalf("%s incomplete cases report = %#v", label, report)
 	}
 	if report.Items[0].ID != betaCaseID || report.Items[0].Reason != "not-run" {
-		t.Fatalf("incomplete case item = %#v", report.Items[0])
+		t.Fatalf("%s incomplete case item = %#v", label, report.Items[0])
 	}
 	if !strings.Contains(report.Items[0].Command, betaPath) {
-		t.Fatalf("suggested command = %q", report.Items[0].Command)
+		t.Fatalf("%s suggested command = %q", label, report.Items[0].Command)
 	}
 
 	ctx := context.Background()
 	storeOnlyPath := filepath.Join(dir, "store-only.sqlite")
 	storeOnly, err := sqlite.Open(ctx, sqlite.Config{Path: storeOnlyPath})
 	if err != nil {
-		t.Fatalf("open store-only catalog: %v", err)
+		t.Fatalf("open %s store-only catalog: %v", label, err)
 	}
 	if err := storeOnly.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
 		ProfileID: "current",
@@ -9817,16 +9827,16 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
 			{ID: "case.store.pending", DisplayName: "Pending Store Case", CasePath: betaPath, Status: "active"},
 		},
 	}); err != nil {
-		t.Fatalf("seed store-only catalog: %v", err)
+		t.Fatalf("seed %s store-only catalog: %v", label, err)
 	}
 	if _, err := storeOnly.CreateRun(ctx, store.Run{ID: "run.store.passed", ProfileID: "current", WorkflowID: "case.store.passed", Status: store.StatusPassed}); err != nil {
-		t.Fatalf("create store-only run: %v", err)
+		t.Fatalf("create %s store-only run: %v", label, err)
 	}
 	if _, err := storeOnly.RecordAPICaseRun(ctx, store.APICaseRun{ID: "run.store.passed.case", RunID: "run.store.passed", CaseID: "case.store.passed", Status: store.StatusPassed}); err != nil {
-		t.Fatalf("record store-only case run: %v", err)
+		t.Fatalf("record %s store-only case run: %v", label, err)
 	}
 	if err := storeOnly.Close(); err != nil {
-		t.Fatalf("close store-only catalog: %v", err)
+		t.Fatalf("close %s store-only catalog: %v", label, err)
 	}
 
 	storeOnlyOut := runCLI(t, "case", "incomplete-batches", "--store", "sqlite://"+storeOnlyPath, "--json")
@@ -9841,16 +9851,16 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(storeOnlyOut), &storeOnlyReport); err != nil {
-		t.Fatalf("decode store-only incomplete cases report: %v\n%s", err, storeOnlyOut)
+		t.Fatalf("decode %s store-only incomplete cases report: %v\n%s", label, err, storeOnlyOut)
 	}
 	if !storeOnlyReport.OK || storeOnlyReport.Count != 1 || len(storeOnlyReport.Items) != 1 {
-		t.Fatalf("store-only incomplete report = %#v", storeOnlyReport)
+		t.Fatalf("%s store-only incomplete report = %#v", label, storeOnlyReport)
 	}
 	if storeOnlyReport.Items[0].ID != "case.store.pending" || storeOnlyReport.Items[0].Reason != "not-run" || storeOnlyReport.Items[0].Source != "profile:current" {
-		t.Fatalf("store-only incomplete item = %#v", storeOnlyReport.Items[0])
+		t.Fatalf("%s store-only incomplete item = %#v", label, storeOnlyReport.Items[0])
 	}
 	if !strings.Contains(storeOnlyReport.Items[0].Command, betaPath) {
-		t.Fatalf("store-only suggested command = %q", storeOnlyReport.Items[0].Command)
+		t.Fatalf("%s store-only suggested command = %q", label, storeOnlyReport.Items[0].Command)
 	}
 }
 
