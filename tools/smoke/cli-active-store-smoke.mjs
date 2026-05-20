@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { assertSkyWalkingTopologyEvidence, assertWorkflowCaseEvidence, prepareSmokeTraceProvider, smokeTraceID, writeSmokeProfile } from "./control-plane-smoke.mjs";
 
@@ -26,10 +26,10 @@ function storeBackend(dsn) {
   return "";
 }
 
-function requiredSQLStoreDSN() {
-  const dsn = process.env.OTSANDBOX_CLI_STORE_DSN || process.env.OTSANDBOX_SMOKE_STORE_DSN || process.env.OTSANDBOX_SMOKE_STORE || "";
+export function requiredSQLStoreDSN(env = process.env) {
+  const dsn = env.OTSANDBOX_CLI_STORE_DSN || env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
   if (!dsn.trim()) {
-    throw new Error("Set OTSANDBOX_CLI_STORE_DSN or OTSANDBOX_SMOKE_STORE_DSN to run the active SQL Store CLI smoke");
+    throw new Error("Set OTSANDBOX_CLI_STORE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to run the active SQL Store CLI smoke");
   }
   if (!storeBackend(dsn)) {
     throw new Error("The active Store CLI smoke requires a PostgreSQL or MySQL DSN");
@@ -240,7 +240,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
+}

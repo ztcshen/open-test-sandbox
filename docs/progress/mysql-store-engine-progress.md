@@ -501,3 +501,32 @@ Current blocker:
 
 - Final completion still requires a real dedicated company MySQL Store DSN for
   `npm run release-check:mysql-real`.
+
+## 2026-05-21 CLI Active Smoke Shared Store Env Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Made `tools/smoke/cli-active-store-smoke.mjs` import-safe and exported its
+  SQL Store DSN resolver so the CLI smoke Store-selection path can be tested
+  without starting servers or requiring a live database.
+- Added regression coverage proving the active SQL Store CLI smoke accepts the
+  shared `OTSANDBOX_SMOKE_STORE` environment variable, including uppercase
+  `MYSQL://` scheme input copied from company-style configs.
+- Updated the missing-DSN guidance to list all supported smoke Store env names:
+  `OTSANDBOX_CLI_STORE_DSN`, `OTSANDBOX_SMOKE_STORE_DSN`, and
+  `OTSANDBOX_SMOKE_STORE`.
+
+Validated:
+
+- `node --test tools/smoke/cli-active-store-smoke.test.mjs`
+- `node --check tools/smoke/cli-active-store-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- A non-blocking explorer pass found remaining MySQL parity work mostly in
+  DSN-gated named active Store tests for daily CLI/API paths that are still
+  PostgreSQL-shaped today.
