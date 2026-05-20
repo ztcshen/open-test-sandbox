@@ -2422,6 +2422,36 @@ func TestEnvironmentRestoreBlocksDockerWhenContainerNamesAlreadyExist(t *testing
 	}
 }
 
+func TestEnvironmentRestoreAssumeCleanDockerIgnoresLocalContainerConflicts(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeBin := t.TempDir()
+	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nif [ \"$1\" = ps ]; then printf 'sandbox-mysql\\n'; exit 0; fi\nexit 0\n")
+	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+		t.Fatalf("chmod fake git: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.clean-machine",
+		ComposeJSON:            `{"composeFile":"compose.yml","generatedFiles":{"compose.yml":"services:\n  mysql:\n    image: mysql:8\n    container_name: sandbox-mysql\n"}}`,
+		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{AssumeCleanDocker: true})
+	if err != nil {
+		t.Fatalf("build clean-machine restore report: %v", err)
+	}
+	if !report.OK || !report.Preflight.OK || !report.Preflight.AssumeCleanDocker || len(report.Preflight.ContainerConflicts) != 0 || report.Docker.Action != "plan-docker-compose" {
+		t.Fatalf("clean-machine report should not be blocked by local containers: %#v", report)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "docker-container-conflicts", true, "clean-machine dry-run") {
+		t.Fatalf("readiness should document clean-machine assumption: %#v", report.Readiness.Items)
+	}
+}
+
 func TestEnvironmentRestoreCanAdoptExistingContainers(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeBin := t.TempDir()

@@ -2308,3 +2308,27 @@ Remote source policy slice:
   environment `scf-chain-core10-local-docker` reports startup planning
   `ok=true` with two startup batches and 24 health gates in both bootstrap and
   restore dry-run JSON.
+- 2026-05-20T09:44Z implementation slice: added a non-destructive
+  `environment restore --assume-clean-docker` dry-run mode for the real
+  colleague/new-machine question. It evaluates the selected PostgreSQL Store
+  environment as if the target Docker containers are absent, so the current
+  developer machine's fixed-name container conflicts do not block the
+  new-machine readiness answer. The mode cannot be combined with `--execute`,
+  `--use-existing-containers`, or Docker cleanup flags, and it records the
+  clean-machine assumption in preflight/readiness.
+- Fixed a PostgreSQL persistence blocker found by the real `local-pg`
+  new-machine dry-run: restore attempt history now stores compact attempt
+  indexes instead of copying the full last-restore diagnostic into every
+  history entry. `summary.lastRestore` still keeps the current detailed
+  diagnostic, while `summary.restoreAttempts` stays small enough for the
+  Store metadata size limit.
+- Verification: focused CLI tests passed for clean-machine Docker assumption,
+  local container conflict blocking, restore summary persistence, and component
+  graph readiness. A real `local-pg` command,
+  `environment restore --store local-pg --workspace /tmp/ots-new-machine-audit
+  --assume-clean-docker --json scf-chain-core10-local-docker`, now returns
+  `ok=true`: readiness is green, preflight is green, Docker action is
+  `plan-docker-compose` with three commands, the component startup plan has two
+  batches and 24 health gates, seven service repositories are ready to clone or
+  validate before Docker, and the persisted environment summary is about
+  27 KB.

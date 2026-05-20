@@ -189,6 +189,15 @@ runtime data. During `--execute`, requested cleanup is blocked unless
 to the recorded target Compose project; the sandbox PostgreSQL control-plane
 Store must stay outside that Docker environment.
 
+When you want to evaluate a new colleague machine without touching the current
+machine's running target containers, use `--assume-clean-docker` on a dry-run.
+That mode assumes the target Docker containers do not exist on the colleague
+machine, skips local fixed-name container conflict blocking, and still checks
+the PostgreSQL Store boundary, remote service repositories, Store-generated
+startup files, component startup batches, Docker Compose commands, and health
+gates. It cannot be combined with `--execute`, container adoption, or cleanup
+flags.
+
 The control-plane API exposes the same recovery shape through
 `GET /api/environments/{environmentId}/bootstrap`: repository steps, Docker
 commands or start-command steps, health checks, and the verification workflow

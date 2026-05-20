@@ -255,7 +255,7 @@ Usage:
   otsandbox environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
   otsandbox environment components inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment components replace ENV_ID --file COMPONENT_GRAPH_JSON [--store NAME_OR_DSN] [--json]
-  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--use-existing-containers] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
+  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--assume-clean-docker] [--use-existing-containers] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
   otsandbox environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox environment acceptance report ENV_ID --server-url URL --run ID [--json]
   otsandbox environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
@@ -955,6 +955,7 @@ type environmentRestoreRepoSpec struct {
 
 type environmentRestorePreflight struct {
 	OK                 bool                              `json:"ok"`
+	AssumeCleanDocker  bool                              `json:"assumeCleanDocker,omitempty"`
 	Tools              []environmentRestorePreflightTool `json:"tools"`
 	HeavySteps         []string                          `json:"heavySteps,omitempty"`
 	ContainerConflicts []string                          `json:"containerConflicts,omitempty"`
@@ -1088,6 +1089,7 @@ type environmentRestoreDockerCleanupOptions struct {
 	IncludeImages         bool
 	Allowed               bool
 	UseExistingContainers bool
+	AssumeCleanDocker     bool
 }
 
 func runEnvironmentRestore(ctx context.Context, args []string) error {
@@ -1106,6 +1108,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	acceptanceTimeoutSeconds := flags.Int("acceptance-timeout-seconds", 120, "Seconds to wait for async environment acceptance report")
 	healthTimeoutSeconds := flags.Int("health-timeout-seconds", 60, "Seconds to wait for recorded Docker service health checks")
 	useExistingContainers := flags.Bool("use-existing-containers", false, "Adopt already-running fixed-name Docker containers instead of running Docker Compose up")
+	assumeCleanDocker := flags.Bool("assume-clean-docker", false, "Dry-run as a colleague/new machine with no existing target Docker containers")
 	cleanDockerState := flags.Bool("clean-docker-state", false, "Plan or run Docker Compose cleanup before startup")
 	cleanDockerImages := flags.Bool("clean-docker-images", false, "Include Docker Compose image removal in cleanup plan")
 	allowDestructiveDockerCleanup := flags.Bool("allow-destructive-docker-cleanup", false, "Allow --execute to run requested Docker cleanup commands")
@@ -1134,6 +1137,12 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	}
 	if *useExistingContainers && (*cleanDockerState || *cleanDockerImages) {
 		return errors.New("--use-existing-containers cannot be combined with Docker cleanup flags")
+	}
+	if *assumeCleanDocker && *execute {
+		return errors.New("--assume-clean-docker is a dry-run planning mode and cannot be combined with --execute")
+	}
+	if *assumeCleanDocker && (*useExistingContainers || *cleanDockerState || *cleanDockerImages) {
+		return errors.New("--assume-clean-docker cannot be combined with Docker adoption or cleanup flags")
 	}
 	if *runWorkflow && strings.TrimSpace(*serverURL) == "" {
 		return errors.New("--run-workflow requires --server-url for async environment acceptance")
@@ -1171,6 +1180,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 		IncludeImages:         *cleanDockerImages,
 		Allowed:               *allowDestructiveDockerCleanup,
 		UseExistingContainers: *useExistingContainers,
+		AssumeCleanDocker:     *assumeCleanDocker,
 	}, componentGraph)
 	if err != nil {
 		return err
@@ -1491,18 +1501,77 @@ func environmentRestoreSummaryJSON(existing string, report environmentRestoreRep
 		lastRestore["error"] = report.Error
 	}
 	summary["lastRestore"] = lastRestore
-	summary["restoreAttempts"] = appendRestoreAttemptSummary(summary["restoreAttempts"], lastRestore)
-	return mustCompactJSON(summary)
+	attempts := appendRestoreAttemptSummary(summary["restoreAttempts"], lastRestore)
+	summary["restoreAttempts"] = attempts
+	raw := mustCompactJSON(summary)
+	for len(raw) > store.EnvironmentSummaryMaxBytes && len(attempts) > 1 {
+		attempts = attempts[1:]
+		summary["restoreAttempts"] = attempts
+		raw = mustCompactJSON(summary)
+	}
+	if len(raw) > store.EnvironmentSummaryMaxBytes {
+		summary["restoreAttempts"] = []any{}
+		raw = mustCompactJSON(summary)
+	}
+	return raw
 }
 
 func appendRestoreAttemptSummary(existing any, attempt map[string]any) []any {
 	out := []any{}
 	if values, ok := existing.([]any); ok {
-		out = append(out, values...)
+		for _, value := range values {
+			out = append(out, compactRestoreAttemptSummary(mapFromReportAny(value)))
+		}
 	}
-	out = append(out, attempt)
+	out = append(out, compactRestoreAttemptSummary(attempt))
 	if len(out) > environmentRestoreAttemptLimit {
 		out = out[len(out)-environmentRestoreAttemptLimit:]
+	}
+	return out
+}
+
+func compactRestoreAttemptSummary(attempt map[string]any) map[string]any {
+	preflight := mapFromReportAny(attempt["preflight"])
+	sourcePolicy := mapFromReportAny(attempt["sourcePolicy"])
+	readiness := mapFromReportAny(attempt["readiness"])
+	docker := mapFromReportAny(attempt["docker"])
+	workflow := mapFromReportAny(attempt["workflow"])
+	out := map[string]any{
+		"id":          valueString(attempt["id"]),
+		"attemptedAt": valueString(attempt["attemptedAt"]),
+		"finishedAt":  valueString(attempt["finishedAt"]),
+		"durationMs":  intFromReportAny(attempt["durationMs"]),
+		"ok":          boolFromReportAny(attempt["ok"]),
+		"executed":    boolFromReportAny(attempt["executed"]),
+		"phase":       valueString(attempt["phase"]),
+		"preflight": map[string]any{
+			"ok": boolFromReportAny(preflight["ok"]),
+		},
+		"sourcePolicy": map[string]any{
+			"ok":         boolFromReportAny(sourcePolicy["ok"]),
+			"remoteOnly": boolFromReportAny(sourcePolicy["remoteOnly"]),
+		},
+		"readiness": map[string]any{
+			"ok":          boolFromReportAny(readiness["ok"]),
+			"action":      valueString(readiness["action"]),
+			"failedItems": listFromReportAny(readiness["failedItems"]),
+		},
+		"docker": map[string]any{
+			"ok":           boolFromReportAny(docker["ok"]),
+			"action":       valueString(docker["action"]),
+			"commandCount": intFromReportAny(docker["commandCount"]),
+		},
+		"workflow": map[string]any{
+			"ok":     boolFromReportAny(workflow["ok"]),
+			"action": valueString(workflow["action"]),
+			"runId":  valueString(workflow["runId"]),
+		},
+	}
+	if environmentID := valueString(attempt["environmentId"]); environmentID != "" {
+		out["environmentId"] = environmentID
+	}
+	if errText := valueString(attempt["error"]); errText != "" {
+		out["error"] = truncateReportText(errText, 500)
 	}
 	return out
 }
@@ -2244,7 +2313,8 @@ func parseComposeContainerNames(content string) map[string]string {
 
 func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestorePreflight {
 	report := environmentRestorePreflight{
-		OK: true,
+		OK:                true,
+		AssumeCleanDocker: cleanupOptions.AssumeCleanDocker,
 		Notes: []string{
 			"Sandbox control-plane Store must already be reachable outside restored Docker target services.",
 			"Heavy Docker image and container validation should be reviewed before deleting or rebuilding existing local Docker state.",
@@ -2281,6 +2351,8 @@ func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec
 			if cleanupOptions.IncludeImages {
 				report.HeavySteps = append(report.HeavySteps, "docker compose down --rmi all may remove local images")
 			}
+		} else if cleanupOptions.AssumeCleanDocker {
+			report.Notes = append(report.Notes, "Clean-machine dry-run assumes target Docker containers do not exist on the colleague machine; current local container names are not treated as blockers.")
 		} else if !prepareReposOnly && !cleanupOptions.UseExistingContainers {
 			conflicts := environmentRestoreContainerNameConflicts(compose, workspace)
 			if len(conflicts) > 0 {
@@ -2352,6 +2424,8 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	}
 	if len(report.Preflight.ContainerConflicts) > 0 {
 		addItem("docker-container-conflicts", true, false, "existing Docker containers would be reused or replaced by fixed container_name values: "+strings.Join(report.Preflight.ContainerConflicts, ", "))
+	} else if cleanupOptions.AssumeCleanDocker {
+		addItem("docker-container-conflicts", true, true, "clean-machine dry-run assumes target Docker containers are absent; no local Docker deletion was performed")
 	} else if cleanupOptions.UseExistingContainers {
 		addItem("docker-container-conflicts", true, true, "existing fixed-name Docker containers are explicitly adopted; Docker Compose up will not run")
 	} else if strings.TrimSpace(valueString(report.Compose["composeFile"])) != "" {
