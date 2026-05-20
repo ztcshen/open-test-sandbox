@@ -6694,12 +6694,22 @@ func TestEvidenceImportCommandCanEmitJSONReport(t *testing.T) {
 
 func TestEvidenceImportUsesNamedPostgreSQLActiveStore(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-evidence-import-pg")
+	runEvidenceImportUsesNamedActiveStore(t, storeRef, "pg", "PostgreSQL")
+}
+
+func TestEvidenceImportUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-evidence-import-mysql")
+	runEvidenceImportUsesNamedActiveStore(t, storeRef, "mysql", "MySQL")
+}
+
+func runEvidenceImportUsesNamedActiveStore(t *testing.T, storeRef string, runLabel string, label string) {
+	t.Helper()
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "legacy.sqlite")
 	suffix := time.Now().UTC().UnixNano()
 	workflowLegacyID := suffix
 	caseLegacyID := suffix + 1
-	parentRunID := fmt.Sprintf("case-run-parent-pg-%d", suffix)
+	parentRunID := fmt.Sprintf("case-run-parent-%s-%d", runLabel, suffix)
 	createLegacyRuntimeDBWithIDs(t, sourcePath, workflowLegacyID, caseLegacyID, parentRunID)
 
 	out := runCLI(t, "evidence", "import", "--from", sourcePath, "--profile", "sample", "--json")
@@ -6711,46 +6721,46 @@ func TestEvidenceImportUsesNamedPostgreSQLActiveStore(t *testing.T) {
 		EvidenceCount   int    `json:"evidenceCount"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode PostgreSQL evidence import json: %v\n%s", err, out)
+		t.Fatalf("decode %s evidence import json: %v\n%s", label, err, out)
 	}
 	if report.SourcePath != sourcePath || report.ProfileID != "sample" || report.RunCount != 2 || report.APICaseRunCount != 1 || report.EvidenceCount != 1 {
-		t.Fatalf("PostgreSQL evidence import report = %#v", report)
+		t.Fatalf("%s evidence import report = %#v", label, report)
 	}
 
 	ctx := context.Background()
 	runtime, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open PostgreSQL evidence import Store: %v", err)
+		t.Fatalf("open %s evidence import Store: %v", label, err)
 	}
 	defer runtime.Close()
 	workflowRunID := fmt.Sprintf("legacy-workflow-%d", workflowLegacyID)
 	workflowRun, err := runtime.GetRun(ctx, workflowRunID)
 	if err != nil {
-		t.Fatalf("get imported PostgreSQL workflow run: %v", err)
+		t.Fatalf("get imported %s workflow run: %v", label, err)
 	}
 	if workflowRun.ProfileID != "sample" || workflowRun.WorkflowID != "workflow.alpha" || workflowRun.Status != store.StatusPassed {
-		t.Fatalf("imported PostgreSQL workflow run = %#v", workflowRun)
+		t.Fatalf("imported %s workflow run = %#v", label, workflowRun)
 	}
 	parentRun, err := runtime.GetRun(ctx, parentRunID)
 	if err != nil {
-		t.Fatalf("get imported PostgreSQL parent run: %v", err)
+		t.Fatalf("get imported %s parent run: %v", label, err)
 	}
 	if parentRun.ProfileID != "sample" || parentRun.Status != store.StatusFailed {
-		t.Fatalf("imported PostgreSQL parent run = %#v", parentRun)
+		t.Fatalf("imported %s parent run = %#v", label, parentRun)
 	}
 	caseRuns, err := runtime.ListAPICaseRuns(ctx, parentRunID)
 	if err != nil {
-		t.Fatalf("list imported PostgreSQL case runs: %v", err)
+		t.Fatalf("list imported %s case runs: %v", label, err)
 	}
 	if len(caseRuns) != 1 || caseRuns[0].ID != fmt.Sprintf("legacy-case-run-%d", caseLegacyID) || caseRuns[0].CaseID != "case.alpha" || caseRuns[0].Status != store.StatusFailed {
-		t.Fatalf("imported PostgreSQL case runs = %#v", caseRuns)
+		t.Fatalf("imported %s case runs = %#v", label, caseRuns)
 	}
 	records, err := runtime.ListEvidence(ctx, parentRunID)
 	if err != nil {
-		t.Fatalf("list imported PostgreSQL Evidence: %v", err)
+		t.Fatalf("list imported %s Evidence: %v", label, err)
 	}
 	if len(records) != 1 || records[0].ID != fmt.Sprintf("legacy-evidence-%d", caseLegacyID) || records[0].Kind != "case-run" {
-		t.Fatalf("imported PostgreSQL Evidence = %#v", records)
+		t.Fatalf("imported %s Evidence = %#v", label, records)
 	}
 
 	listOut := runCLI(t, "evidence", "list", "--run", parentRunID, "--json")
@@ -6769,17 +6779,17 @@ func TestEvidenceImportUsesNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal([]byte(listOut), &evidenceReport); err != nil {
-		t.Fatalf("decode imported PostgreSQL evidence list json: %v\n%s", err, listOut)
+		t.Fatalf("decode imported %s evidence list json: %v\n%s", label, err, listOut)
 	}
 	if len(evidenceReport.Runs) != 1 || evidenceReport.Runs[0].ID != parentRunID || evidenceReport.Runs[0].APICaseRunCount != 1 || evidenceReport.Runs[0].EvidenceCount != 1 {
-		t.Fatalf("imported PostgreSQL evidence list = %#v", evidenceReport.Runs)
+		t.Fatalf("imported %s evidence list = %#v", label, evidenceReport.Runs)
 	}
 	if len(evidenceReport.Runs[0].EvidenceRecords) != 1 {
-		t.Fatalf("imported PostgreSQL evidence list records = %#v", evidenceReport.Runs[0].EvidenceRecords)
+		t.Fatalf("imported %s evidence list records = %#v", label, evidenceReport.Runs[0].EvidenceRecords)
 	}
 	record := evidenceReport.Runs[0].EvidenceRecords[0]
 	if record.ID != fmt.Sprintf("legacy-evidence-%d", caseLegacyID) || record.RunID != parentRunID || record.CaseRunID != fmt.Sprintf("legacy-case-run-%d", caseLegacyID) || record.Kind != "case-run" || record.URI != ".runtime/cases/"+parentRunID {
-		t.Fatalf("imported PostgreSQL evidence list record = %#v", record)
+		t.Fatalf("imported %s evidence list record = %#v", label, record)
 	}
 }
 

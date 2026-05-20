@@ -1330,3 +1330,31 @@ Current blocker:
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - More daily-path CLI parity remains valuable, especially evidence import and
   serve/evidence task inspection.
+
+## 2026-05-21 MySQL Evidence Import Compatibility Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for importing legacy
+  SQLite runtime Evidence into the active SQL Store.
+- Shared the existing PostgreSQL scenario across PostgreSQL and MySQL:
+  `evidence import --from legacy.sqlite`, imported workflow run readback,
+  parent case-run readback, API case run readback, Evidence record readback,
+  and `evidence list --run`.
+- Kept SQLite only as the explicit legacy import source while PostgreSQL/MySQL
+  remain the active product Store targets.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run 'TestEvidenceImportUsesNamed(PostgreSQL|MySQL)ActiveStore' -count=1`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+- More daily-path CLI parity remains valuable, especially serve/evidence task
+  inspection.
