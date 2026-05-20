@@ -381,3 +381,27 @@ Current blocker:
 
 - Still waiting for a dedicated company MySQL Store DSN to run the guarded real
   MySQL release proof.
+
+## 2026-05-21 MySQL Time Parsing DSN Guard Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Hardened MySQL Store URL conversion so user query parameters cannot override
+  the Store-required `parseTime=true` and UTC location settings.
+- Kept ordinary MySQL driver query parameters such as `tls=false` intact while
+  dropping conflicting `parseTime` and `loc` URL parameters before building the
+  driver DSN.
+- Added a focused regression test that first exposed the conflicting
+  `parseTime=false&loc=Local` DSN output, then now proves the Store DSN remains
+  authoritative.
+
+Validated:
+
+- `go test ./internal/store/mysql -run 'TestParseConfigFromURLAcceptsMySQLURL|TestParseConfigFromURLKeepsStoreTimeParsingAuthoritative|TestParseConfigFromURLRejectsNonMySQLDSN|TestParseConfigFromURLRequiresDatabaseName' -count=1`
+
+Current blocker:
+
+- Final completion still requires `npm run release-check:mysql-real` against a
+  dedicated company MySQL Store DSN.

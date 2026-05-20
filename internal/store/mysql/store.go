@@ -141,6 +141,10 @@ func driverDSNFromURL(parsed *url.URL) (string, error) {
 		if len(values) == 0 {
 			continue
 		}
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "parsetime", "loc":
+			continue
+		}
 		params[key] = values[len(values)-1]
 	}
 	if _, ok := params["loc"]; !ok {
