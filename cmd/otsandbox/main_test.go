@@ -1584,72 +1584,94 @@ func TestEnvironmentRestoreMaterializesRemoteComponentAsset(t *testing.T) {
 	}
 }
 
-func TestEnvironmentRestorePostgreSQLUsesStoreGeneratedStartupFiles(t *testing.T) {
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	fakeBin := t.TempDir()
-	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
-	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
-		t.Fatalf("chmod fake git: %v", err)
+func TestEnvironmentRestoreSQLStoreUsesStoreGeneratedStartupFiles(t *testing.T) {
+	tests := []struct {
+		name     string
+		storeURL string
+	}{
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
 	}
-	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
-		t.Fatalf("chmod fake docker: %v", err)
-	}
-	t.Setenv("PATH", fakeBin)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := filepath.Join(t.TempDir(), "workspace")
+			fakeBin := t.TempDir()
+			writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+			writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
+			if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+				t.Fatalf("chmod fake git: %v", err)
+			}
+			if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+				t.Fatalf("chmod fake docker: %v", err)
+			}
+			t.Setenv("PATH", fakeBin)
 
-	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
-		ID:                     "env.pg.generated",
-		ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
-		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  llt:\n    image: alpine:3.20\n"},"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
-		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
-		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
-		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-	}, environmentRestoreDockerCleanupOptions{})
-	if err != nil {
-		t.Fatalf("build restore PostgreSQL generated startup report: %v", err)
-	}
-	if !report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || report.Package.Action != "ignored-for-sql-store-restore" || report.Docker.Action != "plan-docker-compose" {
-		t.Fatalf("PostgreSQL generated startup report = %#v", report)
-	}
-	if len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != "plan-write" || !report.Docker.Generated[0].OK {
-		t.Fatalf("generated startup file report = %#v", report.Docker.Generated)
-	}
-	if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", true, "generated from Store metadata") {
-		t.Fatalf("readiness should accept Store generated startup files: %#v", report.Readiness.Items)
+			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+				ID:                     "env." + tt.name + ".generated",
+				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  llt:\n    image: alpine:3.20\n"},"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
+				VerificationWorkflowID: "workflow.core-10",
+			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+				StoreURL: tt.storeURL,
+			}, environmentRestoreDockerCleanupOptions{})
+			if err != nil {
+				t.Fatalf("build %s restore generated startup report: %v", tt.name, err)
+			}
+			if !report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || report.Package.Action != "ignored-for-sql-store-restore" || report.Docker.Action != "plan-docker-compose" {
+				t.Fatalf("%s generated startup report = %#v", tt.name, report)
+			}
+			if len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != "plan-write" || !report.Docker.Generated[0].OK {
+				t.Fatalf("%s generated startup file report = %#v", tt.name, report.Docker.Generated)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", true, "generated from Store metadata") {
+				t.Fatalf("%s readiness should accept Store generated startup files: %#v", tt.name, report.Readiness.Items)
+			}
+		})
 	}
 }
 
-func TestEnvironmentRestorePostgreSQLRejectsLocalStartupFilesWithoutStoreGeneratedContent(t *testing.T) {
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	fakeBin := t.TempDir()
-	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
-	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
-		t.Fatalf("chmod fake git: %v", err)
+func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGeneratedContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		storeURL string
+	}{
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
 	}
-	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
-		t.Fatalf("chmod fake docker: %v", err)
-	}
-	t.Setenv("PATH", fakeBin)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := filepath.Join(t.TempDir(), "workspace")
+			fakeBin := t.TempDir()
+			writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+			writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
+			if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+				t.Fatalf("chmod fake git: %v", err)
+			}
+			if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+				t.Fatalf("chmod fake docker: %v", err)
+			}
+			t.Setenv("PATH", fakeBin)
 
-	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
-		ID:                     "env.pg.local.compose",
-		ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
-		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
-		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
-		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
-		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-	}, environmentRestoreDockerCleanupOptions{})
-	if err != nil {
-		t.Fatalf("build restore PostgreSQL local startup report: %v", err)
-	}
-	if !report.SourcePolicy.OK || report.Package.Action != "ignored-for-sql-store-restore" {
-		t.Fatalf("PostgreSQL local startup pre-readiness report = %#v", report)
-	}
-	if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing generatedFiles") {
-		t.Fatalf("readiness should reject local startup files without Store content: %#v", report.Readiness.Items)
+			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+				ID:                     "env." + tt.name + ".local.compose",
+				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
+				VerificationWorkflowID: "workflow.core-10",
+			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+				StoreURL: tt.storeURL,
+			}, environmentRestoreDockerCleanupOptions{})
+			if err != nil {
+				t.Fatalf("build %s restore local startup report: %v", tt.name, err)
+			}
+			if !report.SourcePolicy.OK || report.Package.Action != "ignored-for-sql-store-restore" {
+				t.Fatalf("%s local startup pre-readiness report = %#v", tt.name, report)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing generatedFiles") {
+				t.Fatalf("%s readiness should reject local startup files without Store content: %#v", tt.name, report.Readiness.Items)
+			}
+		})
 	}
 }
 
