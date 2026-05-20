@@ -9634,6 +9634,17 @@ func runCaseSuiteImpactReportRunsImpactedCases(t *testing.T, _ string, runLabel 
 }
 
 func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-workflow-report-fail-pg")
+	runWorkflowReportWritesReportWhenStepFails(t, storeRef, "PostgreSQL")
+}
+
+func TestWorkflowReportUsesNamedMySQLActiveStoreWhenStepFails(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-workflow-report-fail-mysql")
+	runWorkflowReportWritesReportWhenStepFails(t, storeRef, "MySQL")
+}
+
+func runWorkflowReportWritesReportWhenStepFails(t *testing.T, _ string, label string) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/first":
@@ -9647,10 +9658,9 @@ func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	profileDir := writeWorkflowBatchReportProfile(t)
-	configureNamedPostgreSQLActiveStore(t, "daily-workflow-report-fail-pg")
-	runCLI(t, "config", "publish", "--from", profileDir)
-	listOut := runCLI(t, "workflow", "discover", "--filter", "Workflow Alpha", "--json")
+	fixture := writeUniqueWorkflowBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+	listOut := runCLI(t, "workflow", "discover", "--filter", fixture.workflowID, "--json")
 	var listReport struct {
 		Items []struct {
 			ID          string `json:"id"`
@@ -9658,10 +9668,10 @@ func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
-		t.Fatalf("decode workflow discover json: %v\n%s", err, listOut)
+		t.Fatalf("decode %s workflow discover json: %v\n%s", label, err, listOut)
 	}
-	if len(listReport.Items) != 1 || listReport.Items[0].ID != "workflow.alpha" {
-		t.Fatalf("workflow discover = %#v", listReport.Items)
+	if len(listReport.Items) != 1 || listReport.Items[0].ID != fixture.workflowID {
+		t.Fatalf("%s workflow discover = %#v", label, listReport.Items)
 	}
 
 	outputDir := filepath.Join(t.TempDir(), "workflow-report")
@@ -9689,26 +9699,26 @@ func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 		} `json:"steps"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode workflow report json: %v\n%s", err, out)
+		t.Fatalf("decode %s workflow report json: %v\n%s", label, err, out)
 	}
 	if report.OK || report.RunID == "" || report.Counts.Total != 2 || report.Counts.Passed != 1 || report.Counts.Failed != 1 {
-		t.Fatalf("workflow report = %#v", report)
+		t.Fatalf("%s workflow report = %#v", label, report)
 	}
 	if len(report.Steps) != 2 || report.Steps[1].RunID == "" || report.Steps[1].CaseRunID != report.Steps[1].RunID+".case" || report.Steps[1].DetailURL == "" {
-		t.Fatalf("workflow report evidence handles = %#v", report.Steps)
+		t.Fatalf("%s workflow report evidence handles = %#v", label, report.Steps)
 	}
 	htmlPath := filepath.Join(outputDir, "report.html")
 	html, err := os.ReadFile(htmlPath)
 	if err != nil {
-		t.Fatalf("html report missing: %v", err)
+		t.Fatalf("%s html report missing: %v", label, err)
 	}
-	for _, want := range []string{"Workflow Alpha", "First Step", "Second Step", "failed", "caseRunId"} {
+	for _, want := range []string{fixture.workflowName, "First Step", "Second Step", "failed", "caseRunId"} {
 		if !strings.Contains(string(html), want) {
-			t.Fatalf("workflow html missing %q:\n%s", want, html)
+			t.Fatalf("%s workflow html missing %q:\n%s", label, want, html)
 		}
 	}
 	if report.ReportURL != htmlPath {
-		t.Fatalf("report url = %q want %q", report.ReportURL, htmlPath)
+		t.Fatalf("%s report url = %q want %q", label, report.ReportURL, htmlPath)
 	}
 }
 
@@ -11250,6 +11260,83 @@ func writeWorkflowBatchReportProfile(t *testing.T) string {
   ]
 }`)
 	return dir
+}
+
+type workflowBatchReportFixture struct {
+	profileDir     string
+	profileID      string
+	workflowID     string
+	workflowName   string
+	nodeFirstID    string
+	nodeSecondID   string
+	caseFirstID    string
+	caseSecondID   string
+	firstConfigID  string
+	secondConfigID string
+}
+
+func writeUniqueWorkflowBatchReportProfile(t *testing.T) workflowBatchReportFixture {
+	t.Helper()
+	fixture := workflowBatchReportFixture{
+		profileDir:     t.TempDir(),
+		profileID:      uniqueTestID(t, "profile.workflow-batch-report"),
+		workflowID:     uniqueTestID(t, "workflow.alpha"),
+		workflowName:   "Workflow Alpha " + strings.ReplaceAll(t.Name(), "/", "-"),
+		nodeFirstID:    uniqueTestID(t, "node.first"),
+		nodeSecondID:   uniqueTestID(t, "node.second"),
+		caseFirstID:    uniqueTestID(t, "case.first"),
+		caseSecondID:   uniqueTestID(t, "case.second"),
+		firstConfigID:  uniqueTestID(t, "cfg.step.first"),
+		secondConfigID: uniqueTestID(t, "cfg.step.second"),
+	}
+	writeFile(t, filepath.Join(fixture.profileDir, "profile.json"), fmt.Sprintf(`{
+  "id": %q,
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "workflows": [{"id":%q,"displayName":%q,"baseStepTimeoutMs":1000}],
+  "interfaceNodes": [
+    {"id":%q,"displayName":"First Node","serviceId":"service.alpha","method":"GET","path":"/first"},
+    {"id":%q,"displayName":"Second Node","serviceId":"service.alpha","method":"GET","path":"/second"}
+  ],
+  "apiCases": [
+    {"id":%q,"displayName":"First Step Case","nodeId":%q,"sortOrder":1},
+    {"id":%q,"displayName":"Second Step Case","nodeId":%q,"sortOrder":2}
+  ],
+  "requestTemplates": [],
+  "templateConfigs": [
+    {
+      "id": %q,
+      "templateId": "case-execution",
+      "workflowId": %q,
+      "nodeId": "service.alpha",
+      "scopeType": "step",
+      "scopeId": "first",
+      "title": "First Step",
+      "status": "active",
+      "sortOrder": 1,
+      "configJson": %q
+    },
+    {
+      "id": %q,
+      "templateId": "case-execution",
+      "workflowId": %q,
+      "nodeId": "service.alpha",
+      "scopeType": "step",
+      "scopeId": "second",
+      "title": "Second Step",
+      "status": "active",
+      "sortOrder": 2,
+      "configJson": %q
+    }
+  ],
+  "caseDependencies": [],
+  "workflowBindings": [
+    {"workflowId":%q,"stepId":"first","nodeId":%q,"caseId":%q,"required":true,"sortOrder":1},
+    {"workflowId":%q,"stepId":"second","nodeId":%q,"caseId":%q,"required":true,"sortOrder":2}
+  ],
+  "fixtures": []
+}`, fixture.profileID, fixture.workflowID, fixture.workflowName, fixture.nodeFirstID, fixture.nodeSecondID, fixture.caseFirstID, fixture.nodeFirstID, fixture.caseSecondID, fixture.nodeSecondID, fixture.firstConfigID, fixture.workflowID, fmt.Sprintf(`{"caseId":%q,"caseExecution":{"method":"GET","nodeId":"service.alpha","path":"/first","expectedHttpCodes":[200]},"exports":[{"name":"item_id","from":"responseBody","path":"item_id"}]}`, fixture.caseFirstID), fixture.secondConfigID, fixture.workflowID, fmt.Sprintf(`{"caseId":%q,"caseExecution":{"method":"GET","nodeId":"service.alpha","path":"/second","expectedHttpCodes":[200]},"inputs":[{"name":"item_id","source":"previous"}]}`, fixture.caseSecondID), fixture.workflowID, fixture.nodeFirstID, fixture.caseFirstID, fixture.workflowID, fixture.nodeSecondID, fixture.caseSecondID))
+	return fixture
 }
 
 func writeFile(t *testing.T, path string, body string) {
