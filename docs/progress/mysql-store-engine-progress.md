@@ -1384,3 +1384,29 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Workflow Daily Path Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for core workflow daily
+  commands.
+- Shared the existing PostgreSQL scenario across PostgreSQL and MySQL:
+  `config publish`, `workflow discover`, `workflow plan`, baseline set/get,
+  `workflow report`, `case runs`, real SkyWalking-shaped topology collection
+  through a test GraphQL provider, and `case evidence` readback.
+- Parameterized trace/request ids so PostgreSQL and MySQL coverage store
+  backend-specific topology evidence without colliding.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run 'TestDailyWorkflowCommandsUseNamed(PostgreSQL|MySQL)ActiveStore' -count=1`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

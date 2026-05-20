@@ -7988,6 +7988,18 @@ func runDiscoverCommandsUseNamedActiveStore(t *testing.T, label string) {
 
 func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "daily-workflow-pg")
+	runDailyWorkflowCommandsUseNamedActiveStore(t, "pg", "PostgreSQL")
+}
+
+func TestDailyWorkflowCommandsUseNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-workflow-mysql")
+	runDailyWorkflowCommandsUseNamedActiveStore(t, "mysql", "MySQL")
+}
+
+func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, label string) {
+	t.Helper()
+	traceID := "trace." + runLabel + ".daily"
+	requestID := "request." + runLabel + ".daily"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/first":
@@ -8012,7 +8024,7 @@ func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		if !strings.Contains(payload.Query, "queryTrace") {
 			t.Fatalf("unexpected provider query: %s", payload.Query)
 		}
-		_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[{"traceId":"trace.pg.daily","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/first","type":"Entry","component":"Tomcat"},{"traceId":"trace.pg.daily","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.pg.daily","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"GET:/first","type":"Entry","component":"Server"}]}}}`))
+		_, _ = fmt.Fprintf(w, `{"data":{"queryTrace":{"spans":[{"traceId":%q,"segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/first","type":"Entry","component":"Tomcat"},{"traceId":%q,"segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":%q,"parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"GET:/first","type":"Entry","component":"Server"}]}}}`, traceID, traceID, traceID)
 	}))
 	defer provider.Close()
 
@@ -8025,10 +8037,10 @@ func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(workflowOut), &workflowList); err != nil {
-		t.Fatalf("decode workflow discover json: %v\n%s", err, workflowOut)
+		t.Fatalf("decode %s workflow discover json: %v\n%s", label, err, workflowOut)
 	}
 	if len(workflowList.Items) != 1 || workflowList.Items[0].ID != "workflow.alpha" {
-		t.Fatalf("workflow discover via active SQL Store = %#v", workflowList.Items)
+		t.Fatalf("%s workflow discover via active SQL Store = %#v", label, workflowList.Items)
 	}
 
 	planOut := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha", "--json")
@@ -8038,16 +8050,16 @@ func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"counts"`
 	}
 	if err := json.Unmarshal([]byte(planOut), &plan); err != nil {
-		t.Fatalf("decode workflow plan json: %v\n%s", err, planOut)
+		t.Fatalf("decode %s workflow plan json: %v\n%s", label, err, planOut)
 	}
 	if plan.Counts.Steps != 2 {
-		t.Fatalf("workflow plan via active SQL Store = %#v", plan)
+		t.Fatalf("%s workflow plan via active SQL Store = %#v", label, plan)
 	}
 
 	runCLI(t, "baseline", "set", "--profile", "sample", "--subject", "workflow.alpha", "--status", "passed", "--required")
 	baselineOut := runCLI(t, "baseline", "get", "--profile", "sample", "--subject", "workflow.alpha")
 	if !strings.Contains(baselineOut, "Status: passed") || !strings.Contains(baselineOut, "Required: true") {
-		t.Fatalf("baseline get via active SQL Store = %q", baselineOut)
+		t.Fatalf("%s baseline get via active SQL Store = %q", label, baselineOut)
 	}
 
 	reportOut := runCLI(t,
@@ -8067,31 +8079,31 @@ func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"counts"`
 	}
 	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
-		t.Fatalf("decode workflow report json: %v\n%s", err, reportOut)
+		t.Fatalf("decode %s workflow report json: %v\n%s", label, err, reportOut)
 	}
 	if !report.OK || report.RunID == "" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 {
-		t.Fatalf("workflow report via active SQL Store = %#v", report)
+		t.Fatalf("%s workflow report via active SQL Store = %#v", label, report)
 	}
 
 	caseRunsOut := runCLI(t, "case", "runs", "--run", report.RunID, "--json")
 	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
-		t.Fatalf("case runs via active SQL Store = %s", caseRunsOut)
+		t.Fatalf("%s case runs via active SQL Store = %s", label, caseRunsOut)
 	}
 	traceOut := runCLI(t, "trace", "topology", "collect",
 		"--trace-graphql-url", provider.URL,
 		"--run", report.RunID,
 		"--step", "first",
 		"--case", "case.first",
-		"--request", "request.pg.daily",
-		"--trace-id", "trace.pg.daily",
+		"--request", requestID,
+		"--trace-id", traceID,
 		"--json",
 	)
-	if !strings.Contains(traceOut, `"provider":"skywalking"`) || !strings.Contains(traceOut, `"status":"complete"`) || !strings.Contains(traceOut, "trace.pg.daily") {
-		t.Fatalf("trace topology via active SQL Store = %s", traceOut)
+	if !strings.Contains(traceOut, `"provider":"skywalking"`) || !strings.Contains(traceOut, `"status":"complete"`) || !strings.Contains(traceOut, traceID) {
+		t.Fatalf("%s trace topology via active SQL Store = %s", label, traceOut)
 	}
 	evidenceOut := runCLI(t, "case", "evidence", "--run", report.RunID, "--case-id", "case.first", "--step-id", "first", "--json")
-	if !strings.Contains(evidenceOut, `"provider":"skywalking"`) || !strings.Contains(evidenceOut, "trace.pg.daily") {
-		t.Fatalf("case evidence via active SQL Store = %s", evidenceOut)
+	if !strings.Contains(evidenceOut, `"provider":"skywalking"`) || !strings.Contains(evidenceOut, traceID) {
+		t.Fatalf("%s case evidence via active SQL Store = %s", label, evidenceOut)
 	}
 }
 
