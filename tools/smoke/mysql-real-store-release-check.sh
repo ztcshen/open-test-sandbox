@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT_DIR"
 
-raw_dsn="${OTSANDBOX_REAL_MYSQL_STORE_DSN:-${OTSANDBOX_SMOKE_STORE_DSN:-}}"
+raw_dsn="${OTSANDBOX_REAL_MYSQL_STORE_DSN:-${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}}"
 if [[ -z "$raw_dsn" ]]; then
-  echo "Set OTSANDBOX_REAL_MYSQL_STORE_DSN to a dedicated mysql:// Open Test Sandbox smoke Store DSN." >&2
+  echo "Set OTSANDBOX_REAL_MYSQL_STORE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to a dedicated mysql:// Open Test Sandbox smoke Store DSN." >&2
   echo "Example: OTSANDBOX_REAL_MYSQL_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check:mysql-real" >&2
   exit 1
 fi

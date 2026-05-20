@@ -151,3 +151,17 @@ test("real MySQL release wrapper dry-run masks credentials and accepts smoke dat
   assert.match(result.stderr, /MySQL Store contract mode: existing/);
   assert.match(result.stderr, /Would run: npm run release-check/);
 });
+
+test("real MySQL release wrapper accepts shared smoke Store env", () => {
+  const result = runRealMySQLWrapper({
+    OTSANDBOX_REAL_MYSQL_STORE_DSN: "",
+    OTSANDBOX_SMOKE_STORE_DSN: "",
+    OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+    OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/otsandbox_smoke/);
+  assert.doesNotMatch(result.stderr, /secret/);
+  assert.match(result.stderr, /Would run: npm run release-check/);
+});

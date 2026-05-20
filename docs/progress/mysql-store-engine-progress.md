@@ -475,3 +475,29 @@ Current blocker:
 
 - Still blocked on a dedicated company MySQL Store DSN for
   `npm run release-check:mysql-real`.
+
+## 2026-05-21 Real MySQL Wrapper Shared Store Env Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Aligned `npm run release-check:mysql-real` with the rest of the MySQL smoke
+  path by accepting shared `OTSANDBOX_SMOKE_STORE` when the dedicated
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN` and `OTSANDBOX_SMOKE_STORE_DSN` variables
+  are not set.
+- Kept the safety checks intact: the wrapper still requires a `mysql://` DSN,
+  masks credentials in output, and refuses likely business database names.
+- Added a focused TDD regression test that first failed on the missing shared
+  Store env path, then now proves the dry-run wrapper accepts the shared MySQL
+  Store DSN without printing the password.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs`
+- `bash -n tools/smoke/mysql-real-store-release-check.sh tools/release-check.sh`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
