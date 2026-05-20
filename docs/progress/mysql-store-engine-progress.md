@@ -1275,3 +1275,31 @@ Current blocker:
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - More daily-path CLI parity remains valuable, especially profile
   import/verify, discover, evidence import, and serve/evidence task inspection.
+
+## 2026-05-21 MySQL Profile Import Daily Path Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for `profile import` and
+  `profile verify`.
+- Shared the existing PostgreSQL scenario across PostgreSQL and MySQL:
+  profile bundle import, profile index readback, catalog index readback,
+  Store-backed case-run coverage records, required case-run verification,
+  verified profile index readback, and verified catalog readback.
+- Kept the scenario tied to `OTSANDBOX_MYSQL_TEST_DSN`, so CI's MySQL release
+  Store and the company MySQL sign-off path can both exercise it.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run 'TestProfileImportAndVerifyUseNamed(PostgreSQL|MySQL)ActiveStore' -count=1`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+- More daily-path CLI parity remains valuable, especially discover, evidence
+  import, and serve/evidence task inspection.
