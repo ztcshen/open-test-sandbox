@@ -1135,16 +1135,23 @@ type fakeRows struct {
 }
 
 type fakeSQLState struct {
-	mu      sync.Mutex
-	execs   []fakeSQLCall
-	queries []fakeSQLCall
-	rows    []fakeRows
+	mu       sync.Mutex
+	execs    []fakeSQLCall
+	queries  []fakeSQLCall
+	rows     []fakeRows
+	execErrs []error
 }
 
 func (s *fakeSQLState) queueRows(rows fakeRows) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rows = append(s.rows, rows)
+}
+
+func (s *fakeSQLState) queueExecError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.execErrs = append(s.execErrs, err)
 }
 
 func (s *fakeSQLState) lastExec(t *testing.T) fakeSQLCall {
@@ -1239,6 +1246,13 @@ func (c fakeSQLConn) ExecContext(_ context.Context, query string, args []driver.
 	c.state.mu.Lock()
 	defer c.state.mu.Unlock()
 	c.state.execs = append(c.state.execs, fakeSQLCall{query: query, args: namedValues(args)})
+	if len(c.state.execErrs) > 0 {
+		err := c.state.execErrs[0]
+		c.state.execErrs = c.state.execErrs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	return driver.RowsAffected(1), nil
 }
 

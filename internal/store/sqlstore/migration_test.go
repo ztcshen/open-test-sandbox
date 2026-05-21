@@ -3,6 +3,7 @@ package sqlstore_test
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -37,7 +38,8 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 			name:    "mysql",
 			dialect: sqlstore.MySQLDialect{},
 			want: []string{
-				"id varchar(128) primary key",
+				"id varchar(255) primary key",
+				"profile_id varchar(128) not null",
 				"applied_at datetime(6) not null",
 				"summary_json json not null",
 				"started_at datetime(6)",
@@ -110,6 +112,9 @@ func TestCoreSchemaSQLUsesMySQLCompatibleIndexDDL(t *testing.T) {
 	}
 	if !strings.Contains(joined, "create index `idx_api_case_runs_run_id_created_at`") {
 		t.Fatalf("mysql schema missing quoted index DDL:\n%s", joined)
+	}
+	if !strings.Contains(joined, "consumer_component_id varchar(128) not null") || !strings.Contains(joined, "provider_component_id varchar(128) not null") {
+		t.Fatalf("mysql component graph keys should stay bounded for composite indexes:\n%s", joined)
 	}
 }
 
@@ -332,6 +337,127 @@ func TestSchemaStatusAndUpgradeSchemaUseMySQLMigrations(t *testing.T) {
 	}
 	if execs := state.execsSnapshot(); len(execs) != 0 {
 		t.Fatalf("latest schema should not execute DDL: %#v", execs)
+	}
+}
+
+func TestUpgradeSchemaWidensMySQLRuntimeIdentifiersFromVersionFour(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	dialect := sqlstore.MySQLDialect{}
+
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(4)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+	})
+
+	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
+	if err != nil {
+		t.Fatalf("upgrade mysql v4 schema: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+		t.Fatalf("upgraded mysql v4 schema status = %#v", status)
+	}
+
+	joinedExecs := strings.Builder{}
+	for _, exec := range state.execsSnapshot() {
+		joinedExecs.WriteString(exec.query)
+		joinedExecs.WriteByte('\n')
+	}
+	for _, want := range []string{
+		"alter table `runs` modify column `id` varchar(255) not null",
+		"alter table `api_case_runs` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null",
+		"alter table `evidence_records` modify column `id` varchar(255) not null",
+		"modify column `workflow_run_id` varchar(255) not null",
+		"alter table `environments` modify column `last_verification_run_id` varchar(255) not null",
+	} {
+		if !strings.Contains(joinedExecs.String(), want) {
+			t.Fatalf("mysql v4 upgrade missing %q:\n%s", want, joinedExecs.String())
+		}
+	}
+}
+
+func TestUpgradeSchemaTreatsDuplicateMySQLIndexAsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	dialect := sqlstore.MySQLDialect{}
+
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(4)}},
+	})
+	for i := 0; i < 3; i++ {
+		state.queueExecError(nil)
+	}
+	state.queueExecError(fmt.Errorf("Error 1061 (42000): Duplicate key name 'idx_api_case_runs_run_id_created_at'"))
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+	})
+
+	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
+	if err != nil {
+		t.Fatalf("upgrade mysql schema should tolerate duplicate index replay: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+		t.Fatalf("upgraded mysql schema status = %#v", status)
+	}
+}
+
+func TestUpgradeSchemaIgnoresExistingMySQLIndexesDuringReplay(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	dialect := sqlstore.MySQLDialect{}
+
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(4)}},
+	})
+	state.queueExecError(nil)
+	state.queueExecError(nil)
+	state.queueExecError(nil)
+	state.queueExecError(errors.New("Error 1061 (42000): Duplicate key name 'idx_api_case_runs_run_id_created_at'"))
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+	})
+
+	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
+	if err != nil {
+		t.Fatalf("upgrade mysql v4 schema with existing index: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+		t.Fatalf("upgraded mysql v4 schema status = %#v", status)
 	}
 }
 

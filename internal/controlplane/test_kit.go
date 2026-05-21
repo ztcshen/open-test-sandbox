@@ -35,6 +35,7 @@ type caseExecutionConfig struct {
 	Auth                  map[string]any `json:"auth"`
 	Body                  any            `json:"body"`
 	ExpectedHTTPCodes     []int          `json:"expectedHttpCodes"`
+	ExpectedResponse      []string       `json:"expectedResponseContains"`
 	RequireRequestID      bool           `json:"requireRequestId"`
 	Signed                bool           `json:"signed"`
 	TraceCorrelatorFields []string       `json:"traceCorrelatorFields"`
@@ -43,6 +44,7 @@ type caseExecutionConfig struct {
 type caseExecutionTemplateConfig struct {
 	CaseID        string              `json:"caseId"`
 	CaseExecution caseExecutionConfig `json:"caseExecution"`
+	Exports       []map[string]any    `json:"exports"`
 }
 
 func handleTestKitRun(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store, collector traceCollector) {
@@ -225,6 +227,19 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 	if !passed {
 		failureReason = fmt.Sprintf("unexpected http status %d", response.StatusCode)
 	}
+	if passed {
+		for _, expected := range request.expectedResponse {
+			expected = strings.TrimSpace(expected)
+			if expected == "" {
+				continue
+			}
+			if !strings.Contains(string(responseBody), expected) {
+				passed = false
+				failureReason = fmt.Sprintf("response body missing %q", expected)
+				break
+			}
+		}
+	}
 	return caseExecutionResult{
 		ok:            passed,
 		httpCode:      response.StatusCode,
@@ -246,6 +261,7 @@ type caseHTTPRequest struct {
 	auth              map[string]string
 	body              any
 	expectedHTTPCodes []int
+	expectedResponse  []string
 	nodeID            string
 	signed            bool
 }
@@ -282,6 +298,7 @@ func buildCaseHTTPRequest(ctx context.Context, bundle profile.Bundle, runtime st
 		auth:              headerStrings(rendered.Auth),
 		body:              rendered.Body,
 		expectedHTTPCodes: rendered.ExpectedHTTPCodes,
+		expectedResponse:  rendered.ExpectedResponse,
 		nodeID:            rendered.NodeID,
 		signed:            rendered.Signed,
 	}
@@ -1189,6 +1206,14 @@ func fileExists(path string) bool {
 }
 
 func findCaseExecutionConfig(ctx context.Context, runtime store.Store, caseID string, payload map[string]any) *caseExecutionConfig {
+	template := findCaseExecutionTemplateConfig(ctx, runtime, caseID, payload)
+	if template == nil {
+		return nil
+	}
+	return &template.CaseExecution
+}
+
+func findCaseExecutionTemplateConfig(ctx context.Context, runtime store.Store, caseID string, payload map[string]any) *caseExecutionTemplateConfig {
 	if runtime == nil {
 		return nil
 	}
@@ -1196,13 +1221,21 @@ func findCaseExecutionConfig(ctx context.Context, runtime store.Store, caseID st
 	if err != nil {
 		return nil
 	}
-	return findCaseExecutionConfigFromCatalog(catalog, caseID, payload)
+	return findCaseExecutionTemplateConfigFromCatalog(catalog, caseID, payload)
 }
 
 func findCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, caseID string, payload map[string]any) *caseExecutionConfig {
+	template := findCaseExecutionTemplateConfigFromCatalog(catalog, caseID, payload)
+	if template == nil {
+		return nil
+	}
+	return &template.CaseExecution
+}
+
+func findCaseExecutionTemplateConfigFromCatalog(catalog store.ProfileCatalog, caseID string, payload map[string]any) *caseExecutionTemplateConfig {
 	workflowID := valueString(payload["workflowId"])
 	stepID := valueString(payload["stepId"])
-	var defaultValue *caseExecutionConfig
+	var defaultValue *caseExecutionTemplateConfig
 	for _, config := range catalog.TemplateConfigs {
 		if config.Status != "" && config.Status != "active" {
 			continue
@@ -1216,13 +1249,13 @@ func findCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, caseID str
 			continue
 		}
 		if workflowID != "" && stepID != "" && config.WorkflowID == workflowID && config.ScopeID == stepID {
-			return &next
+			return &parsed
 		}
 		if parsed.CaseID != caseID {
 			continue
 		}
 		if defaultValue == nil {
-			defaultValue = &next
+			defaultValue = &parsed
 		}
 	}
 	return defaultValue

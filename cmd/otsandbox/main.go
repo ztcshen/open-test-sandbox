@@ -252,6 +252,7 @@ Usage:
   otsandbox store status [--store NAME_OR_DSN]
   otsandbox store upgrade [--store NAME_OR_DSN]
   otsandbox store ddl [--backend postgres|mysql] [--store NAME_OR_DSN]
+  otsandbox store copy --from NAME_OR_DSN --to NAME_OR_DSN [--json]
   otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-generated-file TARGET=SOURCE_FILE]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
@@ -355,6 +356,8 @@ func runStore(ctx context.Context, args []string) error {
 		return runStoreCurrent(args[1:])
 	case "ddl":
 		return runStoreDDL(args[1:])
+	case "copy":
+		return runStoreCopy(ctx, args[1:])
 	}
 
 	flags := flag.NewFlagSet("store "+args[0], flag.ContinueOnError)

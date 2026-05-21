@@ -63,6 +63,7 @@ type apiCaseBatchCasePlan struct {
 	TimeoutSeconds  int
 	Overrides       map[string]any
 	Execution       *caseExecutionConfig
+	Exports         []map[string]any
 }
 
 type apiCaseBatchCaseReport struct {
@@ -417,7 +418,7 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, bundle 
 				}
 			}
 			if item.Status == store.StatusPassed {
-				workflowOverrides = mergeStringAnyMaps(workflowOverrides, apiCaseBatchEvidenceOverrides(result.EvidencePath))
+				workflowOverrides = mergeStringAnyMaps(workflowOverrides, apiCaseBatchEvidenceOverridesForPlan(plan, result.EvidencePath))
 			}
 		}
 		r.updateCase(batchRunID, index, item)
@@ -449,6 +450,7 @@ func materializeAPICaseBatchExecution(ctx context.Context, bundle profile.Bundle
 		},
 		Assertions: apicase.Assertions{
 			ExpectedStatusCodes: request.expectedHTTPCodes,
+			ResponseContains:    request.expectedResponse,
 		},
 	}
 	dir := filepath.Join(".runtime", "case-batches", batchRunID, "materialized-cases")
@@ -479,6 +481,94 @@ func apiCaseBatchRequestPath(request caseHTTPRequest) string {
 		return request.path
 	}
 	return "/"
+}
+
+func apiCaseBatchEvidenceOverridesForPlan(plan apiCaseBatchCasePlan, evidencePath string) map[string]any {
+	out := apiCaseBatchEvidenceOverrides(evidencePath)
+	request, _ := jsonFileObject(filepath.Join(evidencePath, "request.json"))
+	response, _ := jsonFileObject(filepath.Join(evidencePath, "response.json"))
+	requestBody := apiCaseBatchJSONBody(request)
+	responseBody := apiCaseBatchJSONBody(response)
+	for _, export := range plan.Exports {
+		name := apiCaseBatchOverrideKey(valueString(export["name"]))
+		if name == "" {
+			continue
+		}
+		source := strings.ToLower(strings.TrimSpace(valueString(export["from"])))
+		path := strings.TrimSpace(valueString(export["path"]))
+		var root any
+		switch source {
+		case "requestbody", "request.body":
+			root = requestBody
+		case "responsebody", "response.body":
+			root = responseBody
+		case "request":
+			root = request
+		case "response":
+			root = responseBody
+			if root == nil {
+				root = response
+			}
+		default:
+			root = responseBody
+		}
+		value, ok := apiCaseBatchPathValue(root, path)
+		if !ok {
+			continue
+		}
+		text := strings.TrimSpace(apiCaseBatchOverrideValueString(value))
+		if text != "" {
+			out[name] = text
+		}
+	}
+	return out
+}
+
+func apiCaseBatchJSONBody(payload map[string]any) any {
+	body := strings.TrimSpace(valueString(payload["body"]))
+	if body == "" {
+		return nil
+	}
+	var parsed any
+	decoder := json.NewDecoder(strings.NewReader(body))
+	decoder.UseNumber()
+	if decoder.Decode(&parsed) != nil {
+		return nil
+	}
+	return parsed
+}
+
+func apiCaseBatchPathValue(root any, path string) (any, bool) {
+	path = strings.TrimSpace(path)
+	path = strings.TrimPrefix(path, "$")
+	path = strings.TrimPrefix(path, ".")
+	if path == "" {
+		return root, root != nil
+	}
+	current := root
+	for _, part := range strings.Split(path, ".") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		switch typed := current.(type) {
+		case map[string]any:
+			value, ok := typed[part]
+			if !ok {
+				return nil, false
+			}
+			current = value
+		case []any:
+			index, err := strconv.Atoi(part)
+			if err != nil || index < 0 || index >= len(typed) {
+				return nil, false
+			}
+			current = typed[index]
+		default:
+			return nil, false
+		}
+	}
+	return current, true
 }
 
 func apiCaseBatchEvidenceOverrides(evidencePath string) map[string]any {
@@ -1082,7 +1172,13 @@ func apiCaseBatchNodePlans(ctx context.Context, bundle profile.Bundle, runtime s
 		}
 		casePath := strings.TrimSpace(item.CasePath)
 		payload := map[string]any{"caseId": item.ID}
-		execution := findCaseExecutionConfig(ctx, runtime, item.ID, payload)
+		template := findCaseExecutionTemplateConfig(ctx, runtime, item.ID, payload)
+		var execution *caseExecutionConfig
+		var exports []map[string]any
+		if template != nil {
+			execution = &template.CaseExecution
+			exports = template.Exports
+		}
 		if casePath == "" && execution == nil {
 			continue
 		}
@@ -1102,6 +1198,7 @@ func apiCaseBatchNodePlans(ctx context.Context, bundle profile.Bundle, runtime s
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
+			Exports:         exports,
 		})
 	}
 	return out
@@ -1143,7 +1240,13 @@ func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runt
 	for _, item := range cases {
 		casePath := strings.TrimSpace(item.CasePath)
 		payload := map[string]any{"caseId": item.ID}
-		execution := findCaseExecutionConfig(ctx, runtime, item.ID, payload)
+		template := findCaseExecutionTemplateConfig(ctx, runtime, item.ID, payload)
+		var execution *caseExecutionConfig
+		var exports []map[string]any
+		if template != nil {
+			execution = &template.CaseExecution
+			exports = template.Exports
+		}
 		if casePath == "" && execution == nil {
 			continue
 		}
@@ -1163,6 +1266,7 @@ func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runt
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
+			Exports:         exports,
 		})
 	}
 	return out
@@ -1196,7 +1300,13 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 		nodeID := firstNonEmpty(binding.NodeID, item.NodeID)
 		node := nodesByID[nodeID]
 		payload := map[string]any{"caseId": item.ID, "workflowId": request.WorkflowID, "stepId": binding.StepID}
-		execution := findCaseExecutionConfig(ctx, runtime, item.ID, payload)
+		template := findCaseExecutionTemplateConfig(ctx, runtime, item.ID, payload)
+		var execution *caseExecutionConfig
+		var exports []map[string]any
+		if template != nil {
+			execution = &template.CaseExecution
+			exports = template.Exports
+		}
 		if casePath == "" && execution == nil {
 			continue
 		}
@@ -1216,6 +1326,7 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
+			Exports:         exports,
 		})
 	}
 	return out

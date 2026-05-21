@@ -75,6 +75,126 @@ func TestStoreUpgradeAndStatusCommands(t *testing.T) {
 	}
 }
 
+func TestCopyStoreCurrentStateCopiesCatalogAndEnvironmentGraph(t *testing.T) {
+	ctx := context.Background()
+	source, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "source.sqlite")})
+	if err != nil {
+		t.Fatalf("open source: %v", err)
+	}
+	defer source.Close()
+	target, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "target.sqlite")})
+	if err != nil {
+		t.Fatalf("open target: %v", err)
+	}
+	defer target.Close()
+	now := time.Now().UTC()
+	if _, err := source.UpsertProfileIndex(ctx, store.ProfileIndex{
+		ProfileID:   "profile.alpha",
+		BundlePath:  "store://profile.alpha",
+		SummaryJSON: `{"source":"test"}`,
+		ImportedAt:  now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("seed profile index: %v", err)
+	}
+	if err := source.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "profile.alpha",
+		IndexedAt: now,
+		Services:  []store.CatalogService{{ID: "service.alpha", DisplayName: "Service Alpha"}},
+		Workflows: []store.CatalogWorkflow{{ID: "workflow.alpha", DisplayName: "Workflow Alpha"}},
+	}); err != nil {
+		t.Fatalf("seed profile catalog: %v", err)
+	}
+	if _, err := source.UpsertConfigVersion(ctx, store.ConfigVersion{
+		ID:           "config.profile.alpha.001",
+		ProfileID:    "profile.alpha",
+		SourcePath:   "store://profile.alpha",
+		BundleDigest: "sha256:test",
+		SummaryJSON:  `{"source":"test"}`,
+		Active:       true,
+		PublishedAt:  now,
+		CreatedAt:    now,
+	}); err != nil {
+		t.Fatalf("seed config version: %v", err)
+	}
+	if _, err := source.UpsertEnvironment(ctx, store.Environment{
+		ID:                     "env.alpha",
+		DisplayName:            "Environment Alpha",
+		Status:                 "verified",
+		Verified:               true,
+		ServicesJSON:           `[{"id":"service.alpha"}]`,
+		ReposJSON:              `{"service.alpha":{"url":"https://example.invalid/service-alpha.git"}}`,
+		ComposeJSON:            `{"composeFiles":["compose.yml"]}`,
+		HealthChecksJSON:       `[{"id":"alpha","url":"http://127.0.0.1:18080/health"}]`,
+		VerificationWorkflowID: "workflow.alpha",
+		SummaryJSON:            `{"restoreReady":true}`,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}); err != nil {
+		t.Fatalf("seed environment: %v", err)
+	}
+	if err := source.ReplaceEnvironmentComponentGraph(ctx, "env.alpha", store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{{
+			ComponentID:    "service.alpha",
+			DisplayName:    "Service Alpha",
+			Kind:           "service",
+			ComposeService: "service-alpha",
+			Required:       true,
+			RuntimeJSON:    `{}`,
+			SummaryJSON:    `{}`,
+		}},
+		Assets: []store.ComponentConfigAsset{{
+			OwnerComponentID: "service.alpha",
+			AssetID:          "compose.alpha",
+			AssetKind:        "compose-file",
+			TargetPath:       "compose.yml",
+			ContentInline:    "services: {}\n",
+			SummaryJSON:      `{}`,
+		}},
+	}); err != nil {
+		t.Fatalf("seed component graph: %v", err)
+	}
+
+	report, err := copyStoreCurrentState(ctx, source, target)
+	if err != nil {
+		t.Fatalf("copy store state: %v", err)
+	}
+	if report.ProfileCatalogs != 1 || report.ProfileIndexes != 1 || report.ConfigVersions != 1 || len(report.ReadModels) == 0 || !report.RunsSkipped || report.Environments != 1 || report.ComponentGraphs != 1 {
+		t.Fatalf("copy report = %#v", report)
+	}
+	catalog, err := target.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("target profile catalog: %v", err)
+	}
+	if catalog.ProfileID != "profile.alpha" || len(catalog.Services) != 1 || len(catalog.Workflows) != 1 {
+		t.Fatalf("target catalog = %#v", catalog)
+	}
+	configVersion, err := target.GetActiveConfigVersion(ctx)
+	if err != nil {
+		t.Fatalf("target active config version: %v", err)
+	}
+	if configVersion.ID != "config.profile.alpha.001" || !configVersion.Active {
+		t.Fatalf("target active config version = %#v", configVersion)
+	}
+	if _, err := target.GetReadModel(ctx, "profile.alpha", "catalog"); err != nil {
+		t.Fatalf("target catalog read model: %v", err)
+	}
+	env, err := target.GetEnvironment(ctx, "env.alpha")
+	if err != nil {
+		t.Fatalf("target environment: %v", err)
+	}
+	if env.VerificationWorkflowID != "workflow.alpha" || !env.Verified {
+		t.Fatalf("target environment = %#v", env)
+	}
+	graph, err := target.GetEnvironmentComponentGraph(ctx, "env.alpha")
+	if err != nil {
+		t.Fatalf("target component graph: %v", err)
+	}
+	if len(graph.Components) != 1 || len(graph.Assets) != 1 {
+		t.Fatalf("target component graph = %#v", graph)
+	}
+}
+
 func TestStoreDDLCommandPrintsPostgreSQLSchema(t *testing.T) {
 	out := runStoreCommand(t, "ddl", "--backend", "postgres")
 	if !strings.Contains(out, "create table if not exists schema_versions") {
@@ -96,8 +216,8 @@ func TestStoreDDLCommandPrintsMySQLSchema(t *testing.T) {
 	if strings.Contains(out, "create index if not exists") {
 		t.Fatalf("mysql ddl should not emit unsupported index-if-not-exists syntax:\n%s", out)
 	}
-	if !strings.Contains(out, "id varchar(128) primary key") {
-		t.Fatalf("mysql ddl should use bounded key columns:\n%s", out)
+	if !strings.Contains(out, "id varchar(255) primary key") || !strings.Contains(out, "profile_id varchar(128) not null") {
+		t.Fatalf("mysql ddl should use long runtime IDs and bounded graph keys:\n%s", out)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 4
+	CurrentSchemaVersion = 5
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -42,7 +42,15 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 	}
 	for _, statement := range CoreSchemaSQL(d) {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
+			if isIdempotentSchemaReplayError(d, statement, err) {
+				continue
+			}
 			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store schema: %w", err)
+		}
+	}
+	for _, statement := range incrementalSchemaSQL(d, current) {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store migration: %w", err)
 		}
 	}
 	query := fmt.Sprintf(`
@@ -79,6 +87,7 @@ func currentSchemaVersion(ctx context.Context, db *sql.DB, d Dialect) (int, erro
 func CoreSchemaSQL(d Dialect) []string {
 	text := d.TextType()
 	keyText := d.KeyTextType()
+	runIDText := runIdentifierTextType(d)
 	intType := "integer"
 	timeType := d.TimeType()
 	jsonType := d.JSONType()
@@ -102,7 +111,7 @@ create table if not exists runs (
   finished_at %s,
   created_at %s not null,
   updated_at %s not null
-);`, keyText, keyText, keyText, keyText, text, jsonType, timeType, timeType, timeType, timeType),
+);`, runIDText, keyText, keyText, keyText, text, jsonType, timeType, timeType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists api_case_runs (
   id %s primary key,
@@ -114,7 +123,7 @@ create table if not exists api_case_runs (
   started_at %s,
   finished_at %s,
   created_at %s not null
-);`, keyText, keyText, keyText, keyText, jsonType, jsonType, timeType, timeType, timeType),
+);`, runIDText, runIDText, keyText, keyText, jsonType, jsonType, timeType, timeType, timeType),
 		d.CreateIndexSQL("idx_api_case_runs_run_id_created_at", "api_case_runs", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists evidence_records (
@@ -132,7 +141,7 @@ create table if not exists evidence_records (
   visibility %s not null,
   labels_json %s not null,
   created_at %s not null
-);`, keyText, keyText, keyText, keyText, keyText, text, text, text, intType, text, keyText, keyText, jsonType, timeType),
+);`, runIDText, runIDText, runIDText, keyText, keyText, text, text, text, intType, text, keyText, keyText, jsonType, timeType),
 		d.CreateIndexSQL("idx_evidence_records_run_id_created_at", "evidence_records", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists trace_topologies (
@@ -147,7 +156,7 @@ create table if not exists trace_topologies (
   topology_json %s not null,
   text_topology %s not null,
   created_at %s not null
-);`, keyText, keyText, keyText, keyText, keyText, keyText, keyText, keyText, jsonType, text, timeType),
+);`, runIDText, runIDText, keyText, keyText, keyText, runIDText, runIDText, keyText, jsonType, text, timeType),
 		d.CreateIndexSQL("idx_trace_topologies_workflow_run_id_created_at", "trace_topologies", []string{"workflow_run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists post_process_tasks (
@@ -164,7 +173,7 @@ create table if not exists post_process_tasks (
   error %s not null,
   summary_json %s not null,
   created_at %s not null
-);`, keyText, keyText, keyText, keyText, keyText, keyText, keyText, timeType, timeType, intType, text, jsonType, timeType),
+);`, runIDText, runIDText, keyText, keyText, keyText, keyText, keyText, timeType, timeType, intType, text, jsonType, timeType),
 		d.CreateIndexSQL("idx_post_process_tasks_run_id_created_at", "post_process_tasks", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists baseline_gates (
@@ -244,7 +253,7 @@ create table if not exists environments (
   summary_json %s not null,
   created_at %s not null,
   updated_at %s not null
-);`, keyText, text, text, keyText, boolType, jsonType, jsonType, jsonType, jsonType, keyText, keyText, keyText, boolType, boolType, timeType, jsonType, timeType, timeType),
+);`, keyText, text, text, keyText, boolType, jsonType, jsonType, jsonType, jsonType, keyText, runIDText, keyText, boolType, boolType, timeType, jsonType, timeType, timeType),
 		d.CreateIndexSQL("idx_environments_verified_status", "environments", []string{"verified", "status", "updated_at", "id"}),
 		d.CreateIndexSQL("idx_environments_verification", "environments", []string{"verification_workflow_id", "last_verification_status", "updated_at", "id"}),
 		fmt.Sprintf(`
@@ -345,6 +354,39 @@ create table if not exists component_config_assets (
 		d.CreateIndexSQL("idx_component_config_assets_target", "component_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
 		d.CreateIndexSQL("idx_component_config_assets_owner_order", "component_config_assets", []string{"env_id", "owner_component_id", "apply_order", "asset_id"}),
 	}
+}
+
+func runIdentifierTextType(d Dialect) string {
+	if d.Name() == "mysql" {
+		return "varchar(255)"
+	}
+	return d.KeyTextType()
+}
+
+func incrementalSchemaSQL(d Dialect, current int) []string {
+	if d.Name() != "mysql" || current == 0 || current >= 5 {
+		return nil
+	}
+	return []string{
+		"alter table `runs` modify column `id` varchar(255) not null;",
+		"alter table `api_case_runs` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
+		"alter table `evidence_records` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null, modify column `case_run_id` varchar(255) not null;",
+		"alter table `trace_topologies` modify column `id` varchar(255) not null, modify column `workflow_run_id` varchar(255) not null, modify column `request_id` varchar(255) not null, modify column `trace_id` varchar(255) not null;",
+		"alter table `post_process_tasks` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
+		"alter table `environments` modify column `last_verification_run_id` varchar(255) not null;",
+	}
+}
+
+func isIdempotentSchemaReplayError(d Dialect, statement string, err error) bool {
+	if err == nil || d.Name() != "mysql" {
+		return false
+	}
+	normalizedStatement := strings.ToLower(strings.TrimSpace(statement))
+	if !strings.HasPrefix(normalizedStatement, "create index ") {
+		return false
+	}
+	normalizedError := strings.ToLower(err.Error())
+	return strings.Contains(normalizedError, "duplicate key name") || strings.Contains(normalizedError, "error 1061")
 }
 
 func bindVars(d Dialect, count int) string {

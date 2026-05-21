@@ -4950,6 +4950,75 @@ func TestServerExecutesTestKitRunFromRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestServerTestKitRunHonorsExpectedResponseContains(t *testing.T) {
+	ctx := context.Background()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result_status":"F"}`))
+	}))
+	defer target.Close()
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: time.Now().UTC(),
+		APICases: []store.CatalogAPICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active"},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.case.alpha",
+				TemplateID: "template.case.alpha",
+				WorkflowID: "workflow.alpha",
+				ScopeType:  "step",
+				ScopeID:    "step.alpha",
+				Status:     "active",
+				ConfigJSON: `{
+					"caseId":"case.alpha",
+					"caseExecution":{
+						"method":"GET",
+						"nodeId":"node.alpha",
+						"path":"/result",
+						"expectedHttpCodes":[200],
+						"expectedResponseContains":["\"result_status\":\"S\""]
+					}
+				}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/test-kit/run", "application/json", strings.NewReader(fmt.Sprintf(`{
+		"caseId":"case.alpha",
+		"workflowId":"workflow.alpha",
+		"stepId":"step.alpha",
+		"baseUrl":%q
+	}`, target.URL)))
+	if err != nil {
+		t.Fatalf("post test kit run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("test kit run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode test kit result: %v", err)
+	}
+	if result["ok"] != false || !strings.Contains(fmt.Sprint(result["error"]), "response body missing") {
+		t.Fatalf("test kit result = %#v", result)
+	}
+}
+
 func TestServerExecutesTestKitRunFromStoreRegisteredServicePort(t *testing.T) {
 	ctx := context.Background()
 	var receivedPath string
@@ -8483,6 +8552,169 @@ func TestServerRunsWorkflowCaseWithStoreExecutionConfigWithoutCaseFile(t *testin
 	}
 }
 
+func TestServerBatchRunHonorsStoreExecutionExpectedResponseContains(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result_status":"F"}`))
+	}))
+	defer target.Close()
+
+	now := time.Now().UTC()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: now,
+		Workflows: []store.CatalogWorkflow{{ID: "workflow.store-execution", DisplayName: "Store Execution Workflow"}},
+		APICases:  []store.CatalogAPICase{{ID: "case.store-execution", DisplayName: "Store Execution Case", NodeID: "node.store-execution", Status: "active"}},
+		InterfaceNodes: []store.CatalogInterfaceNode{{
+			ID: "node.store-execution", Method: "GET", Path: "/store-execution", Status: "active",
+		}},
+		WorkflowBindings: []store.CatalogWorkflowBinding{{
+			WorkflowID: "workflow.store-execution", StepID: "store-step", NodeID: "node.store-execution", CaseID: "case.store-execution", Required: true, SortOrder: 1,
+		}},
+		TemplateConfigs: []store.CatalogTemplateConfig{{
+			ID: "cfg.case.store-execution", TemplateID: "TPL-CASE-EXECUTION-V1", ScopeType: "api-case", ScopeID: "case.store-execution", Status: "active",
+			ConfigJSON: `{"caseId":"case.store-execution","caseExecution":{"method":"GET","nodeId":"node.store-execution","path":"/store-execution","expectedHttpCodes":[200],"expectedResponseContains":["\"result_status\":\"S\""]}}`,
+		}},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	bundle := profile.Bundle{
+		ID:             "sample",
+		Workflows:      []profile.Workflow{{ID: "workflow.store-execution"}},
+		InterfaceNodes: []profile.InterfaceNode{{ID: "node.store-execution", Method: "GET", Path: "/store-execution"}},
+		APICases:       []profile.APICase{{ID: "case.store-execution", NodeID: "node.store-execution"}},
+		WorkflowBindings: []profile.WorkflowBinding{{
+			WorkflowID: "workflow.store-execution", StepID: "store-step", NodeID: "node.store-execution", CaseID: "case.store-execution", Required: true, SortOrder: 1,
+		}},
+	}
+	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(fmt.Sprintf(`{"requestId":"store-execution-assertion-001","workflowId":"workflow.store-execution","baseUrl":%q}`, target.URL)))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		ReportURL string `json:"reportUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if report.OK || report.Status != store.StatusFailed || report.Passed != 0 || report.Failed != 1 || !strings.Contains(report.Cases[0].Error, "response did not contain") {
+		t.Fatalf("store execution assertion report = %#v", report)
+	}
+}
+
+func TestServerBatchRunAppliesWorkflowStepExportsAsOverrides(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	var appliedPrincipal string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/trial":
+			_, _ = w.Write([]byte(`{"total_principal":500000}`))
+		case "/apply":
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode apply request: %v", err)
+			}
+			appliedPrincipal = strings.TrimSpace(fmt.Sprint(request["repay_principal"]))
+			if appliedPrincipal != "500000" {
+				_, _ = w.Write([]byte(`{"result_status":"F"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"result_status":"S"}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer target.Close()
+
+	now := time.Now().UTC()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: now,
+		Workflows: []store.CatalogWorkflow{{ID: "workflow.exports", DisplayName: "Export Workflow"}},
+		APICases: []store.CatalogAPICase{
+			{ID: "case.trial", DisplayName: "Trial", NodeID: "node.trial", Status: "active"},
+			{ID: "case.apply", DisplayName: "Apply", NodeID: "node.apply", Status: "active"},
+		},
+		InterfaceNodes: []store.CatalogInterfaceNode{
+			{ID: "node.trial", Method: "GET", Path: "/trial", Status: "active"},
+			{ID: "node.apply", Method: "POST", Path: "/apply", Status: "active"},
+		},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.exports", StepID: "trial", NodeID: "node.trial", CaseID: "case.trial", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.exports", StepID: "apply", NodeID: "node.apply", CaseID: "case.apply", Required: true, SortOrder: 2},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID: "cfg.trial", TemplateID: "TPL-CASE-EXECUTION-V1", WorkflowID: "workflow.exports", ScopeType: "step", ScopeID: "trial", Status: "active",
+				ConfigJSON: `{"caseId":"case.trial","caseExecution":{"method":"GET","nodeId":"node.trial","path":"/trial","expectedHttpCodes":[200]},"exports":[{"from":"responseBody","name":"repay_principal","path":"total_principal"}]}`,
+			},
+			{
+				ID: "cfg.apply", TemplateID: "TPL-CASE-EXECUTION-V1", WorkflowID: "workflow.exports", ScopeType: "step", ScopeID: "apply", Status: "active",
+				ConfigJSON: `{"caseId":"case.apply","caseExecution":{"method":"POST","nodeId":"node.apply","path":"/apply","body":{"repay_principal":"{{override:repay_principal|}}"},"expectedHttpCodes":[200],"expectedResponseContains":["\"result_status\":\"S\""]}}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	bundle := profile.Bundle{
+		ID:             "sample",
+		Workflows:      []profile.Workflow{{ID: "workflow.exports"}},
+		InterfaceNodes: []profile.InterfaceNode{{ID: "node.trial", Method: "GET", Path: "/trial"}, {ID: "node.apply", Method: "POST", Path: "/apply"}},
+		APICases:       []profile.APICase{{ID: "case.trial", NodeID: "node.trial"}, {ID: "case.apply", NodeID: "node.apply"}},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.exports", StepID: "trial", NodeID: "node.trial", CaseID: "case.trial", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.exports", StepID: "apply", NodeID: "node.apply", CaseID: "case.apply", Required: true, SortOrder: 2},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(fmt.Sprintf(`{"requestId":"workflow-exports-001","workflowId":"workflow.exports","baseUrl":%q}`, target.URL)))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		ReportURL string `json:"reportUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if !report.OK || report.Passed != 2 || appliedPrincipal != "500000" {
+		t.Fatalf("workflow export report = %#v appliedPrincipal=%q", report, appliedPrincipal)
+	}
+}
+
 func TestServerStartsEnvironmentAcceptanceRunWithHealthSummary(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
@@ -8675,6 +8907,7 @@ type apiCaseBatchReportForTest struct {
 		ViewerURL       string `json:"viewerUrl"`
 		DetailURL       string `json:"detailUrl"`
 		ElapsedMs       int64  `json:"elapsedMs"`
+		Error           string `json:"error"`
 	} `json:"cases"`
 }
 
