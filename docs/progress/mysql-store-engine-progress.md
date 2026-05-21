@@ -2479,3 +2479,37 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Wrapper Delegation Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added MySQL wrapper-level coverage proving `mysql.Open` uses the configured
+  `database/sql` driver, pings it, applies MySQL schema migration, and returns
+  a Store backed by `sqlstore.MySQLDialect`.
+- Added delegated runtime Store coverage for run creation, config read-model
+  upsert, and profile catalog replacement, asserting MySQL `?` bind variables
+  and `on duplicate key update` behavior at the wrapper boundary.
+- Added MySQL wrapper schema status/upgrade coverage with a fake SQL driver,
+  including MySQL `datetime(6)` migration DDL and latest schema version
+  readback.
+
+Validated:
+
+- `go test ./internal/store/mysql -count=1`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+- A non-blocking sidecar audit found the next useful polish slice: replace the
+  workbench Environment Catalog PostgreSQL-only wording with SQL Store wording
+  and revisit the default `store ddl` behavior so MySQL users do not
+  accidentally copy PostgreSQL DDL.
