@@ -13,7 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"open-test-sandbox/internal/profile"
@@ -46,6 +48,8 @@ type caseExecutionTemplateConfig struct {
 	CaseExecution caseExecutionConfig `json:"caseExecution"`
 	Exports       []map[string]any    `json:"exports"`
 }
+
+var caseSerialCounter uint64
 
 func handleTestKitRun(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store, collector traceCollector) {
 	payload, err := readJSONPayload(r)
@@ -196,6 +200,9 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 	}
 	request, err := buildCaseHTTPRequest(ctx, bundle, runtime, *item.Execution, item.CaseBaseURL, payload)
 	if err != nil {
+		return failedCaseExecution(item.Case.ID, err.Error())
+	}
+	if err := applyAPICaseRequestModel(&request, item.Case); err != nil {
 		return failedCaseExecution(item.Case.ID, err.Error())
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, request.method, request.fullURL, request.bodyReader())
@@ -629,6 +636,456 @@ func renderCaseExecution(execution caseExecutionConfig, overrides map[string]any
 	return rendered
 }
 
+func applyAPICaseRequestModel(request *caseHTTPRequest, item profile.APICase) error {
+	if request == nil {
+		return nil
+	}
+	if err := applyAPICaseExpectedJSON(request, item.ExpectedJSON); err != nil {
+		return err
+	}
+	if strings.TrimSpace(item.RenderMode) != "template_patch" || strings.TrimSpace(item.PatchJSON) == "" || strings.TrimSpace(item.PatchJSON) == "[]" {
+		return nil
+	}
+	if apiCasePatchTargetsQuery(request.method) {
+		return applyAPICaseQueryPatch(request, item)
+	}
+	nextBody := request.body
+	if apiCaseUsesSandboxCallback(request.fullURL) {
+		merged, err := mergeAPICasePayloadTemplateModel(nextBody, item.PayloadTemplateJSON)
+		if err != nil {
+			return fmt.Errorf("merge api case payload template %s: %w", item.ID, err)
+		}
+		nextBody = merged
+	}
+	if nextBody == nil && strings.TrimSpace(item.PayloadTemplateJSON) != "" {
+		var parsed any
+		if err := json.Unmarshal([]byte(item.PayloadTemplateJSON), &parsed); err != nil {
+			return fmt.Errorf("decode api case payload template %s: %w", item.ID, err)
+		}
+		nextBody = parsed
+	}
+	if nextBody == nil {
+		return nil
+	}
+	patched, err := applyAPICaseJSONPatch(nextBody, item.PatchJSON)
+	if err != nil {
+		return fmt.Errorf("apply api case patch %s: %w", item.ID, err)
+	}
+	if err := applyAPICaseEquivalentBodyPatch(patched, item.PatchJSON); err != nil {
+		return fmt.Errorf("apply api case equivalent field patch %s: %w", item.ID, err)
+	}
+	request.body = patched
+	if err := resignAPICaseRequest(request, item.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func apiCaseUsesSandboxCallback(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return strings.Contains(rawURL, "/__sandbox/llt/callback")
+	}
+	return parsed.Path == "/__sandbox/llt/callback"
+}
+
+func mergeAPICasePayloadTemplateModel(body any, templateJSON string) (any, error) {
+	templateJSON = strings.TrimSpace(templateJSON)
+	if templateJSON == "" || templateJSON == "{}" {
+		return body, nil
+	}
+	var templateModel any
+	if err := json.Unmarshal([]byte(templateJSON), &templateModel); err != nil {
+		return nil, err
+	}
+	templateObject := mapFromAny(renderCaseExecutionValue(templateModel, nil))
+	if len(templateObject) == 0 {
+		return body, nil
+	}
+	bodyObject, ok := body.(map[string]any)
+	if !ok {
+		return templateObject, nil
+	}
+	merged := make(map[string]any, len(templateObject)+len(bodyObject))
+	for key, value := range templateObject {
+		merged[key] = value
+	}
+	for key, value := range bodyObject {
+		merged[key] = value
+	}
+	return merged, nil
+}
+
+func apiCasePatchTargetsQuery(method string) bool {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodGet, http.MethodHead:
+		return true
+	default:
+		return false
+	}
+}
+
+func applyAPICaseQueryPatch(request *caseHTTPRequest, item profile.APICase) error {
+	parsed, queryObject, err := apiCaseQueryObject(request.fullURL)
+	if err != nil {
+		return fmt.Errorf("decode api case query %s: %w", item.ID, err)
+	}
+	if len(queryObject) == 0 && strings.TrimSpace(item.PayloadTemplateJSON) != "" {
+		var template any
+		if err := json.Unmarshal([]byte(item.PayloadTemplateJSON), &template); err != nil {
+			return fmt.Errorf("decode api case payload template %s: %w", item.ID, err)
+		}
+		queryObject = mapFromAny(template)
+	}
+	patched, err := applyAPICaseJSONPatch(queryObject, item.PatchJSON)
+	if err != nil {
+		return fmt.Errorf("apply api case patch %s: %w", item.ID, err)
+	}
+	patchedQuery, ok := patched.(map[string]any)
+	if !ok {
+		return fmt.Errorf("api case patch %s must keep query as an object", item.ID)
+	}
+	parsed.RawQuery = apiCaseQueryValues(patchedQuery).Encode()
+	request.fullURL = parsed.String()
+	request.body = nil
+	if err := resignAPICaseRequest(request, item.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func apiCaseQueryObject(rawURL string) (*url.URL, map[string]any, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	values := parsed.Query()
+	out := make(map[string]any, len(values))
+	for key, items := range values {
+		if len(items) == 1 {
+			out[key] = items[0]
+			continue
+		}
+		array := make([]any, 0, len(items))
+		for _, item := range items {
+			array = append(array, item)
+		}
+		out[key] = array
+	}
+	return parsed, out, nil
+}
+
+func apiCaseQueryValues(query map[string]any) url.Values {
+	values := url.Values{}
+	for key, raw := range query {
+		switch typed := raw.(type) {
+		case nil:
+			continue
+		case []any:
+			for _, item := range typed {
+				values.Add(key, valueString(item))
+			}
+		case []string:
+			for _, item := range typed {
+				values.Add(key, item)
+			}
+		default:
+			values.Set(key, valueString(typed))
+		}
+	}
+	return values
+}
+
+func resignAPICaseRequest(request *caseHTTPRequest, caseID string) error {
+	if !request.signed {
+		return nil
+	}
+	if request.headers == nil {
+		request.headers = map[string]string{}
+	}
+	delete(request.headers, "Authorization")
+	if err := request.applySigning(); err != nil {
+		return fmt.Errorf("sign patched api case request %s: %w", caseID, err)
+	}
+	return nil
+}
+
+func applyAPICaseEquivalentBodyPatch(body any, patchJSON string) error {
+	var operations []apiCaseJSONPatchOperation
+	if err := json.Unmarshal([]byte(patchJSON), &operations); err != nil {
+		return fmt.Errorf("decode patchJson: %w", err)
+	}
+	for _, operation := range operations {
+		segments, err := parseAPICaseJSONPath(operation.Path)
+		if err != nil {
+			return err
+		}
+		if len(segments) != 1 || segments[0].Index != nil {
+			continue
+		}
+		candidates := equivalentJSONFieldNames(segments[0].Key)
+		if len(candidates) == 0 {
+			continue
+		}
+		applyEquivalentJSONFieldPatch(body, candidates, operation)
+	}
+	return nil
+}
+
+func equivalentJSONFieldNames(key string) map[string]bool {
+	parts := strings.Split(strings.TrimSpace(key), "_")
+	candidates := map[string]bool{}
+	for index := 0; index < len(parts); index++ {
+		name := lowerCamelName(parts[index:])
+		if name != "" {
+			candidates[name] = true
+		}
+		identifierParts := append([]string(nil), parts[index:]...)
+		if len(identifierParts) > 0 && identifierParts[len(identifierParts)-1] == "no" {
+			identifierParts[len(identifierParts)-1] = "id"
+			if name := lowerCamelName(identifierParts); name != "" {
+				candidates[name] = true
+			}
+		}
+	}
+	delete(candidates, strings.TrimSpace(key))
+	return candidates
+}
+
+func lowerCamelName(parts []string) string {
+	var out strings.Builder
+	for index, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if index == 0 && out.Len() == 0 {
+			out.WriteString(strings.ToLower(part))
+			continue
+		}
+		out.WriteString(strings.ToUpper(part[:1]))
+		if len(part) > 1 {
+			out.WriteString(strings.ToLower(part[1:]))
+		}
+	}
+	return out.String()
+}
+
+func applyEquivalentJSONFieldPatch(value any, candidates map[string]bool, operation apiCaseJSONPatchOperation) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if candidates[key] {
+				switch strings.ToLower(strings.TrimSpace(operation.Op)) {
+				case "add", "replace":
+					typed[key] = operation.Value
+				case "remove":
+					delete(typed, key)
+				}
+				continue
+			}
+			applyEquivalentJSONFieldPatch(child, candidates, operation)
+		}
+	case []any:
+		for _, child := range typed {
+			applyEquivalentJSONFieldPatch(child, candidates, operation)
+		}
+	}
+}
+
+func applyAPICaseExpectedJSON(request *caseHTTPRequest, expectedJSON string) error {
+	expectedJSON = strings.TrimSpace(expectedJSON)
+	if expectedJSON == "" || expectedJSON == "{}" {
+		return nil
+	}
+	var parsed struct {
+		ExpectedHTTPCodes []int    `json:"expectedHttpCodes"`
+		ResponseContains  []string `json:"expectedResponseContains"`
+	}
+	if err := json.Unmarshal([]byte(expectedJSON), &parsed); err != nil {
+		return fmt.Errorf("decode api case expectedJson: %w", err)
+	}
+	if len(parsed.ExpectedHTTPCodes) > 0 {
+		request.expectedHTTPCodes = parsed.ExpectedHTTPCodes
+	}
+	if len(parsed.ResponseContains) > 0 {
+		request.expectedResponse = parsed.ResponseContains
+	}
+	return nil
+}
+
+type apiCaseJSONPatchOperation struct {
+	Op    string `json:"op"`
+	Path  string `json:"path"`
+	Value any    `json:"value"`
+}
+
+type apiCaseJSONPathSegment struct {
+	Key   string
+	Index *int
+}
+
+func applyAPICaseJSONPatch(body any, patchJSON string) (any, error) {
+	var operations []apiCaseJSONPatchOperation
+	if err := json.Unmarshal([]byte(patchJSON), &operations); err != nil {
+		return nil, fmt.Errorf("decode patchJson: %w", err)
+	}
+	next := body
+	for _, operation := range operations {
+		operation.Value = renderCaseExecutionValue(operation.Value, nil)
+		segments, err := parseAPICaseJSONPath(operation.Path)
+		if err != nil {
+			return nil, err
+		}
+		if len(segments) == 0 {
+			switch strings.ToLower(strings.TrimSpace(operation.Op)) {
+			case "add", "replace":
+				next = operation.Value
+			case "remove":
+				next = nil
+			default:
+				return nil, fmt.Errorf("unsupported patch op %q", operation.Op)
+			}
+			continue
+		}
+		if err := applyAPICaseJSONPatchOperation(next, segments, operation); err != nil {
+			return nil, err
+		}
+	}
+	return next, nil
+}
+
+func parseAPICaseJSONPath(path string) ([]apiCaseJSONPathSegment, error) {
+	path = strings.TrimSpace(path)
+	path = strings.TrimPrefix(path, "$")
+	path = strings.TrimPrefix(path, ".")
+	if path == "" {
+		return nil, nil
+	}
+	parts := strings.Split(path, ".")
+	segments := make([]apiCaseJSONPathSegment, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		for part != "" {
+			bracket := strings.Index(part, "[")
+			if bracket < 0 {
+				segments = append(segments, apiCaseJSONPathSegment{Key: part})
+				break
+			}
+			if bracket > 0 {
+				segments = append(segments, apiCaseJSONPathSegment{Key: part[:bracket]})
+			}
+			closeBracket := strings.Index(part[bracket:], "]")
+			if closeBracket < 0 {
+				return nil, fmt.Errorf("invalid patch path %q", path)
+			}
+			indexText := part[bracket+1 : bracket+closeBracket]
+			index, err := strconv.Atoi(strings.TrimSpace(indexText))
+			if err != nil || index < 0 {
+				return nil, fmt.Errorf("invalid patch array index %q", path)
+			}
+			segments = append(segments, apiCaseJSONPathSegment{Index: &index})
+			part = part[bracket+closeBracket+1:]
+			part = strings.TrimPrefix(part, ".")
+		}
+	}
+	return segments, nil
+}
+
+func applyAPICaseJSONPatchOperation(root any, segments []apiCaseJSONPathSegment, operation apiCaseJSONPatchOperation) error {
+	parent := root
+	for _, segment := range segments[:len(segments)-1] {
+		next, ok := apiCaseJSONPathChild(parent, segment)
+		if !ok {
+			return fmt.Errorf("patch path not found: %s", operation.Path)
+		}
+		parent = next
+	}
+	last := segments[len(segments)-1]
+	op := strings.ToLower(strings.TrimSpace(operation.Op))
+	if last.Index != nil {
+		array, ok := parent.([]any)
+		if !ok {
+			return fmt.Errorf("patch path is not an array: %s", operation.Path)
+		}
+		index := *last.Index
+		if index < 0 || index >= len(array) {
+			return fmt.Errorf("patch array index out of range: %s", operation.Path)
+		}
+		switch op {
+		case "add", "replace":
+			array[index] = operation.Value
+		case "remove":
+			copy(array[index:], array[index+1:])
+			array[len(array)-1] = nil
+			array = array[:len(array)-1]
+			return assignAPICaseJSONPathChild(root, segments[:len(segments)-1], array)
+		default:
+			return fmt.Errorf("unsupported patch op %q", operation.Op)
+		}
+		return nil
+	}
+	object, ok := parent.(map[string]any)
+	if !ok {
+		return fmt.Errorf("patch path is not an object: %s", operation.Path)
+	}
+	switch op {
+	case "add", "replace":
+		object[last.Key] = operation.Value
+	case "remove":
+		delete(object, last.Key)
+	default:
+		return fmt.Errorf("unsupported patch op %q", operation.Op)
+	}
+	return nil
+}
+
+func apiCaseJSONPathChild(parent any, segment apiCaseJSONPathSegment) (any, bool) {
+	if segment.Index != nil {
+		array, ok := parent.([]any)
+		if !ok || *segment.Index < 0 || *segment.Index >= len(array) {
+			return nil, false
+		}
+		return array[*segment.Index], true
+	}
+	object, ok := parent.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	value, ok := object[segment.Key]
+	return value, ok
+}
+
+func assignAPICaseJSONPathChild(root any, segments []apiCaseJSONPathSegment, value any) error {
+	if len(segments) == 0 {
+		return nil
+	}
+	parent := root
+	for _, segment := range segments[:len(segments)-1] {
+		next, ok := apiCaseJSONPathChild(parent, segment)
+		if !ok {
+			return nil
+		}
+		parent = next
+	}
+	last := segments[len(segments)-1]
+	if last.Index != nil {
+		array, ok := parent.([]any)
+		if !ok || *last.Index < 0 || *last.Index >= len(array) {
+			return nil
+		}
+		array[*last.Index] = value
+		return nil
+	}
+	if object, ok := parent.(map[string]any); ok {
+		object[last.Key] = value
+	}
+	return nil
+}
+
 func renderCaseExecutionValue(value any, overrides map[string]any) any {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -653,41 +1110,60 @@ func renderCaseExecutionValue(value any, overrides map[string]any) any {
 func renderCaseString(value string, overrides map[string]any) string {
 	rendered := strings.ReplaceAll(value, "${AUTO_SERIAL}", serialValue("GEN"))
 	rendered = strings.ReplaceAll(rendered, "${AUTO_RT_ORDER_ID}", serialValue("RT"))
+	cursor := 0
 	for {
-		start := strings.Index(rendered, "{{")
-		end := strings.Index(rendered, "}}")
-		if start < 0 || end < start {
+		if cursor >= len(rendered) {
 			break
 		}
+		start := strings.Index(rendered[cursor:], "{{")
+		if start >= 0 {
+			start += cursor
+		}
+		if start < 0 {
+			break
+		}
+		end := strings.Index(rendered[start+2:], "}}")
+		if end < 0 {
+			break
+		}
+		end += start + 2
 		token := rendered[start+2 : end]
-		replacement := renderCaseToken(token, overrides)
+		replacement, ok := renderCaseToken(token, overrides)
+		if !ok {
+			cursor = end + 2
+			continue
+		}
 		rendered = rendered[:start] + replacement + rendered[end+2:]
+		cursor = start + len(replacement)
 	}
 	return rendered
 }
 
-func renderCaseToken(token string, overrides map[string]any) string {
+func renderCaseToken(token string, overrides map[string]any) (string, bool) {
 	token = strings.TrimSpace(token)
 	if strings.HasPrefix(token, "override:") {
 		body := strings.TrimPrefix(token, "override:")
 		key, defaultValue, _ := strings.Cut(body, "|")
 		if value := strings.TrimSpace(valueString(overrides[strings.TrimSpace(key)])); value != "" {
-			return value
+			return renderDefaultValue(value), true
 		}
-		return renderDefaultValue(defaultValue)
+		return renderDefaultValue(defaultValue), true
 	}
 	if strings.HasPrefix(token, "serial:") {
-		return serialValue(strings.TrimPrefix(token, "serial:"))
+		return serialValue(strings.TrimPrefix(token, "serial:")), true
 	}
 	if token == "now:datetime" {
-		return time.Now().UTC().Format("2006-01-02 15:04:05")
+		return time.Now().UTC().Format("2006-01-02 15:04:05"), true
 	}
-	return "{{" + token + "}}"
+	return "", false
 }
 
 func renderDefaultValue(value string) string {
 	if strings.HasPrefix(value, "serial:") {
 		return serialValue(strings.TrimPrefix(value, "serial:"))
+	}
+	if value == "now:datetime" {
+		return time.Now().UTC().Format("2006-01-02 15:04:05")
 	}
 	return value
 }
@@ -697,7 +1173,8 @@ func serialValue(prefix string) string {
 	if prefix == "" {
 		prefix = "GEN"
 	}
-	return prefix + time.Now().UTC().Format("20060102150405")
+	counter := atomic.AddUint64(&caseSerialCounter, 1) % 1000000
+	return fmt.Sprintf("%s%s%06d", prefix, time.Now().UTC().Format("20060102150405"), counter)
 }
 
 func headerStrings(headers map[string]any) map[string]string {
@@ -1146,7 +1623,21 @@ func findAPICase(items []profile.APICase, id string) (profile.APICase, bool) {
 func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime store.Store, id string, payload map[string]any) (runnableAPICase, bool) {
 	if item, ok := findAPICase(bundle.APICases, id); ok {
 		item.CasePath = resolveBundleAPICasePath(ctx, runtime, bundle, item.CasePath)
-		return runnableAPICase{Case: item, Execution: findCaseExecutionConfig(ctx, runtime, id, payload)}, true
+		execution := findCaseExecutionConfig(ctx, runtime, id, payload)
+		caseBaseURL := item.BaseURL
+		if runtime != nil {
+			if catalogItem, catalog, ok := findCatalogAPICase(ctx, runtime, id); ok {
+				catalogCase := profileAPICaseFromCatalog(catalogItem)
+				catalogCase.CasePath = resolveCatalogAPICasePath(ctx, runtime, catalog.ProfileID, catalogItem.CasePath)
+				catalogCase.PayloadTemplateJSON = apiCasePayloadTemplateJSON(catalogCase.PayloadTemplateJSON, catalogRequestTemplateJSON(catalog, catalogItem.RequestTemplateID))
+				item = mergeRunnableAPICaseModel(item, catalogCase)
+				caseBaseURL = firstNonEmpty(caseBaseURL, catalogItem.BaseURL)
+				if execution == nil {
+					execution = deriveCaseExecutionConfigFromCatalog(catalog, catalogItem)
+				}
+			}
+		}
+		return runnableAPICase{Case: item, Execution: execution, CaseBaseURL: caseBaseURL}, true
 	}
 	if runtime == nil {
 		return runnableAPICase{}, false
@@ -1157,15 +1648,247 @@ func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime sto
 	}
 	for _, item := range catalog.APICases {
 		if item.ID == id {
-			return runnableAPICase{Case: profile.APICase{
-				ID:          item.ID,
-				DisplayName: item.DisplayName,
-				NodeID:      item.NodeID,
-				CasePath:    resolveCatalogAPICasePath(ctx, runtime, catalog.ProfileID, item.CasePath),
-			}, Execution: findCaseExecutionConfigFromCatalog(catalog, id, payload), CaseBaseURL: item.BaseURL}, true
+			apiCase := profileAPICaseFromCatalog(item)
+			apiCase.CasePath = resolveCatalogAPICasePath(ctx, runtime, catalog.ProfileID, item.CasePath)
+			apiCase.PayloadTemplateJSON = apiCasePayloadTemplateJSON(apiCase.PayloadTemplateJSON, catalogRequestTemplateJSON(catalog, item.RequestTemplateID))
+			execution := findCaseExecutionConfigFromCatalog(catalog, id, payload)
+			if execution == nil {
+				execution = deriveCaseExecutionConfigFromCatalog(catalog, item)
+			}
+			return runnableAPICase{Case: apiCase, Execution: execution, CaseBaseURL: item.BaseURL}, true
 		}
 	}
 	return runnableAPICase{}, false
+}
+
+func findCatalogAPICase(ctx context.Context, runtime store.Store, id string) (store.CatalogAPICase, store.ProfileCatalog, bool) {
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		return store.CatalogAPICase{}, store.ProfileCatalog{}, false
+	}
+	for _, item := range catalog.APICases {
+		if item.ID == id {
+			return item, catalog, true
+		}
+	}
+	return store.CatalogAPICase{}, store.ProfileCatalog{}, false
+}
+
+func catalogRequestTemplateJSON(catalog store.ProfileCatalog, id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	for _, item := range catalog.RequestTemplates {
+		if item.ID == id {
+			return item.TemplateJSON
+		}
+	}
+	return ""
+}
+
+func apiCasePayloadTemplateJSON(value string, requestTemplateJSON string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || trimmed == "{}" {
+		return requestTemplateJSON
+	}
+	return value
+}
+
+func mergeRunnableAPICaseModel(base profile.APICase, enriched profile.APICase) profile.APICase {
+	if strings.TrimSpace(base.DisplayName) == "" {
+		base.DisplayName = enriched.DisplayName
+	}
+	if strings.TrimSpace(base.Description) == "" {
+		base.Description = enriched.Description
+	}
+	if strings.TrimSpace(base.NodeID) == "" {
+		base.NodeID = enriched.NodeID
+	}
+	if strings.TrimSpace(base.CaseType) == "" {
+		base.CaseType = enriched.CaseType
+	}
+	if strings.TrimSpace(base.Scenario) == "" {
+		base.Scenario = enriched.Scenario
+	}
+	if len(base.Tags) == 0 {
+		base.Tags = enriched.Tags
+	}
+	if strings.TrimSpace(base.Priority) == "" {
+		base.Priority = enriched.Priority
+	}
+	if strings.TrimSpace(base.Owner) == "" {
+		base.Owner = enriched.Owner
+	}
+	if strings.TrimSpace(base.PayloadTemplateJSON) == "" || strings.TrimSpace(base.PayloadTemplateJSON) == "{}" {
+		base.PayloadTemplateJSON = enriched.PayloadTemplateJSON
+	}
+	if strings.TrimSpace(base.RequestTemplateID) == "" {
+		base.RequestTemplateID = enriched.RequestTemplateID
+	}
+	if strings.TrimSpace(base.PatchJSON) == "" {
+		base.PatchJSON = enriched.PatchJSON
+	}
+	if strings.TrimSpace(base.RenderMode) == "" {
+		base.RenderMode = enriched.RenderMode
+	}
+	if strings.TrimSpace(base.ExpectedJSON) == "" {
+		base.ExpectedJSON = enriched.ExpectedJSON
+	}
+	if strings.TrimSpace(base.CasePath) == "" {
+		base.CasePath = enriched.CasePath
+	}
+	if strings.TrimSpace(base.BaseURL) == "" {
+		base.BaseURL = enriched.BaseURL
+	}
+	if strings.TrimSpace(base.EvidenceDir) == "" {
+		base.EvidenceDir = enriched.EvidenceDir
+	}
+	if base.TimeoutSeconds == 0 {
+		base.TimeoutSeconds = enriched.TimeoutSeconds
+	}
+	if len(base.DefaultOverrides) == 0 {
+		base.DefaultOverrides = enriched.DefaultOverrides
+	}
+	return base
+}
+
+func profileAPICaseFromCatalog(item store.CatalogAPICase) profile.APICase {
+	return profile.APICase{
+		ID:                   item.ID,
+		DisplayName:          item.DisplayName,
+		Description:          item.Description,
+		NodeID:               item.NodeID,
+		CaseType:             item.CaseType,
+		Scenario:             item.Scenario,
+		Tags:                 item.Tags,
+		Priority:             item.Priority,
+		Owner:                item.Owner,
+		PayloadTemplateJSON:  item.PayloadTemplateJSON,
+		RequestTemplateID:    item.RequestTemplateID,
+		PatchJSON:            item.PatchJSON,
+		RenderMode:           item.RenderMode,
+		ExpectedJSON:         item.ExpectedJSON,
+		RequiredForAdmission: item.RequiredForAdmission,
+		Status:               item.Status,
+		SortOrder:            item.SortOrder,
+		CasePath:             item.CasePath,
+		SourceKind:           item.SourceKind,
+		SourcePath:           item.SourcePath,
+		ExecutorID:           item.ExecutorID,
+		BaseURL:              item.BaseURL,
+		EvidenceDir:          item.EvidenceDir,
+		TimeoutSeconds:       item.TimeoutSeconds,
+		DefaultOverrides:     mapFromAny(jsonObject(item.DefaultOverridesJSON)),
+	}
+}
+
+func deriveCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, item store.CatalogAPICase) *caseExecutionConfig {
+	if execution := deriveCaseExecutionConfigFromSiblingConfig(catalog, item); execution != nil {
+		return execution
+	}
+	templateID := strings.TrimSpace(item.RequestTemplateID)
+	if templateID == "" {
+		return nil
+	}
+	var selected store.CatalogRequestTemplate
+	for _, template := range catalog.RequestTemplates {
+		if template.ID == templateID && activeCatalogStatus(template.Status) {
+			selected = template
+			break
+		}
+	}
+	if strings.TrimSpace(selected.ID) == "" {
+		return nil
+	}
+	method := strings.ToUpper(firstNonEmpty(selected.Method, "GET"))
+	execution := caseExecutionConfig{
+		Method: strings.ToUpper(method),
+		NodeID: firstNonEmpty(item.NodeID, selected.NodeID),
+		Path:   firstNonEmpty(selected.Path, "/"),
+	}
+	if strings.TrimSpace(selected.TemplateJSON) != "" {
+		var body any
+		if json.Unmarshal([]byte(selected.TemplateJSON), &body) == nil {
+			if method == http.MethodGet || method == http.MethodHead {
+				execution.Query = mapFromAny(body)
+			} else {
+				execution.Body = body
+			}
+		}
+	}
+	if expected := expectedConfigFromAPICase(item.ExpectedJSON); expected != nil {
+		execution.ExpectedHTTPCodes = expected.ExpectedHTTPCodes
+		execution.ExpectedResponse = expected.ExpectedResponse
+		execution.RequireRequestID = expected.RequireRequestID
+	}
+	return &execution
+}
+
+func deriveCaseExecutionConfigFromSiblingConfig(catalog store.ProfileCatalog, item store.CatalogAPICase) *caseExecutionConfig {
+	caseNodeByID := map[string]string{}
+	for _, apiCase := range catalog.APICases {
+		caseNodeByID[apiCase.ID] = apiCase.NodeID
+	}
+	for _, config := range catalog.TemplateConfigs {
+		if config.Status != "" && config.Status != "active" {
+			continue
+		}
+		var parsed caseExecutionTemplateConfig
+		if json.Unmarshal([]byte(config.ConfigJSON), &parsed) != nil {
+			continue
+		}
+		if strings.TrimSpace(config.NodeID) != "" && config.NodeID != item.NodeID && caseNodeByID[parsed.CaseID] != item.NodeID {
+			continue
+		}
+		next := parsed.CaseExecution
+		if next.Method == "" && next.Path == "" && next.NodeID == "" {
+			continue
+		}
+		if strings.TrimSpace(config.NodeID) == "" && caseNodeByID[parsed.CaseID] != item.NodeID {
+			continue
+		}
+		cloned := cloneCaseExecutionConfig(next)
+		if expected := expectedConfigFromAPICase(item.ExpectedJSON); expected != nil {
+			cloned.ExpectedHTTPCodes = expected.ExpectedHTTPCodes
+			cloned.ExpectedResponse = expected.ExpectedResponse
+			cloned.RequireRequestID = expected.RequireRequestID
+		}
+		return &cloned
+	}
+	return nil
+}
+
+func cloneCaseExecutionConfig(input caseExecutionConfig) caseExecutionConfig {
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return input
+	}
+	var out caseExecutionConfig
+	if json.Unmarshal(raw, &out) != nil {
+		return input
+	}
+	return out
+}
+
+func expectedConfigFromAPICase(expectedJSON string) *caseExecutionConfig {
+	expectedJSON = strings.TrimSpace(expectedJSON)
+	if expectedJSON == "" || expectedJSON == "{}" {
+		return nil
+	}
+	var parsed struct {
+		ExpectedHTTPCodes []int    `json:"expectedHttpCodes"`
+		ResponseContains  []string `json:"expectedResponseContains"`
+		RequireRequestID  bool     `json:"requireRequestId"`
+	}
+	if json.Unmarshal([]byte(expectedJSON), &parsed) != nil {
+		return nil
+	}
+	return &caseExecutionConfig{
+		ExpectedHTTPCodes: parsed.ExpectedHTTPCodes,
+		ExpectedResponse:  parsed.ResponseContains,
+		RequireRequestID:  parsed.RequireRequestID,
+	}
 }
 
 func resolveBundleAPICasePath(ctx context.Context, runtime store.Store, bundle profile.Bundle, casePath string) string {

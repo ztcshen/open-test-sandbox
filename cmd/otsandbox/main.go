@@ -56,6 +56,7 @@ type profileImportReport struct {
 	BundlePath    string               `json:"bundlePath"`
 	BundleDigest  string               `json:"bundleDigest"`
 	Counts        profileImportCounts  `json:"counts"`
+	Diff          profileImportDiff    `json:"diff"`
 	StorePath     string               `json:"storePath"`
 	CatalogIndex  profileCatalogIndex  `json:"catalogIndex"`
 	ConfigVersion profileConfigVersion `json:"configVersion"`
@@ -73,6 +74,28 @@ type profileImportCounts struct {
 	CaseDependencies int `json:"caseDependencies"`
 	WorkflowBindings int `json:"workflowBindings"`
 	Fixtures         int `json:"fixtures"`
+}
+
+type profileImportDiff struct {
+	HasPreviousCatalog bool                         `json:"hasPreviousCatalog"`
+	Before             profileImportCounts          `json:"before"`
+	After              profileImportCounts          `json:"after"`
+	APICases           profileImportCaseDiff        `json:"apiCases"`
+	NodeCaseDeltas     []profileImportNodeCaseDelta `json:"nodeCaseDeltas,omitempty"`
+}
+
+type profileImportCaseDiff struct {
+	Before  int      `json:"before"`
+	After   int      `json:"after"`
+	Added   []string `json:"added,omitempty"`
+	Removed []string `json:"removed,omitempty"`
+}
+
+type profileImportNodeCaseDelta struct {
+	NodeID string `json:"nodeId"`
+	Before int    `json:"before"`
+	After  int    `json:"after"`
+	Delta  int    `json:"delta"`
 }
 
 type profileCatalogIndex struct {
@@ -239,6 +262,54 @@ func main() {
 	}
 }
 
+func parseInterspersedFlags(flags *flag.FlagSet, args []string) error {
+	return flags.Parse(interspersedFlagArgs(flags, args))
+}
+
+func interspersedFlagArgs(flags *flag.FlagSet, args []string) []string {
+	flagArgs := make([]string, 0, len(args))
+	positional := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if !looksLikeFlagToken(arg) {
+			positional = append(positional, arg)
+			continue
+		}
+		flagArgs = append(flagArgs, arg)
+		name, inlineValue := flagTokenName(arg)
+		defined := flags.Lookup(name)
+		if defined == nil || inlineValue || isBoolFlagValue(defined.Value) || i+1 >= len(args) {
+			continue
+		}
+		i++
+		flagArgs = append(flagArgs, args[i])
+	}
+	return append(flagArgs, positional...)
+}
+
+func looksLikeFlagToken(arg string) bool {
+	return strings.HasPrefix(arg, "-") && arg != "-"
+}
+
+func flagTokenName(arg string) (string, bool) {
+	name := strings.TrimLeft(arg, "-")
+	if before, _, ok := strings.Cut(name, "="); ok {
+		return before, true
+	}
+	return name, false
+}
+
+func isBoolFlagValue(value flag.Value) bool {
+	boolValue, ok := value.(interface {
+		IsBoolFlag() bool
+	})
+	return ok && boolValue.IsBoolFlag()
+}
+
 func printHelp() {
 	fmt.Println(`Open Test Sandbox
 
@@ -282,6 +353,8 @@ Usage:
   otsandbox profile inspect --profile PATH_OR_ID [--profile-home PATH]
   otsandbox profile audit --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
   otsandbox profile audit-plan --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
+  otsandbox profile doctor --profile PATH_OR_ID --case-id ID [--profile-home PATH] [--json]
+  otsandbox profile repair --from-manifest PATH [--profile PATH_OR_ID] [--profile-home PATH] [--apply] [--json]
   otsandbox profile generation-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
   otsandbox profile import-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
   otsandbox profile import-plan http-capture --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
@@ -334,6 +407,8 @@ Usage:
   otsandbox case runs [--store NAME_OR_DSN] [--run ID] [--json]
   otsandbox case evidence [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
   otsandbox case timing [--store NAME_OR_DSN] [--kind KIND] [--max-age-minutes N] [--json]
+  otsandbox case batch start --server-url URL [--case ID]... [--node ID]... [--workflow ID] [--suite NAME] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case batch report --server-url URL --run ID [--json]
   otsandbox case run (--case PATH | --case-id ID) [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
   otsandbox case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]
   otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
@@ -458,7 +533,7 @@ func runStoreDDL(args []string) error {
 	backend := flags.String("backend", "", "Store backend")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	selectedBackend := strings.ToLower(strings.TrimSpace(*backend))
@@ -594,7 +669,7 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	flags.Var(&healthTCPs, "health-tcp", "TCP health check address as HOST:PORT; repeat for multiple checks")
 	flags.Var(&healthCommands, "health-command", "Shell command health check; repeat for multiple checks")
 	flags.Var(&healthComposeServices, "health-compose-service", "Docker Compose service health check; repeat for multiple services")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*id) == "" {
@@ -638,7 +713,7 @@ func runEnvironmentDiscover(ctx context.Context, args []string) error {
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	includeAll := flags.Bool("all", false, "Include environments that are not verified")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
@@ -673,7 +748,7 @@ func runEnvironmentInspect(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -693,7 +768,7 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -755,7 +830,7 @@ func runEnvironmentRepoSet(ctx context.Context, args []string) error {
 	flags.Var(&branches, "branch", "Service branch as SERVICE=BRANCH; repeat for multiple services")
 	flags.Var(&repoRefs, "repo-ref", "Service Git ref as SERVICE=REF; repeat for multiple services")
 	flags.Var(&checkouts, "checkout", "Service checkout path as SERVICE=PATH; repeat for multiple services")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -829,7 +904,7 @@ func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	var files stringListFlag
 	flags.Var(&files, "file", "Generated startup file as TARGET=SOURCE_FILE; repeat for multiple files")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -898,7 +973,7 @@ func runEnvironmentComponentsInspect(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -927,7 +1002,7 @@ func runEnvironmentComponentsReplace(ctx context.Context, args []string) error {
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	file := flags.String("file", "", "Component graph JSON file")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -1322,7 +1397,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	cleanDockerImages := flags.Bool("clean-docker-images", false, "Include Docker Compose image removal in cleanup plan")
 	allowDestructiveDockerCleanup := flags.Bool("allow-destructive-docker-cleanup", false, "Allow --execute to run requested Docker cleanup commands")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -1431,7 +1506,7 @@ func runEnvironmentAcceptanceStart(ctx context.Context, args []string) error {
 	evidenceDir := flags.String("evidence-dir", "", "Evidence output directory")
 	timeoutSeconds := flags.Int("timeout-seconds", 0, "Per-step timeout in seconds")
 	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	envID := strings.TrimSpace(flags.Arg(0))
@@ -1465,7 +1540,7 @@ func runEnvironmentAcceptanceReport(ctx context.Context, args []string) error {
 	serverURL := flags.String("server-url", "", "Running control plane base URL")
 	runID := flags.String("run", "", "Acceptance batch run id")
 	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	envID := strings.TrimSpace(flags.Arg(0))
@@ -4456,7 +4531,7 @@ func runEnvironmentVerify(ctx context.Context, args []string) error {
 	evidenceComplete := flags.Bool("evidence-complete", false, "Evidence is complete for the verification run")
 	topologyComplete := flags.Bool("topology-complete", false, "SkyWalking topology is complete for the verification run")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -4498,7 +4573,7 @@ func runEnvironmentPublishVerified(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
@@ -5352,6 +5427,10 @@ func runProfile(args []string) error {
 		return runProfileAudit(context.Background(), args[1:])
 	case "audit-plan":
 		return runProfileAuditPlan(context.Background(), args[1:])
+	case "doctor":
+		return runProfileDoctor(args[1:])
+	case "repair":
+		return runProfileRepair(args[1:])
 	case "generation-plan":
 		return runProfileGenerationPlan(args[1:])
 	case "import-plan":
@@ -6270,6 +6349,455 @@ func runProfileInspect(args []string) error {
 	return nil
 }
 
+type profileDoctorReport struct {
+	OK          bool                 `json:"ok"`
+	ProfileID   string               `json:"profileId,omitempty"`
+	ProfilePath string               `json:"profilePath"`
+	CaseID      string               `json:"caseId"`
+	Checks      []profileDoctorCheck `json:"checks"`
+}
+
+type profileDoctorCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+func runProfileDoctor(args []string) error {
+	flags := flag.NewFlagSet("profile doctor", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	caseID := flags.String("case-id", "", "API case id to inspect")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedProfilePath, err := resolveProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome)
+	if err != nil {
+		return err
+	}
+	report := profileDoctor(resolvedProfilePath, *caseID)
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+		if !report.OK {
+			return errors.New("profile doctor found issues")
+		}
+		return nil
+	}
+	printProfileDoctor(report)
+	if !report.OK {
+		return errors.New("profile doctor found issues")
+	}
+	return nil
+}
+
+func profileDoctor(profilePath string, caseID string) profileDoctorReport {
+	report := profileDoctorReport{
+		ProfilePath: profilePath,
+		CaseID:      strings.TrimSpace(caseID),
+		OK:          true,
+	}
+	if report.CaseID == "" {
+		return appendProfileDoctorCheck(report, "case-id", false, "--case-id is required")
+	}
+	bundle, err := profile.Load(profilePath)
+	if err != nil {
+		return appendProfileDoctorCheck(report, "profile-load", false, err.Error())
+	}
+	report.ProfileID = bundle.ID
+	report = appendProfileDoctorCheck(report, "profile-load", true, "profile loaded")
+	apiCase, foundCase := findProfileAPICase(bundle.APICases, report.CaseID)
+	report = appendProfileDoctorCheck(report, "case-catalog", foundCase, "case is present in loaded profile catalog")
+	rawCatalogIDs := loadRawCatalogCaseIDs(bundle.BaseDir)
+	if len(rawCatalogIDs) > 0 {
+		report = appendProfileDoctorCheck(report, "catalog-json-entry", rawCatalogIDs[report.CaseID], "case is present in catalog.json interfaceNodeCases")
+	}
+	caseFile := profileCaseFilePath(bundle.BaseDir, apiCase)
+	if report.CaseID != "" {
+		_, err := os.Stat(caseFile)
+		report = appendProfileDoctorCheck(report, "case-file", err == nil, caseFile)
+	}
+	if !foundCase {
+		return report
+	}
+	if strings.TrimSpace(apiCase.NodeID) != "" {
+		_, foundNode := findProfileInterfaceNode(bundle.InterfaceNodes, apiCase.NodeID)
+		report = appendProfileDoctorCheck(report, "interface-node", foundNode, "node "+apiCase.NodeID+" exists")
+	}
+	if strings.TrimSpace(apiCase.RequestTemplateID) != "" {
+		_, foundTemplate := findProfileRequestTemplate(bundle.RequestTemplates, apiCase.RequestTemplateID)
+		report = appendProfileDoctorCheck(report, "request-template", foundTemplate, "template "+apiCase.RequestTemplateID+" exists")
+	}
+	for _, item := range bundle.CaseDependencies {
+		if item.CaseID != apiCase.ID {
+			continue
+		}
+		_, foundFixture := findProfileFixture(bundle.Fixtures, item.FixtureID)
+		report = appendProfileDoctorCheck(report, "fixture:"+item.FixtureID, foundFixture, "dependency "+item.ID+" fixture exists")
+	}
+	if strings.TrimSpace(apiCase.PatchJSON) != "" {
+		report = appendProfileDoctorCheck(report, "patch-json", validJSONObjectOrArray(apiCase.PatchJSON), "patchJson parses as JSON")
+	}
+	if strings.TrimSpace(apiCase.ExpectedJSON) != "" {
+		report = appendProfileDoctorCheck(report, "expected-json", validJSONObjectOrArray(apiCase.ExpectedJSON), "expectedJson parses as JSON")
+	}
+	return report
+}
+
+func appendProfileDoctorCheck(report profileDoctorReport, name string, ok bool, detail string) profileDoctorReport {
+	if !ok {
+		report.OK = false
+	}
+	report.Checks = append(report.Checks, profileDoctorCheck{Name: name, OK: ok, Detail: detail})
+	return report
+}
+
+func printProfileDoctor(report profileDoctorReport) {
+	fmt.Println("Profile Doctor")
+	fmt.Printf("Profile: %s\n", firstNonEmpty(report.ProfileID, report.ProfilePath))
+	fmt.Printf("Case: %s\n", report.CaseID)
+	fmt.Printf("OK: %t\n", report.OK)
+	for _, check := range report.Checks {
+		status := "ok"
+		if !check.OK {
+			status = "issue"
+		}
+		fmt.Printf("- %s [%s] %s\n", check.Name, status, check.Detail)
+	}
+}
+
+type profileRepairReport struct {
+	OK           bool                 `json:"ok"`
+	Applied      bool                 `json:"applied"`
+	ProfilePath  string               `json:"profilePath"`
+	ManifestPath string               `json:"manifestPath"`
+	Summary      profileRepairSummary `json:"summary"`
+	Items        []profileRepairItem  `json:"items"`
+	Warnings     []string             `json:"warnings,omitempty"`
+}
+
+type profileRepairSummary struct {
+	CatalogCasesRestored int `json:"catalogCasesRestored"`
+	CaseFilesRestored    int `json:"caseFilesRestored"`
+	AlreadyPresent       int `json:"alreadyPresent"`
+	ChangedFiles         int `json:"changedFiles"`
+}
+
+type profileRepairItem struct {
+	Kind   string `json:"kind"`
+	ID     string `json:"id,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Action string `json:"action"`
+}
+
+type profileRepairManifest struct {
+	ProfilePath  string                     `json:"profilePath"`
+	CatalogPath  string                     `json:"catalogPath"`
+	CaseIDs      []string                   `json:"caseIds"`
+	CatalogCases []json.RawMessage          `json:"catalogCases"`
+	CaseFiles    map[string]string          `json:"caseFiles"`
+	CaseFileJSON map[string]json.RawMessage `json:"caseFileJson"`
+}
+
+func runProfileRepair(args []string) error {
+	flags := flag.NewFlagSet("profile repair", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	manifestPath := flags.String("from-manifest", "", "Repair manifest path")
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	apply := flags.Bool("apply", false, "Write repaired profile files")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := profileRepair(*manifestPath, *profilePath, *profileHome, *apply)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printProfileRepair(report)
+	return nil
+}
+
+func profileRepair(manifestPath string, profileRef string, profileHome string, apply bool) (profileRepairReport, error) {
+	manifestPath = strings.TrimSpace(manifestPath)
+	if manifestPath == "" {
+		return profileRepairReport{}, errors.New("--from-manifest is required")
+	}
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return profileRepairReport{}, fmt.Errorf("read repair manifest: %w", err)
+	}
+	var manifest profileRepairManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return profileRepairReport{}, fmt.Errorf("decode repair manifest: %w", err)
+	}
+	resolvedProfilePath := strings.TrimSpace(profileRef)
+	if resolvedProfilePath != "" {
+		resolvedProfilePath, err = resolveProfileReference(resolvedProfilePath, profileHome)
+		if err != nil {
+			return profileRepairReport{}, err
+		}
+	} else {
+		resolvedProfilePath = strings.TrimSpace(manifest.ProfilePath)
+	}
+	if resolvedProfilePath == "" {
+		return profileRepairReport{}, errors.New("profile repair needs --profile or manifest profilePath")
+	}
+	catalogPath := profileRepairCatalogPath(resolvedProfilePath, manifest)
+	report := profileRepairReport{OK: true, Applied: apply, ProfilePath: resolvedProfilePath, ManifestPath: manifestPath}
+	catalogRaw, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return profileRepairReport{}, fmt.Errorf("read profile catalog: %w", err)
+	}
+	var catalog map[string]any
+	if err := json.Unmarshal(catalogRaw, &catalog); err != nil {
+		return profileRepairReport{}, fmt.Errorf("decode profile catalog: %w", err)
+	}
+	cases := rawJSONListFromAny(catalog["interfaceNodeCases"])
+	byID := map[string]json.RawMessage{}
+	for _, rawCase := range cases {
+		id := jsonID(rawCase)
+		if id != "" {
+			byID[id] = rawCase
+		}
+	}
+	for _, rawCase := range manifest.CatalogCases {
+		id := jsonID(rawCase)
+		if id == "" {
+			report.Warnings = append(report.Warnings, "skipped catalog case without id")
+			continue
+		}
+		action := "already-present"
+		if _, ok := byID[id]; !ok {
+			cases = append(cases, rawCase)
+			byID[id] = rawCase
+			action = "restore"
+			report.Summary.CatalogCasesRestored++
+		} else {
+			report.Summary.AlreadyPresent++
+		}
+		report.Items = append(report.Items, profileRepairItem{Kind: "catalog-case", ID: id, Action: action})
+	}
+	fileContents := profileRepairCaseFiles(manifest)
+	for sourcePath, content := range fileContents {
+		targetPath := profileRepairCaseFilePath(resolvedProfilePath, manifest.ProfilePath, sourcePath)
+		action := "already-present"
+		current, err := os.ReadFile(targetPath)
+		if err != nil || string(current) != content {
+			action = "restore"
+			report.Summary.CaseFilesRestored++
+			if apply {
+				if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+					return profileRepairReport{}, err
+				}
+				if err := os.WriteFile(targetPath, []byte(ensureTrailingNewline(content)), 0o644); err != nil {
+					return profileRepairReport{}, err
+				}
+			}
+		} else {
+			report.Summary.AlreadyPresent++
+		}
+		report.Items = append(report.Items, profileRepairItem{Kind: "case-file", Path: targetPath, Action: action})
+	}
+	if apply && report.Summary.CatalogCasesRestored > 0 {
+		nextCases := make([]any, 0, len(cases))
+		for _, rawCase := range cases {
+			var value any
+			if err := json.Unmarshal(rawCase, &value); err != nil {
+				return profileRepairReport{}, err
+			}
+			nextCases = append(nextCases, value)
+		}
+		catalog["interfaceNodeCases"] = nextCases
+		out, err := json.MarshalIndent(catalog, "", "  ")
+		if err != nil {
+			return profileRepairReport{}, err
+		}
+		if err := os.WriteFile(catalogPath, append(out, '\n'), 0o644); err != nil {
+			return profileRepairReport{}, err
+		}
+	}
+	if report.Summary.CatalogCasesRestored > 0 && apply {
+		report.Summary.ChangedFiles++
+	}
+	if report.Summary.CaseFilesRestored > 0 && apply {
+		report.Summary.ChangedFiles += report.Summary.CaseFilesRestored
+	}
+	return report, nil
+}
+
+func printProfileRepair(report profileRepairReport) {
+	fmt.Println("Profile Repair")
+	fmt.Printf("Profile: %s\n", report.ProfilePath)
+	fmt.Printf("Applied: %t\n", report.Applied)
+	fmt.Printf("Catalog Cases Restored: %d\n", report.Summary.CatalogCasesRestored)
+	fmt.Printf("Case Files Restored: %d\n", report.Summary.CaseFilesRestored)
+	for _, item := range report.Items {
+		target := firstNonEmpty(item.ID, item.Path)
+		fmt.Printf("- %s %s: %s\n", item.Kind, target, item.Action)
+	}
+}
+
+func findProfileAPICase(items []profile.APICase, id string) (profile.APICase, bool) {
+	for _, item := range items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return profile.APICase{}, false
+}
+
+func findProfileInterfaceNode(items []profile.InterfaceNode, id string) (profile.InterfaceNode, bool) {
+	for _, item := range items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return profile.InterfaceNode{}, false
+}
+
+func findProfileRequestTemplate(items []profile.RequestTemplate, id string) (profile.RequestTemplate, bool) {
+	for _, item := range items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return profile.RequestTemplate{}, false
+}
+
+func findProfileFixture(items []profile.Fixture, id string) (profile.Fixture, bool) {
+	for _, item := range items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return profile.Fixture{}, false
+}
+
+func profileCaseFilePath(baseDir string, apiCase profile.APICase) string {
+	if strings.TrimSpace(apiCase.CasePath) != "" {
+		if filepath.IsAbs(apiCase.CasePath) {
+			return apiCase.CasePath
+		}
+		return filepath.Join(baseDir, apiCase.CasePath)
+	}
+	return filepath.Join(baseDir, "cases", apiCase.ID+".json")
+}
+
+func loadRawCatalogCaseIDs(baseDir string) map[string]bool {
+	out := map[string]bool{}
+	raw, err := os.ReadFile(filepath.Join(baseDir, "catalog.json"))
+	if err != nil {
+		return out
+	}
+	var payload struct {
+		InterfaceNodeCases []json.RawMessage `json:"interfaceNodeCases"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return out
+	}
+	for _, item := range payload.InterfaceNodeCases {
+		if id := jsonID(item); id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func validJSONObjectOrArray(value string) bool {
+	var parsed any
+	if json.Unmarshal([]byte(value), &parsed) != nil {
+		return false
+	}
+	switch parsed.(type) {
+	case map[string]any, []any:
+		return true
+	default:
+		return false
+	}
+}
+
+func profileRepairCatalogPath(profilePath string, manifest profileRepairManifest) string {
+	if strings.TrimSpace(manifest.CatalogPath) != "" {
+		if filepath.IsAbs(manifest.CatalogPath) {
+			return manifest.CatalogPath
+		}
+		if strings.TrimSpace(manifest.ProfilePath) != "" {
+			if rel, err := filepath.Rel(manifest.ProfilePath, manifest.CatalogPath); err == nil && !strings.HasPrefix(rel, "..") {
+				return filepath.Join(profilePath, rel)
+			}
+		}
+		return manifest.CatalogPath
+	}
+	return filepath.Join(profilePath, "catalog.json")
+}
+
+func rawJSONListFromAny(value any) []json.RawMessage {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]json.RawMessage, 0, len(values))
+	for _, item := range values {
+		raw, err := json.Marshal(item)
+		if err == nil {
+			out = append(out, raw)
+		}
+	}
+	return out
+}
+
+func jsonID(raw json.RawMessage) string {
+	var payload struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.ID)
+}
+
+func profileRepairCaseFiles(manifest profileRepairManifest) map[string]string {
+	out := map[string]string{}
+	for path, content := range manifest.CaseFiles {
+		out[path] = content
+	}
+	for path, raw := range manifest.CaseFileJSON {
+		out[path] = string(raw)
+	}
+	return out
+}
+
+func profileRepairCaseFilePath(profilePath string, manifestProfilePath string, sourcePath string) string {
+	sourcePath = strings.TrimSpace(sourcePath)
+	if sourcePath == "" {
+		return filepath.Join(profilePath, "cases", "case.json")
+	}
+	if strings.TrimSpace(manifestProfilePath) != "" {
+		if rel, err := filepath.Rel(manifestProfilePath, sourcePath); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.Join(profilePath, rel)
+		}
+	}
+	if filepath.IsAbs(sourcePath) {
+		return sourcePath
+	}
+	return filepath.Join(profilePath, sourcePath)
+}
+
+func ensureTrailingNewline(value string) string {
+	if strings.HasSuffix(value, "\n") {
+		return value
+	}
+	return value + "\n"
+}
+
 func runProfileCatalogIndex(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile catalog-index", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -6397,6 +6925,7 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 	}
 	fmt.Printf("%s: %s\n", textPrefix, report.ProfileID)
 	fmt.Printf("Digest: %s\n", report.BundleDigest)
+	printProfileImportDiff(report.Diff)
 	if report.Audit != nil {
 		printProfileImportAudit(*report.Audit)
 	}
@@ -6439,6 +6968,10 @@ func publishProfileBundleToStore(ctx context.Context, s store.Store, from string
 		return profileImportReport{}, err
 	}
 	catalog := profilecatalog.FromBundle(bundle, importedAt)
+	previousCatalog, hasPreviousCatalog, err := readCurrentProfileCatalog(ctx, s)
+	if err != nil {
+		return profileImportReport{}, err
+	}
 	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
 		return profileImportReport{}, err
 	}
@@ -6468,6 +7001,7 @@ func publishProfileBundleToStore(ctx context.Context, s store.Store, from string
 		BundlePath:    from,
 		BundleDigest:  digest,
 		Counts:        profileImportAssetCounts(bundle.Counts()),
+		Diff:          profileImportDiffFromCatalogs(previousCatalog, catalog, hasPreviousCatalog),
 		StorePath:     storePath,
 		CatalogIndex:  profileCatalogIndexFromStore(catalogIndex),
 		ConfigVersion: profileConfigVersionFromStore(configVersion),
@@ -6713,6 +7247,132 @@ func profileImportAssetCounts(counts profile.Counts) profileImportCounts {
 		CaseDependencies: counts.CaseDependencies,
 		WorkflowBindings: counts.WorkflowBindings,
 		Fixtures:         counts.Fixtures,
+	}
+}
+
+func readCurrentProfileCatalog(ctx context.Context, s store.Store) (store.ProfileCatalog, bool, error) {
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return store.ProfileCatalog{}, false, nil
+		}
+		return store.ProfileCatalog{}, false, err
+	}
+	return catalog, true, nil
+}
+
+func profileImportDiffFromCatalogs(before store.ProfileCatalog, after store.ProfileCatalog, hasBefore bool) profileImportDiff {
+	diff := profileImportDiff{
+		HasPreviousCatalog: hasBefore,
+		Before:             profileImportCountsFromCatalog(before),
+		After:              profileImportCountsFromCatalog(after),
+		APICases: profileImportCaseDiff{
+			Before: len(before.APICases),
+			After:  len(after.APICases),
+		},
+	}
+	if !hasBefore {
+		diff.APICases.Before = 0
+		diff.Before = profileImportCounts{}
+	}
+	beforeIDs := map[string]bool{}
+	for _, item := range before.APICases {
+		beforeIDs[item.ID] = true
+	}
+	afterIDs := map[string]bool{}
+	for _, item := range after.APICases {
+		afterIDs[item.ID] = true
+		if hasBefore && !beforeIDs[item.ID] {
+			diff.APICases.Added = append(diff.APICases.Added, item.ID)
+		}
+	}
+	if hasBefore {
+		for _, item := range before.APICases {
+			if !afterIDs[item.ID] {
+				diff.APICases.Removed = append(diff.APICases.Removed, item.ID)
+			}
+		}
+	}
+	sort.Strings(diff.APICases.Added)
+	sort.Strings(diff.APICases.Removed)
+	diff.NodeCaseDeltas = profileImportNodeCaseDeltas(before.APICases, after.APICases, hasBefore)
+	return diff
+}
+
+func profileImportCountsFromCatalog(catalog store.ProfileCatalog) profileImportCounts {
+	return profileImportCounts{
+		Services:         len(catalog.Services),
+		Workflows:        len(catalog.Workflows),
+		InterfaceNodes:   len(catalog.InterfaceNodes),
+		APICases:         len(catalog.APICases),
+		RequestTemplates: len(catalog.RequestTemplates),
+		CaseDependencies: len(catalog.CaseDependencies),
+		WorkflowBindings: len(catalog.WorkflowBindings),
+		Fixtures:         len(catalog.Fixtures),
+	}
+}
+
+func profileImportNodeCaseDeltas(before []store.CatalogAPICase, after []store.CatalogAPICase, hasBefore bool) []profileImportNodeCaseDelta {
+	beforeCounts := map[string]int{}
+	if hasBefore {
+		for _, item := range before {
+			beforeCounts[firstNonEmpty(item.NodeID, "(none)")]++
+		}
+	}
+	afterCounts := map[string]int{}
+	for _, item := range after {
+		afterCounts[firstNonEmpty(item.NodeID, "(none)")]++
+	}
+	nodeIDs := map[string]bool{}
+	for nodeID := range beforeCounts {
+		nodeIDs[nodeID] = true
+	}
+	for nodeID := range afterCounts {
+		nodeIDs[nodeID] = true
+	}
+	out := make([]profileImportNodeCaseDelta, 0, len(nodeIDs))
+	for _, nodeID := range sortedBoolMapKeys(nodeIDs) {
+		beforeCount := beforeCounts[nodeID]
+		afterCount := afterCounts[nodeID]
+		if hasBefore && beforeCount == afterCount {
+			continue
+		}
+		out = append(out, profileImportNodeCaseDelta{
+			NodeID: nodeID,
+			Before: beforeCount,
+			After:  afterCount,
+			Delta:  afterCount - beforeCount,
+		})
+	}
+	return out
+}
+
+func sortedBoolMapKeys(items map[string]bool) []string {
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func printProfileImportDiff(diff profileImportDiff) {
+	if !diff.HasPreviousCatalog {
+		fmt.Printf("API Cases: %d\n", diff.APICases.After)
+		return
+	}
+	fmt.Printf("API Cases: %d -> %d\n", diff.APICases.Before, diff.APICases.After)
+	for _, item := range diff.NodeCaseDeltas {
+		if item.Delta == 0 {
+			continue
+		}
+		fmt.Printf("- %s: %d -> %d (%+d)\n", item.NodeID, item.Before, item.After, item.Delta)
+	}
+	if len(diff.APICases.Added) > 0 {
+		fmt.Printf("Added Cases: %d\n", len(diff.APICases.Added))
+	}
+	if len(diff.APICases.Removed) > 0 {
+		fmt.Printf("Removed Cases: %d\n", len(diff.APICases.Removed))
 	}
 }
 
@@ -10088,6 +10748,8 @@ func runCase(ctx context.Context, args []string) error {
 		return runCaseEvidence(ctx, args[1:])
 	case "timing":
 		return runCaseTiming(ctx, args[1:])
+	case "batch":
+		return runCaseBatch(ctx, args[1:])
 	case "incomplete-batches":
 		return runCaseIncompleteBatches(ctx, args[1:])
 	default:
@@ -10126,6 +10788,129 @@ func runCaseSuite(ctx context.Context, args []string) error {
 		return runCaseSuiteImpactReport(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case suite command: %s", args[0])
+	}
+}
+
+func runCaseBatch(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing case batch command")
+	}
+	switch args[0] {
+	case "start":
+		return runCaseBatchStart(ctx, args[1:])
+	case "report":
+		return runCaseBatchReport(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown case batch command: %s", args[0])
+	}
+}
+
+func runCaseBatchStart(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case batch start", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	serverURL := flags.String("server-url", "", "Running control plane base URL")
+	workflowID := flags.String("workflow", "", "Workflow id")
+	suite := flags.String("suite", "", "Suite selector")
+	requestID := flags.String("request-id", "", "Batch request id")
+	baseURL := flags.String("base-url", "", "Base URL for live request execution")
+	evidenceDir := flags.String("evidence-dir", "", "Evidence output directory")
+	timeoutSeconds := flags.Int("timeout-seconds", 0, "Per-case timeout in seconds")
+	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
+	var caseIDs, nodeIDs stringListFlag
+	flags.Var(&caseIDs, "case", "Case id; repeat for multiple cases")
+	flags.Var(&nodeIDs, "node", "Interface node id; repeat for multiple nodes")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*serverURL) == "" {
+		return errors.New("--server-url is required")
+	}
+	payload := map[string]any{}
+	if values := caseIDs.Values(); len(values) > 0 {
+		payload["caseIds"] = values
+	}
+	if values := nodeIDs.Values(); len(values) > 0 {
+		payload["nodeIds"] = values
+	}
+	if strings.TrimSpace(*workflowID) != "" {
+		payload["workflowId"] = strings.TrimSpace(*workflowID)
+	}
+	if strings.TrimSpace(*suite) != "" {
+		payload["suite"] = strings.TrimSpace(*suite)
+	}
+	if len(payload) == 0 {
+		return errors.New("at least one of --case, --node, --workflow, or --suite is required")
+	}
+	if strings.TrimSpace(*requestID) != "" {
+		payload["requestId"] = strings.TrimSpace(*requestID)
+	}
+	if strings.TrimSpace(*baseURL) != "" {
+		payload["baseUrl"] = strings.TrimSpace(*baseURL)
+	}
+	if strings.TrimSpace(*evidenceDir) != "" {
+		payload["evidenceDir"] = strings.TrimSpace(*evidenceDir)
+	}
+	if *timeoutSeconds > 0 {
+		payload["timeoutSeconds"] = *timeoutSeconds
+	}
+	result, err := postWorkflowAcceptanceJSON(ctx, workflowAcceptanceURL(*serverURL, "/api/cases/batch-runs"), payload)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(result)
+	}
+	printCaseBatchStart(result)
+	return nil
+}
+
+func runCaseBatchReport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case batch report", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	serverURL := flags.String("server-url", "", "Running control plane base URL")
+	runID := flags.String("run", "", "Case batch run id")
+	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*serverURL) == "" || strings.TrimSpace(*runID) == "" {
+		return errors.New("--server-url and --run are required")
+	}
+	result, err := fetchWorkflowAcceptanceJSON(ctx, workflowAcceptanceURL(*serverURL, "/api/cases/batch-runs/"+url.PathEscape(strings.TrimSpace(*runID))))
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(result)
+	}
+	printCaseBatchReport(result)
+	return nil
+}
+
+func printCaseBatchStart(payload map[string]any) {
+	fmt.Printf("Case Batch Run: %s\n", valueString(payload["batchRunId"]))
+	fmt.Printf("Status: %s\n", valueString(payload["status"]))
+	if workflowID := valueString(payload["workflowId"]); workflowID != "" {
+		fmt.Printf("Workflow: %s\n", workflowID)
+	}
+	if total := intFromReportAny(payload["total"]); total > 0 {
+		fmt.Printf("Total: %d\n", total)
+	}
+	fmt.Printf("Report: %s\n", valueString(payload["reportUrl"]))
+}
+
+func printCaseBatchReport(payload map[string]any) {
+	fmt.Printf("Case Batch Report: %s\n", valueString(payload["batchRunId"]))
+	fmt.Printf("Status: %s\n", valueString(payload["status"]))
+	fmt.Printf("OK: %t\n", boolFromReportAny(payload["ok"]))
+	if total := intFromReportAny(payload["total"]); total > 0 {
+		fmt.Printf("Total: %d\n", total)
+	}
+	if passed := intFromReportAny(payload["passed"]); passed > 0 {
+		fmt.Printf("Passed: %d\n", passed)
+	}
+	if failed := intFromReportAny(payload["failed"]); failed > 0 {
+		fmt.Printf("Failed: %d\n", failed)
 	}
 }
 

@@ -645,13 +645,13 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	}
 
 	verifyOut := runCLI(t, "environment", "verify",
+		"env.team.verified",
 		"--store", storeRef,
 		"--run", "run.core-10",
 		"--status", "passed",
 		"--evidence-complete",
 		"--topology-complete",
 		"--json",
-		"env.team.verified",
 	)
 	var verified struct {
 		Environment struct {
@@ -675,7 +675,7 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	}
 	seedEnvironmentVerificationArtifacts(t, storeRef, "run.core-10")
 
-	publishOut := runCLI(t, "environment", "publish-verified", "--store", storeRef, "--json", "env.team.verified")
+	publishOut := runCLI(t, "environment", "publish-verified", "env.team.verified", "--store", storeRef, "--json")
 	var published struct {
 		Environment struct {
 			Status   string `json:"status"`
@@ -821,6 +821,83 @@ func TestWorkflowAcceptanceCLIStartsAndReadsAsyncReport(t *testing.T) {
 	}
 	if !report.Acceptance.OK || report.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Acceptance.TopologyProvider != "skywalking" {
 		t.Fatalf("workflow acceptance report = %#v", report.Acceptance)
+	}
+}
+
+func TestCaseBatchCLIStartsAndReadsAsyncReport(t *testing.T) {
+	var startPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/cases/batch-runs":
+			if err := json.NewDecoder(r.Body).Decode(&startPayload); err != nil {
+				t.Fatalf("decode start payload: %v", err)
+			}
+			writeTestJSON(t, w, http.StatusAccepted, map[string]any{
+				"ok":         true,
+				"batchRunId": "batch.case.001",
+				"requestId":  "case-batch-001",
+				"status":     "running",
+				"total":      2,
+				"reportUrl":  "/api/cases/batch-runs/batch.case.001",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/cases/batch-runs/batch.case.001":
+			writeTestJSON(t, w, http.StatusOK, map[string]any{
+				"ok":         true,
+				"batchRunId": "batch.case.001",
+				"status":     "passed",
+				"total":      2,
+				"passed":     2,
+				"failed":     0,
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	startOut := runCLI(t, "case", "batch", "start",
+		"--server-url", server.URL,
+		"--case", "case.alpha",
+		"--case", "case.beta",
+		"--request-id", "case-batch-001",
+		"--base-url", "http://127.0.0.1:18080",
+		"--timeout-seconds", "30",
+		"--json",
+	)
+	var started struct {
+		OK         bool   `json:"ok"`
+		BatchRunID string `json:"batchRunId"`
+		Status     string `json:"status"`
+		Total      int    `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(startOut), &started); err != nil {
+		t.Fatalf("decode case batch start: %v\n%s", err, startOut)
+	}
+	if !started.OK || started.BatchRunID != "batch.case.001" || started.Status != "running" || started.Total != 2 {
+		t.Fatalf("case batch start = %#v", started)
+	}
+	caseIDs, _ := startPayload["caseIds"].([]any)
+	if len(caseIDs) != 2 || caseIDs[0] != "case.alpha" || caseIDs[1] != "case.beta" || startPayload["requestId"] != "case-batch-001" || startPayload["baseUrl"] != "http://127.0.0.1:18080" || startPayload["timeoutSeconds"] != float64(30) {
+		t.Fatalf("case batch start payload = %#v", startPayload)
+	}
+
+	reportOut := runCLI(t, "case", "batch", "report",
+		"--server-url", server.URL,
+		"--run", "batch.case.001",
+		"--json",
+	)
+	var report struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+		Total  int    `json:"total"`
+		Passed int    `json:"passed"`
+		Failed int    `json:"failed"`
+	}
+	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
+		t.Fatalf("decode case batch report: %v\n%s", err, reportOut)
+	}
+	if !report.OK || report.Status != "passed" || report.Total != 2 || report.Passed != 2 || report.Failed != 0 {
+		t.Fatalf("case batch report = %#v", report)
 	}
 }
 
@@ -973,12 +1050,12 @@ func runEnvironmentCommandsUseNamedActiveStore(t *testing.T, storeRef string, en
 	}
 
 	verifyOut := runCLI(t, "environment", "verify",
+		envID,
 		"--run", runID,
 		"--status", "passed",
 		"--evidence-complete",
 		"--topology-complete",
 		"--json",
-		envID,
 	)
 	var verified struct {
 		Environment struct {
@@ -1002,7 +1079,7 @@ func runEnvironmentCommandsUseNamedActiveStore(t *testing.T, storeRef string, en
 	}
 	seedEnvironmentVerificationArtifacts(t, storeRef, runID)
 
-	publishOut := runCLI(t, "environment", "publish-verified", "--json", envID)
+	publishOut := runCLI(t, "environment", "publish-verified", envID, "--json")
 	var published struct {
 		Environment struct {
 			Status   string `json:"status"`
@@ -2091,7 +2168,9 @@ func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
 	}))
 	replaceOut := runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "--json", "env.component.inspect-readiness")
 	inspectOut := runCLI(t, "environment", "components", "inspect", "--store", "sqlite://"+storePath, "--json", "env.component.inspect-readiness")
-	for _, out := range []string{replaceOut, inspectOut} {
+	documentedReplaceOut := runCLI(t, "environment", "components", "replace", "env.component.inspect-readiness", "--store", "sqlite://"+storePath, "--file", graphPath, "--json")
+	documentedInspectOut := runCLI(t, "environment", "components", "inspect", "env.component.inspect-readiness", "--store", "sqlite://"+storePath, "--json")
+	for _, out := range []string{replaceOut, inspectOut, documentedReplaceOut, documentedInspectOut} {
 		var payload struct {
 			ComponentGraph struct {
 				RestoreReadiness struct {
@@ -3287,7 +3366,7 @@ func TestEnvironmentRestoreFailsBeforeDockerWhenComposeFileIsMissing(t *testing.
 		"--verification-workflow", "workflow.core-10",
 	)
 
-	out := runCLIFails(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.missing.compose")
+	out := runCLIFails(t, "environment", "restore", "env.missing.compose", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json")
 	if !strings.Contains(out, "missing-compose-file") || !strings.Contains(out, "missing-compose.yml") {
 		t.Fatalf("missing compose restore output = %q", out)
 	}
@@ -5205,6 +5284,85 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 	if got := sqliteScalar(t, dbPath, "select value from kv where key = 'active_profile_id';"); got != "empty" {
 		t.Fatalf("active profile catalog index = %q", got)
+	}
+}
+
+func TestProfileImportReportsNodeCaseDiff(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeProfileWithCatalogCases(t, []string{"case.alpha"})
+	runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+dbPath)
+
+	profileDir = writeProfileWithCatalogCases(t, []string{"case.alpha", "case.beta"})
+	out := runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
+	var report struct {
+		Diff struct {
+			HasPreviousCatalog bool `json:"hasPreviousCatalog"`
+			APICases           struct {
+				Before int      `json:"before"`
+				After  int      `json:"after"`
+				Added  []string `json:"added"`
+			} `json:"apiCases"`
+			NodeCaseDeltas []struct {
+				NodeID string `json:"nodeId"`
+				Before int    `json:"before"`
+				After  int    `json:"after"`
+				Delta  int    `json:"delta"`
+			} `json:"nodeCaseDeltas"`
+		} `json:"diff"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode import diff: %v\n%s", err, out)
+	}
+	if !report.Diff.HasPreviousCatalog || report.Diff.APICases.Before != 1 || report.Diff.APICases.After != 2 || strings.Join(report.Diff.APICases.Added, ",") != "case.beta" {
+		t.Fatalf("import case diff = %#v", report.Diff.APICases)
+	}
+	if len(report.Diff.NodeCaseDeltas) != 1 || report.Diff.NodeCaseDeltas[0].NodeID != "node.alpha" || report.Diff.NodeCaseDeltas[0].Before != 1 || report.Diff.NodeCaseDeltas[0].After != 2 || report.Diff.NodeCaseDeltas[0].Delta != 1 {
+		t.Fatalf("import node deltas = %#v", report.Diff.NodeCaseDeltas)
+	}
+}
+
+func TestProfileDoctorAndRepairManifest(t *testing.T) {
+	profileDir := writeProfileWithCatalogCases(t, []string{"case.alpha", "case.beta"})
+	manifestPath := writeProfileRepairManifest(t, profileDir, []string{"case.beta"})
+	removeProfileCatalogCase(t, profileDir, "case.beta")
+	if err := os.Remove(filepath.Join(profileDir, "cases", "case.beta.json")); err != nil {
+		t.Fatalf("remove case file: %v", err)
+	}
+
+	out := runCLIFails(t, "profile", "doctor", "--profile", profileDir, "--case-id", "case.beta", "--json")
+	var doctorBefore profileDoctorReport
+	if err := json.Unmarshal([]byte(jsonPrefix(out)), &doctorBefore); err != nil {
+		t.Fatalf("decode doctor before repair: %v\n%s", err, out)
+	}
+	if doctorBefore.OK {
+		t.Fatalf("doctor should fail before repair: %#v", doctorBefore)
+	}
+
+	dryRunOut := runCLI(t, "profile", "repair", "--from-manifest", manifestPath, "--profile", profileDir, "--json")
+	var dryRun profileRepairReport
+	if err := json.Unmarshal([]byte(dryRunOut), &dryRun); err != nil {
+		t.Fatalf("decode dry-run repair: %v\n%s", err, dryRunOut)
+	}
+	if _, err := os.Stat(filepath.Join(profileDir, "cases", "case.beta.json")); dryRun.Applied || dryRun.Summary.CatalogCasesRestored != 1 || dryRun.Summary.CaseFilesRestored != 1 || err == nil {
+		t.Fatalf("dry-run repair = %#v", dryRun)
+	}
+
+	applyOut := runCLI(t, "profile", "repair", "--from-manifest", manifestPath, "--profile", profileDir, "--apply", "--json")
+	var applied profileRepairReport
+	if err := json.Unmarshal([]byte(applyOut), &applied); err != nil {
+		t.Fatalf("decode applied repair: %v\n%s", err, applyOut)
+	}
+	if !applied.Applied || applied.Summary.CatalogCasesRestored != 1 || applied.Summary.CaseFilesRestored != 1 {
+		t.Fatalf("applied repair = %#v", applied)
+	}
+
+	doctorOut := runCLI(t, "profile", "doctor", "--profile", profileDir, "--case-id", "case.beta", "--json")
+	var doctorAfter profileDoctorReport
+	if err := json.Unmarshal([]byte(doctorOut), &doctorAfter); err != nil {
+		t.Fatalf("decode doctor after repair: %v\n%s", err, doctorOut)
+	}
+	if !doctorAfter.OK {
+		t.Fatalf("doctor should pass after repair: %#v", doctorAfter)
 	}
 }
 
@@ -11180,6 +11338,124 @@ func writeInterfaceNodeCaseProfile(t *testing.T) string {
   ]
 }`)
 	return dir
+}
+
+func writeProfileWithCatalogCases(t *testing.T, caseIDs []string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha"}],
+  "apiCases": [],
+  "requestTemplates": [{"id":"tpl.alpha","nodeId":"node.alpha","method":"POST","path":"/alpha","templateJson":"{\"id\":\"{{serial:CASE}}\"}"}],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	var cases []map[string]any
+	for index, id := range caseIDs {
+		cases = append(cases, map[string]any{
+			"id":                id,
+			"nodeId":            "node.alpha",
+			"title":             "Case " + id,
+			"requestTemplateId": "tpl.alpha",
+			"expectedJson":      `{"expectedHttpCodes":[200]}`,
+			"status":            "active",
+			"sortOrder":         index + 1,
+		})
+		writeFile(t, filepath.Join(dir, "cases", id+".json"), `{"id":"`+id+`","nodeId":"node.alpha"}`)
+	}
+	rawCases, err := json.MarshalIndent(map[string]any{"interfaceNodeCases": cases}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal catalog cases: %v", err)
+	}
+	writeFile(t, filepath.Join(dir, "catalog.json"), string(rawCases))
+	return dir
+}
+
+func writeProfileRepairManifest(t *testing.T, profileDir string, caseIDs []string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(profileDir, "catalog.json"))
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+	var catalog struct {
+		InterfaceNodeCases []json.RawMessage `json:"interfaceNodeCases"`
+	}
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	want := map[string]bool{}
+	for _, id := range caseIDs {
+		want[id] = true
+	}
+	var selected []json.RawMessage
+	caseFiles := map[string]string{}
+	for _, item := range catalog.InterfaceNodeCases {
+		if !want[jsonID(item)] {
+			continue
+		}
+		selected = append(selected, item)
+		casePath := filepath.Join(profileDir, "cases", jsonID(item)+".json")
+		content, err := os.ReadFile(casePath)
+		if err != nil {
+			t.Fatalf("read case file: %v", err)
+		}
+		caseFiles[casePath] = string(content)
+	}
+	manifest := map[string]any{
+		"profilePath":  profileDir,
+		"catalogPath":  filepath.Join(profileDir, "catalog.json"),
+		"caseIds":      caseIDs,
+		"catalogCases": selected,
+		"caseFiles":    caseFiles,
+	}
+	rawManifest, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "repair-manifest.json")
+	writeFile(t, path, string(rawManifest))
+	return path
+}
+
+func removeProfileCatalogCase(t *testing.T, profileDir string, caseID string) {
+	t.Helper()
+	path := filepath.Join(profileDir, "catalog.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+	var catalog map[string]any
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	var kept []any
+	for _, item := range catalog["interfaceNodeCases"].([]any) {
+		rawItem, err := json.Marshal(item)
+		if err != nil {
+			t.Fatalf("marshal case: %v", err)
+		}
+		if jsonID(rawItem) != caseID {
+			kept = append(kept, item)
+		}
+	}
+	catalog["interfaceNodeCases"] = kept
+	out, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal catalog: %v", err)
+	}
+	writeFile(t, path, string(out))
+}
+
+func jsonPrefix(output string) string {
+	if index := strings.LastIndex(output, "\n}"); index >= 0 {
+		return output[:index+2]
+	}
+	return output
 }
 
 func writeInterfaceNodeCoverageProfile(t *testing.T) string {

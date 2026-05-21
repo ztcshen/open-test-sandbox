@@ -64,6 +64,7 @@ type apiCaseBatchCasePlan struct {
 	Overrides       map[string]any
 	Execution       *caseExecutionConfig
 	Exports         []map[string]any
+	Case            profile.APICase
 }
 
 type apiCaseBatchCaseReport struct {
@@ -437,6 +438,9 @@ func materializeAPICaseBatchExecution(ctx context.Context, bundle profile.Bundle
 	}
 	request, err := buildCaseHTTPRequest(ctx, bundle, runtime, *plan.Execution, plan.BaseURL, payload)
 	if err != nil {
+		return "", "", err
+	}
+	if err := applyAPICaseRequestModel(&request, plan.Case); err != nil {
 		return "", "", err
 	}
 	body := mapFromAny(request.body)
@@ -1201,6 +1205,7 @@ func apiCaseBatchNodePlans(ctx context.Context, bundle profile.Bundle, runtime s
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
 			Exports:         exports,
+			Case:            item,
 		})
 	}
 	return out
@@ -1269,6 +1274,7 @@ func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runt
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
 			Exports:         exports,
+			Case:            item,
 		})
 	}
 	return out
@@ -1329,6 +1335,7 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
 			Exports:         exports,
+			Case:            item,
 		})
 	}
 	return out
