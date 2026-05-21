@@ -136,8 +136,10 @@ func TestApplyAPICaseRequestModelPatchesEquivalentBodyFields(t *testing.T) {
 		method: "POST",
 		body: map[string]any{
 			"action": 20001,
+			"id":     "ROOT-ID",
 			"data": map[string]any{
 				"approvalStatus": 2,
+				"id":             "DATA-ID",
 				"orderId":        "ORDER-1",
 			},
 		},
@@ -160,6 +162,35 @@ func TestApplyAPICaseRequestModelPatchesEquivalentBodyFields(t *testing.T) {
 	}
 	if _, ok := data["orderId"]; ok {
 		t.Fatalf("orderId was not removed: %#v", data)
+	}
+	if body["id"] != "ROOT-ID" {
+		t.Fatalf("root id should not be patched by financing_order_id: %#v", body)
+	}
+	if data["id"] != "DATA-ID" {
+		t.Fatalf("nested id should not be patched by financing_order_id: %#v", data)
+	}
+}
+
+func TestApplyAPICaseJSONPatchRemovesRootArrayItem(t *testing.T) {
+	body := []any{
+		map[string]any{"name": "remove"},
+		map[string]any{"name": "keep"},
+	}
+
+	patched, err := applyAPICaseJSONPatch(body, `[{"op":"remove","path":"$[0]"}]`)
+	if err != nil {
+		t.Fatalf("apply patch: %v", err)
+	}
+	array, ok := patched.([]any)
+	if !ok {
+		t.Fatalf("patched body should remain an array: %#v", patched)
+	}
+	if len(array) != 1 {
+		t.Fatalf("array length = %d, body = %#v", len(array), array)
+	}
+	first, ok := array[0].(map[string]any)
+	if !ok || first["name"] != "keep" {
+		t.Fatalf("remaining item = %#v", array[0])
 	}
 }
 

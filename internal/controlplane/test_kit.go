@@ -836,11 +836,15 @@ func equivalentJSONFieldNames(key string) map[string]bool {
 	parts := strings.Split(strings.TrimSpace(key), "_")
 	candidates := map[string]bool{}
 	for index := 0; index < len(parts); index++ {
-		name := lowerCamelName(parts[index:])
+		aliasParts := parts[index:]
+		if index > 0 && len(aliasParts) < 2 {
+			continue
+		}
+		name := lowerCamelName(aliasParts)
 		if name != "" {
 			candidates[name] = true
 		}
-		identifierParts := append([]string(nil), parts[index:]...)
+		identifierParts := append([]string(nil), aliasParts...)
 		if len(identifierParts) > 0 && identifierParts[len(identifierParts)-1] == "no" {
 			identifierParts[len(identifierParts)-1] = "id"
 			if name := lowerCamelName(identifierParts); name != "" {
@@ -948,8 +952,10 @@ func applyAPICaseJSONPatch(body any, patchJSON string) (any, error) {
 			}
 			continue
 		}
-		if err := applyAPICaseJSONPatchOperation(next, segments, operation); err != nil {
-			return nil, err
+		var patchErr error
+		next, patchErr = applyAPICaseJSONPatchOperation(next, segments, operation)
+		if patchErr != nil {
+			return nil, patchErr
 		}
 	}
 	return next, nil
@@ -995,12 +1001,12 @@ func parseAPICaseJSONPath(path string) ([]apiCaseJSONPathSegment, error) {
 	return segments, nil
 }
 
-func applyAPICaseJSONPatchOperation(root any, segments []apiCaseJSONPathSegment, operation apiCaseJSONPatchOperation) error {
+func applyAPICaseJSONPatchOperation(root any, segments []apiCaseJSONPathSegment, operation apiCaseJSONPatchOperation) (any, error) {
 	parent := root
 	for _, segment := range segments[:len(segments)-1] {
 		next, ok := apiCaseJSONPathChild(parent, segment)
 		if !ok {
-			return fmt.Errorf("patch path not found: %s", operation.Path)
+			return root, fmt.Errorf("patch path not found: %s", operation.Path)
 		}
 		parent = next
 	}
@@ -1009,11 +1015,11 @@ func applyAPICaseJSONPatchOperation(root any, segments []apiCaseJSONPathSegment,
 	if last.Index != nil {
 		array, ok := parent.([]any)
 		if !ok {
-			return fmt.Errorf("patch path is not an array: %s", operation.Path)
+			return root, fmt.Errorf("patch path is not an array: %s", operation.Path)
 		}
 		index := *last.Index
 		if index < 0 || index >= len(array) {
-			return fmt.Errorf("patch array index out of range: %s", operation.Path)
+			return root, fmt.Errorf("patch array index out of range: %s", operation.Path)
 		}
 		switch op {
 		case "add", "replace":
@@ -1022,15 +1028,18 @@ func applyAPICaseJSONPatchOperation(root any, segments []apiCaseJSONPathSegment,
 			copy(array[index:], array[index+1:])
 			array[len(array)-1] = nil
 			array = array[:len(array)-1]
-			return assignAPICaseJSONPathChild(root, segments[:len(segments)-1], array)
+			if len(segments) == 1 {
+				return array, nil
+			}
+			return root, assignAPICaseJSONPathChild(root, segments[:len(segments)-1], array)
 		default:
-			return fmt.Errorf("unsupported patch op %q", operation.Op)
+			return root, fmt.Errorf("unsupported patch op %q", operation.Op)
 		}
-		return nil
+		return root, nil
 	}
 	object, ok := parent.(map[string]any)
 	if !ok {
-		return fmt.Errorf("patch path is not an object: %s", operation.Path)
+		return root, fmt.Errorf("patch path is not an object: %s", operation.Path)
 	}
 	switch op {
 	case "add", "replace":
@@ -1038,9 +1047,9 @@ func applyAPICaseJSONPatchOperation(root any, segments []apiCaseJSONPathSegment,
 	case "remove":
 		delete(object, last.Key)
 	default:
-		return fmt.Errorf("unsupported patch op %q", operation.Op)
+		return root, fmt.Errorf("unsupported patch op %q", operation.Op)
 	}
-	return nil
+	return root, nil
 }
 
 func apiCaseJSONPathChild(parent any, segment apiCaseJSONPathSegment) (any, bool) {
