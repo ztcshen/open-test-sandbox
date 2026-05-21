@@ -2373,3 +2373,28 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Run Records SQL Store Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added MySQL dialect coverage for SQL Store workflow run record creation.
+- Added MySQL dialect coverage for run lookup using `?` bind placeholders.
+- Verified MySQL run list readback keeps the same normalized JSON behavior as
+  the existing PostgreSQL path.
+
+Validated:
+
+- `go test -v ./internal/store/sqlstore -run 'TestStoreRecordsAndReadsRuns(ThroughDatabaseSQL|UseMySQLDialect)$' -count=1`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

@@ -80,6 +80,71 @@ func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {
 	}
 }
 
+func TestStoreRecordsAndReadsRunsUseMySQLDialect(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	s := sqlstore.New(db, sqlstore.MySQLDialect{})
+	started := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
+
+	created, err := s.CreateRun(ctx, store.Run{
+		ID:           "run-001",
+		ProfileID:    "profile.alpha",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusRunning,
+		EvidenceRoot: ".runtime/evidence/run-001",
+		SummaryJSON:  `{"stepCount":1}`,
+		StartedAt:    started,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {
+		t.Fatalf("created run timestamps = %#v", created)
+	}
+	exec := state.lastExec(t)
+	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") || strings.Contains(exec.query, "$1") {
+		t.Fatalf("create run query did not use mysql bind vars:\n%s", exec.query)
+	}
+	if exec.args[0] != "run-001" || exec.args[5] != `{"stepCount":1}` {
+		t.Fatalf("create run args = %#v", exec.args)
+	}
+
+	state.queueRows(fakeRows{
+		columns: []string{"id", "profile_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
+		values: [][]driver.Value{{
+			"run-001", "profile.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount": 1}`,
+			started.Format(time.RFC3339Nano), "", created.CreatedAt.Format(time.RFC3339Nano), created.UpdatedAt.Format(time.RFC3339Nano),
+		}},
+	})
+	loaded, err := s.GetRun(ctx, "run-001")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if loaded.ID != "run-001" || loaded.Status != store.StatusPassed || loaded.SummaryJSON != `{"stepCount":1}` || !loaded.StartedAt.Equal(started) {
+		t.Fatalf("loaded run = %#v", loaded)
+	}
+	query := state.lastQuery(t)
+	if !strings.Contains(query.query, "from runs where id = ?") || query.args[0] != "run-001" {
+		t.Fatalf("get run query = %#v", query)
+	}
+
+	state.queueRows(fakeRows{
+		columns: []string{"id", "profile_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
+		values: [][]driver.Value{{
+			"run-001", "profile.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount":1}`,
+			started.Format(time.RFC3339Nano), "", created.CreatedAt.Format(time.RFC3339Nano), created.UpdatedAt.Format(time.RFC3339Nano),
+		}},
+	})
+	runs, err := s.ListRuns(ctx)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != "run-001" {
+		t.Fatalf("runs = %#v", runs)
+	}
+}
+
 func TestPostgresStoreUsesNullForZeroTimestampArgs(t *testing.T) {
 	ctx := context.Background()
 	db, state := openFakeSQLDB(t)
