@@ -18,11 +18,12 @@ The current product direction is Store-first:
   separate sandbox project or repeatedly edit external configuration.
 - SQL Store is the active Store for current sandbox state, runtime facts,
   workflow catalog, execution state, Evidence indexes, and verification
-  results. PostgreSQL and MySQL are supported product Store engines. Local and
-  remote SQL Stores use the same daily commands; users switch the active
+  results. SQLite, PostgreSQL, and MySQL are supported SQL Store engines. Local
+  and remote SQL Stores use the same daily commands; users switch the active
   database through named Store config.
-- SQLite is retained for old local data import, compatibility checks, and tests.
-  It is not the product path for new daily workflows.
+- SQLite is useful for local and personal Stores; PostgreSQL and MySQL are
+  stronger fits for shared, remote, and multi-user Stores. Old local data
+  import remains a compatibility path.
 - Optional template packages may exist only for import, export, sharing, review,
   or migration. They are not the daily testing surface.
 - New functionality should expose Store-first APIs and UI flows before adding
@@ -43,8 +44,8 @@ and validation tools all read the same facts.
 
 ## Current Shape
 
-- **Store engines**: PostgreSQL and MySQL are the product SQL Store engines;
-  SQLite remains only for legacy migration, compatibility checks, and tests.
+- **Store engines**: SQLite, PostgreSQL, and MySQL are product SQL Store
+  engines with different operating boundaries.
 - **Daily workflow**: configure or switch a named Store once, then use the same
   CLI/API/UI commands for local and remote SQL Stores.
 - **Environment Catalog**: register environments, inspect bootstrap plans,
@@ -53,7 +54,7 @@ and validation tools all read the same facts.
   publish only verified environments.
 - **Acceptance proof**: verified environments require a passed workflow run,
   indexed Evidence, and real SkyWalking topology stored in the selected Store.
-- **Release gates**: generic PostgreSQL/MySQL `release-check` is wired; optional
+- **Release gates**: generic SQLite/PostgreSQL/MySQL `release-check` is wired; optional
   organization-owned real-environment sign-off can add the stricter two-stage
   real SkyWalking gate with externally supplied secrets and trace ids.
 
@@ -61,7 +62,7 @@ and validation tools all read the same facts.
 
 | Capability | What it means |
 | --- | --- |
-| SQL Store-first | Named PostgreSQL or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
+| SQL Store-first | Named SQLite, PostgreSQL, or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through sandbox APIs and UI discovery. |
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
@@ -96,15 +97,19 @@ OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmod
 # MySQL:
 OTSANDBOX_DEMO_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
+# SQLite:
+OTSANDBOX_DEMO_STORE="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run demo:api-case
+OTSANDBOX_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run release-check
 ```
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or
 `OTSANDBOX_DEMO_STORE=postgres://...` /
-`OTSANDBOX_DEMO_STORE=mysql://...`, and prints the Evidence bundle path. The
+`OTSANDBOX_DEMO_STORE=mysql://...` /
+`OTSANDBOX_DEMO_STORE=sqlite://...`, and prints the Evidence bundle path. The
 demo and release gate require dedicated MySQL Store database names that look
 like sandbox/smoke/test/CI targets; do not point them at an application schema. The
-release gate requires a PostgreSQL or MySQL smoke Store DSN.
+release gate requires a SQLite, PostgreSQL, or MySQL smoke Store DSN.
 It runs whitespace checks, generated-state checks, source-domain guardrails, Go
 tests, the demo, the React build, active SQL Store CLI smoke tests, and
 headless browser smoke tests.
@@ -124,7 +129,7 @@ report unavailable, failed, or skipped status instead of inventing a topology.
 
 ```text
 Sandbox APIs and UI
-  -> active SQL Store (PostgreSQL or MySQL)
+  -> active SQL Store (SQLite, PostgreSQL, or MySQL)
   -> catalog read-models
   -> Environment Catalog and component graph
   -> remote component repositories plus target Docker runtime
@@ -141,7 +146,7 @@ Core packages stay generic:
 - `internal/store/`: Store contract and runtime records.
 - `internal/store/postgres/`: PostgreSQL product Store backend.
 - `internal/store/mysql/`: MySQL product Store backend.
-- `internal/store/sqlite/`: legacy compatibility and migration backend.
+- `internal/store/sqlite/`: SQLite product Store backend for local and personal Stores.
 - `internal/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.
 - `internal/apicase/`: HTTP case runner and Evidence writer.
 - `control-plane/frontend/`: React workbench source.
@@ -156,7 +161,7 @@ Core packages stay generic:
 | [Share Kit](docs/share-kit.md) | Project tagline, short descriptions, demo script, and announcement snippets for sharing the project. |
 | [Roadmap](docs/roadmap.md) | Public development themes and contribution-friendly milestones. |
 | [API Case Format](docs/api-case-format.md) | Runnable HTTP case JSON and Evidence output contract. |
-| [Store Backends](docs/store-backends.md) | PostgreSQL/MySQL Store setup, MySQL safety guards, and SQLite compatibility boundary. |
+| [Store Backends](docs/store-backends.md) | SQLite/PostgreSQL/MySQL Store setup, MySQL safety guards, and Store boundaries. |
 | [CLI and API Contracts](docs/cli-api-contracts.md) | Agent/CI discovery, Environment Catalog lifecycle, reports, asynchronous batches, topology collection, and failed-case Evidence lookup. |
 | [Release Checklist](docs/release-checklist.md) | Local gates, CI gates, real SkyWalking requirements, and optional real-environment sign-off. |
 | [Visual Overview](docs/core-capabilities-skills-goals.html) | Bilingual capability map, API surface, data flow, and goals. |
@@ -181,7 +186,7 @@ target product model.
 
 Current working areas:
 
-- Store lifecycle: named PostgreSQL/MySQL config, active Store switching,
+- Store lifecycle: named SQLite/PostgreSQL/MySQL config, active Store switching,
   backend-specific DDL, schema status/upgrade, and contract tests.
 - Catalog maintenance: API case metadata, searchable case catalog, request
   templates, fixtures, dependencies, workflow bindings, and suite coverage.
@@ -190,7 +195,7 @@ Current working areas:
 - Evidence: request, response, assertions, summaries, logs, topology, timing,
   artifact manifests, failure summaries, and redaction for sensitive fields.
 - Environment Catalog: Store-backed environment register/discover/inspect,
-  bootstrap plan, restore diagnostics, component graph readiness, remote service
+  bootstrap plan, restore diagnostics, component graph readiness, remote component
   repository preparation, Docker Compose/start orchestration, health gates,
   acceptance workflow recording, and verified publishing gates.
 - Workbench: local React pages backed by Control plane APIs for catalog,

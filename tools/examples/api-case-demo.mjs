@@ -76,7 +76,7 @@ function run(args) {
 }
 
 function isProductSQLStore(reference) {
-  return /^(postgres(?:ql)?|mysql):\/\//i.test(String(reference || ""));
+  return /^(postgres(?:ql)?|mysql|sqlite):\/\//i.test(String(reference || "")) || /^file:/i.test(String(reference || ""));
 }
 
 function isSQLiteStore(reference) {
@@ -91,11 +91,11 @@ export function demoStore(tempDir, env = process.env) {
   const explicitStore = env.OTSANDBOX_DEMO_STORE || env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
   const sqliteCompat = flagEnabled(env.OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO);
   if (explicitStore.trim()) {
-    if (isSQLiteStore(explicitStore) && !sqliteCompat) {
-      throw new Error("SQLite demo Store requires OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1; use OTSANDBOX_DEMO_STORE=postgres://... or OTSANDBOX_DEMO_STORE=mysql://... for the product path");
+    if (isSQLiteStore(explicitStore) && flagEnabled(env.OTSANDBOX_DISABLE_SQLITE_STORE)) {
+      throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite demo Store");
     }
-    if (explicitStore.includes("://") && !isProductSQLStore(explicitStore) && !sqliteCompat) {
-      throw new Error("Demo Store must be OTSANDBOX_DEMO_STORE=postgres://... or OTSANDBOX_DEMO_STORE=mysql://... unless SQLite compatibility is explicit");
+    if (explicitStore.includes("://") && !isProductSQLStore(explicitStore)) {
+      throw new Error("Demo Store must be OTSANDBOX_DEMO_STORE=postgres://..., OTSANDBOX_DEMO_STORE=mysql://..., or OTSANDBOX_DEMO_STORE=sqlite://PATH");
     }
     if (/^mysql:\/\//i.test(explicitStore)) {
       requireSafeMySQLStoreDSN(explicitStore, { label: "The API case demo" });
@@ -107,7 +107,7 @@ export function demoStore(tempDir, env = process.env) {
       throw new Error("OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO cannot be combined with OTSANDBOX_DISABLE_SQLITE_STORE");
     }
     const storeRef = `sqlite://${path.join(tempDir, "store.sqlite")}`;
-    return { label: storeRef, storeArgs: ["--store", storeRef], upgradeArgs: ["--store", storeRef], sqliteCompat: true };
+    return { label: storeRef, storeArgs: ["--store", storeRef], upgradeArgs: ["--store", storeRef] };
   }
   return { label: "active Store", storeArgs: [], upgradeArgs: [] };
 }
@@ -119,9 +119,7 @@ async function main() {
   try {
     const evidenceDir = path.join(tempDir, "evidence");
     const store = demoStore(tempDir);
-    if (!store.sqliteCompat) {
-      await run(["store", "upgrade", ...store.upgradeArgs]);
-    }
+    await run(["store", "upgrade", ...store.upgradeArgs]);
     const output = await run([
       "case",
       "run",

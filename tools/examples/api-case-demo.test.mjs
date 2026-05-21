@@ -39,20 +39,20 @@ describe("api-case demo Store selection", () => {
     assert.deepEqual(store.upgradeArgs, ["--store", "local-personal"]);
   });
 
-  it("rejects an explicit SQLite Store unless compatibility mode is enabled", () => {
-    assert.throws(
-      () => demoStore("/tmp/ots-demo", { OTSANDBOX_DEMO_STORE: "sqlite:///tmp/ots-demo/store.sqlite" }),
-      /OTSANDBOX_DEMO_STORE=mysql:\/\/\.\.\./,
-    );
+  it("uses an explicit SQLite demo Store", () => {
+    const store = demoStore("/tmp/ots-demo", { OTSANDBOX_DEMO_STORE: "sqlite:///tmp/ots-demo/store.sqlite" });
+    assert.equal(store.label, "sqlite:///tmp/ots-demo/store.sqlite");
+    assert.deepEqual(store.storeArgs, ["--store", store.label]);
+    assert.deepEqual(store.upgradeArgs, ["--store", store.label]);
   });
 
-  it("keeps SQLite demo behind an explicit compatibility switch", () => {
+  it("can create a temporary SQLite demo Store", () => {
     const store = demoStore("/tmp/ots-demo", { OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO: "1" });
     assert.equal(store.label, "sqlite:///tmp/ots-demo/store.sqlite");
-    assert.equal(store.sqliteCompat, true);
+    assert.deepEqual(store.storeArgs, ["--store", store.label]);
   });
 
-  it("rejects contradictory SQLite compatibility flags", () => {
+  it("rejects contradictory temporary SQLite flags", () => {
     assert.throws(
       () => demoStore("/tmp/ots-demo", { OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO: "1", OTSANDBOX_DISABLE_SQLITE_STORE: "1" }),
       /cannot be combined/,

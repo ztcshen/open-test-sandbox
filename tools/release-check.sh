@@ -16,6 +16,10 @@ is_mysql_store_dsn() {
   [[ "$1" =~ ^[Mm][Yy][Ss][Qq][Ll]:// ]]
 }
 
+is_sqlite_store_dsn() {
+  [[ "$1" =~ ^([Ss][Qq][Ll][Ii][Tt][Ee]://|[Ff][Ii][Ll][Ee]:) ]]
+}
+
 step "checking whitespace"
 git diff --check
 
@@ -25,6 +29,7 @@ if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
   echo "SQL Store examples:" >&2
   echo "PostgreSQL: OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check" >&2
   echo "MySQL: OTSANDBOX_SMOKE_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check" >&2
+  echo "SQLite: OTSANDBOX_SMOKE_STORE='sqlite:///tmp/otsandbox-smoke.sqlite' npm run release-check" >&2
   exit 1
 fi
 smoke_store_dsn="${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}"
@@ -47,8 +52,13 @@ elif is_mysql_store_dsn "$smoke_store_dsn"; then
   fi
   export OTSANDBOX_MYSQL_TEST_DSN="${OTSANDBOX_MYSQL_TEST_DSN:-$smoke_store_dsn}"
   export OTSANDBOX_MYSQL_TEST_DSN_MODE="${OTSANDBOX_MYSQL_TEST_DSN_MODE:-existing}"
+elif is_sqlite_store_dsn "$smoke_store_dsn"; then
+  if [[ "${OTSANDBOX_DISABLE_SQLITE_STORE:-}" == "1" ]]; then
+    echo "OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite release-check Store." >&2
+    exit 1
+  fi
 else
-  echo "OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be postgres://, postgresql://, or mysql://." >&2
+  echo "OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be postgres://, postgresql://, mysql://, sqlite://, or file:." >&2
   exit 1
 fi
 
@@ -95,7 +105,11 @@ step "running Go tests"
 go test ./... -count=1
 
 step "running generic API case demo"
-OTSANDBOX_CLEAN_DEMO_OUTPUT=1 OTSANDBOX_DISABLE_SQLITE_STORE=1 OTSANDBOX_DEMO_STORE="${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" npm run demo:api-case
+if is_sqlite_store_dsn "$smoke_store_dsn"; then
+  OTSANDBOX_CLEAN_DEMO_OUTPUT=1 OTSANDBOX_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
+else
+  OTSANDBOX_CLEAN_DEMO_OUTPUT=1 OTSANDBOX_DISABLE_SQLITE_STORE=1 OTSANDBOX_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
+fi
 
 step "building React workbench"
 npm run build:frontend

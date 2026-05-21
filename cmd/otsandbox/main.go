@@ -246,6 +246,7 @@ Usage:
   otsandbox version
   otsandbox store config set NAME --url postgres://...
   otsandbox store config set NAME --url mysql://...
+  otsandbox store config set NAME --url sqlite://PATH
   otsandbox store config list [--json]
   otsandbox store use NAME
   otsandbox store current [--json]
@@ -1306,7 +1307,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	workspace := flags.String("workspace", "", "Local workspace for cloned or existing service checkouts")
-	execute := flags.Bool("execute", false, "Clone or update service repositories, run Docker Compose, and wait for health checks")
+	execute := flags.Bool("execute", false, "Clone or update component repositories, run Docker Compose, and wait for health checks")
 	pull := flags.Bool("pull", false, "Run git pull --ff-only for existing checkouts when --execute is set")
 	prepareReposOnly := flags.Bool("prepare-repos-only", false, "When --execute is set, clone or validate repositories and stop before Docker startup")
 	runWorkflow := flags.Bool("run-workflow", false, "Run the environment verification workflow after Docker health checks pass")
@@ -1725,7 +1726,7 @@ func environmentRestoreCleanMachinePrerequisites(report environmentRestoreReport
 			Name:     "sql-store",
 			Required: true,
 			OK:       environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL),
-			Detail:   "configure the named PostgreSQL or MySQL Store before running restore; the Store must stay outside the target Docker environment",
+			Detail:   "configure the named SQL Store before running restore; the Store must stay outside the target Docker environment",
 		},
 	}
 	for _, tool := range report.Preflight.Tools {
@@ -2374,7 +2375,7 @@ func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs
 		report.Violations = append(report.Violations, label+" must use a remote Git URL, got local path/source: "+rawURL)
 	}
 	for _, spec := range specs {
-		addViolation("service "+spec.ServiceID, spec.URL)
+		addViolation("component "+spec.ServiceID, spec.URL)
 	}
 	return report
 }
@@ -2794,7 +2795,7 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 		addItem("docker-container-conflicts", true, true, "no existing Docker container_name conflicts detected for non-destructive restore")
 	}
 	if report.SourcePolicy.RemoteOnly {
-		detail := "all service source repositories must be remote Git URLs for SQL Store-backed one-click environments; environment startup files come from compact Store metadata"
+		detail := "all component source repositories must be remote Git URLs for SQL Store-backed one-click environments; environment startup files come from compact Store metadata"
 		if len(report.SourcePolicy.Violations) > 0 {
 			detail = strings.Join(report.SourcePolicy.Violations, "; ")
 		}
@@ -2823,11 +2824,11 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	}
 	switch {
 	case len(specs) == 0:
-		addItem("service-repositories", true, true, "no service repositories recorded; Docker uses the recorded compose/start plan and existing local context")
+		addItem("component-repositories", true, true, "no component repositories recorded; Docker uses the recorded compose/start plan and existing local context")
 	case report.Executed:
-		addItem("service-repositories", true, repoOK, fmt.Sprintf("%d service repository checkout(s) prepared before Docker startup", len(specs)))
+		addItem("component-repositories", true, repoOK, fmt.Sprintf("%d component repository checkout(s) prepared before Docker startup", len(specs)))
 	default:
-		addItem("service-repositories", true, repoOK, fmt.Sprintf("%d service repository checkout(s) will be cloned or validated before Docker startup", len(specs)))
+		addItem("component-repositories", true, repoOK, fmt.Sprintf("%d component repository checkout(s) will be cloned or validated before Docker startup", len(specs)))
 	}
 
 	dockerPlanOK := report.Docker.OK && (report.Docker.Action == "plan-docker-compose" || report.Docker.Action == "run-docker-compose" || report.Docker.Action == "plan-start-command" || report.Docker.Action == "run-start-command" || report.Docker.Action == "plan-use-existing-containers" || report.Docker.Action == "use-existing-containers" || report.Docker.Action == "skipped-after-repository-preparation")
@@ -2907,7 +2908,7 @@ func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) st
 	case "skipped-after-repository-preparation":
 		return "repository preparation completed; Docker startup intentionally skipped"
 	case "skipped-due-to-source-policy":
-		return "Docker startup is blocked until package and service sources use remote Git URLs"
+		return "Docker startup is blocked until package and component sources use remote Git URLs"
 	case "missing-docker-plan":
 		return "composeFile or startCommand is required"
 	default:
@@ -6100,7 +6101,7 @@ func initProfileBundle(outputPath string, profileID string, displayName string, 
 	}
 	readmePath := filepath.Join(outputPath, "README.md")
 	if _, err := os.Stat(readmePath); errors.Is(err, os.ErrNotExist) || force {
-		body := "# External Profile Bundle\n\nPublish this bundle into the selected PostgreSQL or MySQL Store before serving it through Open Test Sandbox:\n\n```sh\notsandbox store use local-personal\notsandbox config publish --from . --store local-personal\notsandbox serve --profile . --store local-personal\n```\n"
+		body := "# External Profile Bundle\n\nPublish this bundle into the selected SQL Store before serving it through Open Test Sandbox:\n\n```sh\notsandbox store use local-personal\notsandbox config publish --from . --store local-personal\notsandbox serve --profile . --store local-personal\n```\n"
 		if err := os.WriteFile(readmePath, []byte(body), 0o644); err != nil {
 			return profileInitReport{}, err
 		}
@@ -8269,7 +8270,7 @@ func executeInterfaceNodeCaseReport(ctx context.Context, bundle profile.Bundle, 
 
 func requiredReportStore(sourceStore store.Store) (store.Store, error) {
 	if sourceStore == nil {
-		return nil, errors.New("daily report execution requires an active Store or --store NAME_OR_DSN; hidden SQLite runtime stores are not allowed")
+		return nil, errors.New("daily report execution requires an active Store or --store NAME_OR_DSN")
 	}
 	return sourceStore, nil
 }

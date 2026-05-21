@@ -9,6 +9,12 @@ test("active SQL Store CLI smoke accepts shared Store env", () => {
   assert.equal(requiredSQLStoreDSN({ OTSANDBOX_SMOKE_STORE: dsn }), dsn);
 });
 
+test("active SQL Store CLI smoke accepts SQLite Store env", () => {
+  const dsn = "sqlite:///tmp/otsandbox.sqlite";
+
+  assert.equal(requiredSQLStoreDSN({ OTSANDBOX_SMOKE_STORE: dsn }), dsn);
+});
+
 test("active SQL Store CLI smoke documents every supported Store env", () => {
   assert.throws(
     () => requiredSQLStoreDSN({}),
@@ -16,10 +22,17 @@ test("active SQL Store CLI smoke documents every supported Store env", () => {
   );
 });
 
-test("active SQL Store CLI smoke rejects non-SQL shared Store env", () => {
+test("active SQL Store CLI smoke rejects unsupported shared Store env", () => {
   assert.throws(
-    () => requiredSQLStoreDSN({ OTSANDBOX_SMOKE_STORE: "sqlite:///tmp/otsandbox.sqlite" }),
-    /requires a PostgreSQL or MySQL DSN/,
+    () => requiredSQLStoreDSN({ OTSANDBOX_SMOKE_STORE: "redis://127.0.0.1:6379/0" }),
+    /requires a PostgreSQL, MySQL, or SQLite DSN/,
+  );
+});
+
+test("active SQL Store CLI smoke rejects disabled SQLite Store env", () => {
+  assert.throws(
+    () => requiredSQLStoreDSN({ OTSANDBOX_SMOKE_STORE: "sqlite:///tmp/otsandbox.sqlite", OTSANDBOX_DISABLE_SQLITE_STORE: "1" }),
+    /cannot be combined/,
   );
 });
 

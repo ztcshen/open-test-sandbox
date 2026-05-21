@@ -100,11 +100,10 @@ The gate verifies:
 Do not mark the SQL Store-first line complete until current evidence proves all
 of these items:
 
-- daily CLI/API/workbench paths use the active named PostgreSQL/MySQL Store or
-  explicit `--store NAME_OR_DSN`; compatibility SQLite paths remain isolated to
-  migration, import, and historical tests;
-- active or named SQLite Store configs are rejected by daily commands with
-  migration/compatibility guidance;
+- daily CLI/API/workbench paths use the active named SQLite/PostgreSQL/MySQL
+  Store or explicit `--store NAME_OR_DSN`;
+- active or named SQLite Store configs use the same daily command shape as
+  PostgreSQL and MySQL;
 - deprecated `--store-url` does not appear as a normal daily path and bare local
   paths are not accepted by daily commands;
 - local execution paths, including `environment bootstrap`, `sandbox service

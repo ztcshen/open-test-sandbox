@@ -27,9 +27,12 @@ OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmod
 # MySQL:
 OTSANDBOX_DEMO_STORE="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
+# SQLite:
+OTSANDBOX_DEMO_STORE="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run demo:api-case
+OTSANDBOX_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run release-check
 ```
 
-The release check requires a PostgreSQL or MySQL smoke Store DSN. It runs Go
+The release check requires a SQLite, PostgreSQL, or MySQL smoke Store DSN. It runs Go
 tests, the source-domain guardrail, the React build, active SQL Store CLI
 smoke, and a SQL Store headless browser smoke test against a generated generic import
 bundle. For final live topology sign-off, add
@@ -39,7 +42,8 @@ for every configured workflow step so release-check fails instead of using the
 synthetic SkyWalking provider or a partial trace-id set.
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store, or
-`OTSANDBOX_DEMO_STORE=postgres://...` / `OTSANDBOX_DEMO_STORE=mysql://...`, and
+`OTSANDBOX_DEMO_STORE=postgres://...` / `OTSANDBOX_DEMO_STORE=mysql://...` /
+`OTSANDBOX_DEMO_STORE=sqlite://...`, and
 prints the Evidence bundle path.
 MySQL demo Stores must use dedicated sandbox/smoke/test/CI-looking database
 names and must not point at application schemas.
@@ -63,11 +67,16 @@ automatically.
 ./bin/otsandbox.sh store status --store team-mysql
 ./bin/otsandbox.sh store upgrade --store team-mysql
 ./bin/otsandbox.sh store ddl --store team-mysql > otsandbox-mysql-schema.sql
+
+./bin/otsandbox.sh store config set local-sqlite \
+  --url "sqlite://$PWD/.runtime/otsandbox-local.sqlite"
+./bin/otsandbox.sh store use local-sqlite
+./bin/otsandbox.sh store status --store local-sqlite
+./bin/otsandbox.sh store upgrade --store local-sqlite
 ```
 
-Use a private PostgreSQL or MySQL database for unverified local work and a
-separate shared database for verified team environments. SQLite is kept only
-for legacy compatibility while SQL Store rollout continues.
+Use a private SQLite, PostgreSQL, or MySQL Store for unverified local work and a
+separate shared PostgreSQL or MySQL database for verified team environments.
 The Open Test Sandbox Store is the control-plane database and should already
 exist outside any Docker environment restored for a tested target. Do not point
 the Store DSN at a Docker database that `environment restore` is responsible
@@ -156,7 +165,7 @@ launcher. The SQL Store stores compact source pointers and restore rules, not
 source archives, Docker images, logs, or Evidence payloads. For
 SQL Store-backed one-click environments, source pointers must be cloneable
 remote Git URLs, including private GitLab and public GitHub repositories. Local
-paths are reserved for SQLite compatibility tests and ad-hoc development, not
+paths are reserved for compatibility tests and ad-hoc development, not
 published one-click environments. Component repositories contain the code
 mounted or built by Compose; component-owned Store assets contain only bounded
 startup/config material such as generated Compose files, small cert/key
@@ -288,8 +297,8 @@ the active SQL Store, Environment Catalog, CLI/API discovery, and the workbench.
 Open `http://127.0.0.1:18191/`.
 
 SQL Store is the target for daily testing workflows. The same CLI commands work
-for a local PostgreSQL/MySQL database or a remote team PostgreSQL/MySQL
-database; switch the selected Store with `store use NAME` or override one
+for a local SQLite/PostgreSQL/MySQL Store or a remote team PostgreSQL/MySQL
+Store; switch the selected Store with `store use NAME` or override one
 command with `--store NAME_OR_DSN`.
 
 ## Next Steps

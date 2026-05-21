@@ -3,9 +3,10 @@
 Open Test Sandbox treats the Store as a pluggable database backend. Users pick
 one backend for a workspace or team, and daily CLI/API/UI commands operate
 against the selected Store without changing command shape. The active product
-path is SQL Store-first: PostgreSQL and MySQL are supported product Store
-engines, and teams should choose the engine that matches their operational
-environment. The Store holds environment catalogs, component graph metadata,
+path is SQL Store-first: SQLite, PostgreSQL, and MySQL are supported Store
+engines, and users should choose the engine that matches their operational
+boundary. SQLite is useful for local and personal Stores; PostgreSQL and MySQL
+are better fits for shared, remote, and multi-user Stores. The Store holds environment catalogs, component graph metadata,
 service and interface registrations, workflows, maintained API cases, run
 records, Evidence indexes, trace topology indexes, baseline gates, timing data,
 and post-process task state. Evidence files and local logs may still live on
@@ -17,14 +18,14 @@ The code path for opening a Store is centralized in `internal/store/open`, and
 database-specific SQL differences live behind `internal/store/sqlstore`
 dialects. Command handlers and the control-plane should depend on the
 `store.Store` contract instead of importing a concrete database package
-directly. This keeps PostgreSQL, MySQL, and SQLite compatibility from leaking
+directly. This keeps PostgreSQL, MySQL, and SQLite specifics from leaking
 into daily workflow commands.
 
 Supported backend families:
 
+- SQLite: active product Store engine for local and personal Stores.
 - PostgreSQL: active product Store engine for personal and team Stores.
-- MySQL: active product path for organizations that require MySQL Stores.
-- SQLite: compatibility backend for migration, old local runs, and tests.
+- MySQL: active product Store engine for organizations that require MySQL Stores.
 
 Dialect responsibilities:
 
@@ -60,9 +61,9 @@ Current SQL Store schema boundaries:
 
 ## SQL Store First
 
-Use one PostgreSQL or MySQL database per isolation boundary:
+Use one SQL Store per isolation boundary:
 
-- `local-personal`: a private database for unverified local work.
+- `local-personal`: a private SQLite, PostgreSQL, or MySQL Store for unverified local work.
 - `team-verified`: a shared database for verified environments and reusable
   cases.
 
@@ -72,6 +73,7 @@ Configure named Stores with:
 otsandbox store config set local-personal --url postgres://user:pass@host:5432/otsandbox_local?sslmode=disable
 otsandbox store config set team-verified --url postgres://user:pass@host:5432/otsandbox_team?sslmode=disable
 otsandbox store config set team-mysql --url mysql://user:pass@host:3306/otsandbox_team?tls=false
+otsandbox store config set local-sqlite --url sqlite://$PWD/.runtime/otsandbox-local.sqlite
 otsandbox store use local-personal
 otsandbox store current
 ```
@@ -99,8 +101,8 @@ CLI/API commands read and write the active Store unless that explicit override
 is present. Legacy `--store-url` remains accepted during migration and import
 tests.
 
-The command shape is location- and engine-agnostic. A local PostgreSQL
-database, a remote team PostgreSQL database, and a remote team MySQL database
+The command shape is location- and engine-agnostic. A local SQLite Store, a
+local PostgreSQL database, a remote team PostgreSQL database, and a remote team MySQL database
 use the same daily commands; only the selected Store changes:
 
 ```sh
@@ -113,6 +115,7 @@ otsandbox case discover --filter refund
 otsandbox case discover --store team-verified --filter refund
 otsandbox workflow discover --store postgres://user:pass@host:5432/team_verified --filter checkout
 otsandbox workflow discover --store mysql://user:pass@host:3306/team_verified --filter checkout
+otsandbox workflow discover --store sqlite://$PWD/.runtime/otsandbox-local.sqlite --filter checkout
 ```
 
 ## Environment Catalog
@@ -142,17 +145,19 @@ nodes, and edges. This verified-environment gate is stricter than deterministic
 local smoke: local synthetic provider rows do not replace live endpoint
 validation for team-ready environments.
 
-## SQLite Compatibility
+## SQLite Store
 
-SQLite is no longer the product target for new daily workflows. It remains a
-compatibility path for old local runs, legacy Evidence import, and tests that
-exercise historical behavior while the SQL Store path is being rolled in.
+SQLite is a supported SQL Store engine for local and personal workflows. It
+uses the same `--store NAME_OR_DSN`, active Store config, schema upgrade,
+Environment Catalog, case execution, workflow execution, Evidence index, and
+report paths as PostgreSQL and MySQL.
 
-Do not add new daily testing behavior that only works with SQLite.
-Daily execution/report commands must not create a hidden SQLite runtime when
-the selected Store is PostgreSQL or MySQL. The inverse also holds for compatibility
-runs: a command uses the selected Store engine end to end, and missing Store
-configuration fails with guidance instead of switching to another engine.
+Do not add daily testing behavior that only works with SQLite. Daily
+execution/report commands must use the selected Store engine end to end and
+must not create a hidden SQLite runtime when another Store is selected. Missing
+Store configuration fails with guidance instead of switching engines. The
+deprecated `--store-url` flag remains reserved for migration and compatibility
+commands; daily commands should use `--store NAME_OR_DSN` or a named Store.
 
 ## SQL Store Validation
 
@@ -214,7 +219,7 @@ This is the repeatable equivalent of taking the local SQLite path offline before
 running the core workflow. When `OTSANDBOX_SMOKE_STORE_DSN` is present, the smoke
 harness configures a temporary named Store, selects it as active, upgrades the
 schema, and serves the workbench through that named Store. The smoke must still
-complete through the selected PostgreSQL or MySQL Store.
+complete through the selected SQLite, PostgreSQL, or MySQL Store.
 
 Smoke topology collection uses a deterministic synthetic SkyWalking GraphQL
 provider unless `OTS_TRACE_GRAPHQL_URL` is set. That provider is only a local
@@ -228,7 +233,8 @@ mappings for every configured workflow step. When no SkyWalking endpoint is
 configured, product paths must report topology as unavailable, failed, or
 skipped rather than generating an invented topology.
 
-SQLite smoke or demo execution is available only for explicit compatibility
-checks with `OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE=1` or
-`OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1`. Do not combine those compatibility
-switches with `OTSANDBOX_DISABLE_SQLITE_STORE=1`.
+SQLite smoke and demo execution can use an explicit `sqlite://` or `file:` DSN.
+The `OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE=1` and
+`OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1` switches remain as convenience shortcuts
+for temporary local SQLite Stores. Do not combine SQLite smoke or demo inputs
+with `OTSANDBOX_DISABLE_SQLITE_STORE=1`.

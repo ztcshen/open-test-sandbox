@@ -2,7 +2,7 @@
 
 A template package is a reviewable import/export artifact kept outside the Open
 Test Sandbox core repository. It is useful for sharing, migration, and review,
-but daily testing should use the active PostgreSQL/MySQL SQL Store. The minimum
+but daily testing should use the active SQLite/PostgreSQL/MySQL SQL Store. The minimum
 package contains a `profile.json` manifest during the legacy schema transition.
 
 ```json

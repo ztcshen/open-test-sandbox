@@ -328,16 +328,19 @@ export async function prepareSmokeStoreReference(tempDir, env = process.env, run
       }
       return { storeRef: `sqlite://${path.join(tempDir, "store.sqlite")}`, serverEnv: env };
     }
-    throw new Error("set OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE to a PostgreSQL or MySQL Store DSN for smoke validation");
+    throw new Error("set OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE to a PostgreSQL, MySQL, or SQLite Store DSN for smoke validation");
   }
-  const backend = /^postgres(?:ql)?:\/\//i.test(smokeStoreDSN) ? "postgres" : /^mysql:\/\//i.test(smokeStoreDSN) ? "mysql" : "";
+  const backend = /^postgres(?:ql)?:\/\//i.test(smokeStoreDSN) ? "postgres" : /^mysql:\/\//i.test(smokeStoreDSN) ? "mysql" : /^(sqlite:\/\/|file:)/i.test(smokeStoreDSN) ? "sqlite" : "";
   if (!backend) {
-    throw new Error("OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be a PostgreSQL or MySQL Store DSN");
+    throw new Error("OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be a PostgreSQL, MySQL, or SQLite Store DSN");
+  }
+  if (backend === "sqlite" && /^(1|true|yes|on)$/i.test(env.OTSANDBOX_DISABLE_SQLITE_STORE || "")) {
+    throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite smoke Store DSN");
   }
   if (backend === "mysql") {
     requireSafeMySQLStoreDSN(smokeStoreDSN, { label: "The control-plane smoke" });
   }
-  const storeName = backend === "mysql" ? "smoke-mysql" : "smoke-postgres";
+  const storeName = backend === "mysql" ? "smoke-mysql" : backend === "sqlite" ? "smoke-sqlite" : "smoke-postgres";
   const configHome = path.join(tempDir, "store-config");
   await mkdir(configHome, { recursive: true });
   const serverEnv = { ...env, OTSANDBOX_CONFIG_HOME: configHome };

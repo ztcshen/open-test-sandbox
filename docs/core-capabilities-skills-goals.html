@@ -543,7 +543,7 @@
       <aside class="hero-side panel">
         <div class="metric"><strong>Core</strong><span>CLI + Control plane + Store + Runner + Evidence + Reports</span></div>
         <div class="metric"><strong>Store-first</strong><span>默认使用当前 active Store；PostgreSQL 与 MySQL 是并列产品 Store 引擎。Uses the active Store by default; PostgreSQL and MySQL are peer product Store engines.</span></div>
-        <div class="metric"><strong>Store-first</strong><span>核心不携带团队场景，配置从外部发布。Team scenarios live in external current state bundles.</span></div>
+        <div class="metric"><strong>Generic Core</strong><span>核心不携带团队场景，配置从外部模板包或 Store 记录发布。Team scenarios live in external template packages or Store records.</span></div>
       </aside>
     </header>
 
@@ -577,10 +577,10 @@
     <section id="core">
       <div class="section-head">
         <h2>核心能力分层 / Core Capability Layers</h2>
-        <p class="note">当前核心后端已经具备完整的“配置发布 -> 发现目标 -> 执行 -> 记录 -> 报告”闭环。The backend already supports the full loop from config publishing to discovery, execution, recording, and reports.</p>
+        <p class="note">当前核心后端已经具备完整的“配置发布 -> 发现目标 -> 执行 -> 记录 -> 报告”闭环。The backend already supports the full loop from configuration publishing to discovery, execution, recording, and reports.</p>
       </div>
       <div class="grid">
-        <article class="card"><div class="kicker">Configuration</div><h3>外部配置包生命周期</h3><p>创建、安装、打包、审计、校验、发布。配置文件保留为可审阅源资产，Store 作为索引和运行态视图。</p><div class="cmds"><code>current state init</code><code>current state install</code><code>current state pack</code><code>config publish</code></div></article>
+        <article class="card"><div class="kicker">Configuration</div><h3>外部模板包生命周期</h3><p>创建、安装、打包、审计、校验、发布。配置文件保留为可审阅源资产，Store 作为索引和运行态视图。</p><div class="cmds"><code>template-package init</code><code>template-package install</code><code>template-package pack</code><code>config publish</code></div></article>
         <article class="card"><div class="kicker">Catalog</div><h3>目录与 read-model</h3><p>将外部配置转换为服务、工作流、接口节点、用例、夹具、绑定和模板配置目录，并生成页面可读模型。</p><div class="cmds"><code>/api/catalog</code><code>/api/dashboard</code><code>GetCatalog</code></div></article>
         <article class="card"><div class="kicker">Discovery</div><h3>目标发现</h3><p>面向 agent 的第一步能力。支持过滤候选，但不替 report 命令做隐式解析。</p><div class="cmds"><code>interface-node discover</code><code>workflow discover</code></div></article>
         <article class="card"><div class="kicker">Execution</div><h3>用例与工作流执行</h3><p>支持独立 API case、接口节点全量报告、工作流报告、HTTP batch runner 和测试适配执行。</p><div class="cmds"><code>case run</code><code>case report</code><code>workflow report</code><code>/api/test-kit/run</code></div></article>
@@ -592,12 +592,12 @@
     <section id="backend">
       <div class="section-head">
         <h2>后端能力总览 / Backend Capability Overview</h2>
-        <p class="note">当前后端不是单一 runner，而是一套本地控制平面：配置进入 Store，执行产生 Evidence，报告和页面再从同一份事实读取。The backend is a local control plane: current states publish into Store, execution writes Evidence, and reports/pages read the same facts.</p>
+        <p class="note">当前后端不是单一 runner，而是一套本地控制平面：配置进入 Store，执行产生 Evidence，报告和页面再从同一份事实读取。The backend is a local control plane: template packages publish into Store, execution writes Evidence, and reports/pages read the same facts.</p>
       </div>
       <div class="grid-four">
         <article class="card"><div class="kicker">Store</div><h3>事实库 / Fact store</h3><p>保存 schema、配置索引、运行记录、用例运行、证据索引、基线、耗时、日志、拓扑和后处理任务。Stores schema, catalogs, runs, Evidence indexes, logs, topology, timing, and tasks.</p><div class="cmds"><code>PostgreSQL</code><code>MySQL</code><code>Store interface</code><code>schema upgrade</code></div></article>
-        <article class="card"><div class="kicker">current state</div><h3>配置包生命周期 / current state lifecycle</h3><p>外部配置包可以创建、安装、打包、审计、验证、发布；运行产物和本地数据库会被过滤。Creates, installs, packs, audits, verifies, and publishes external bundles.</p><div class="cmds"><code>current state verify</code><code>/api/current state/verify</code></div></article>
-        <article class="card"><div class="kicker">Read-model</div><h3>目录视图 / Catalog views</h3><p>把服务、工作流、接口节点、用例、模板、夹具、依赖和绑定转成页面与 agent 都能读取的视图。Builds UI and agent-readable views from current state assets.</p><div class="cmds"><code>/api/catalog</code><code>/api/dashboard</code></div></article>
+        <article class="card"><div class="kicker">Template Package</div><h3>配置包生命周期 / Template package lifecycle</h3><p>外部配置包可以创建、安装、打包、审计、验证、发布；运行产物和本地数据库会被过滤。Creates, installs, packs, audits, verifies, and publishes external bundles.</p><div class="cmds"><code>template-package verify</code><code>/api/template-packages/verify</code></div></article>
+        <article class="card"><div class="kicker">Read-model</div><h3>目录视图 / Catalog views</h3><p>把服务、工作流、接口节点、用例、模板、夹具、依赖和绑定转成页面与 agent 都能读取的视图。Builds UI and agent-readable views from template package and Store assets.</p><div class="cmds"><code>/api/catalog</code><code>/api/dashboard</code></div></article>
         <article class="card"><div class="kicker">Discovery</div><h3>可测目标发现 / Target discovery</h3><p>agent 先搜索目标，再用返回的精确 ID 生成报告，避免在提示词或代码里写死目标。Agents search first and pass exact IDs to report commands.</p><div class="cmds"><code>discover</code><code>--filter</code><code>--json</code></div></article>
         <article class="card"><div class="kicker">Execution</div><h3>运行能力 / Execution</h3><p>支持单用例、接口节点全量、工作流步骤、同步接口和异步 batch。失败用例会写进报告。Runs cases, interface batches, and workflow steps; failed cases stay in reports.</p><div class="cmds"><code>case run</code><code>case report</code><code>workflow report</code></div></article>
         <article class="card"><div class="kicker">Reports</div><h3>报告能力 / Reports</h3><p>生成机器可读 JSON 和临时 HTML；每个用例保留 run id、case run id、耗时、状态和详情入口。Produces JSON and HTML with status, timing, and detail links.</p><div class="cmds"><code>report.html</code><code>detailUrl</code></div></article>
@@ -609,14 +609,14 @@
     <section id="api">
       <div class="section-head">
         <h2>Control Plane API 面 / Control Plane APIs</h2>
-        <p class="note">API 按能力分组。页面、CLI 适配器和本地 agent 可以共用这些入口，但配置源仍然是外部配置包。APIs are grouped by capability and shared by the workbench, adapters, and local agents.</p>
+        <p class="note">API 按能力分组。页面、CLI 适配器和本地 agent 可以共用这些入口；日常测试事实来自 active SQL Store，外部模板包作为可选导入/审阅资产。APIs are grouped by capability and shared by the workbench, adapters, and local agents.</p>
       </div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>分组</th><th>端点</th><th>说明</th></tr></thead>
           <tbody>
-            <tr><td>current state</td><td><code>GET /api/current state</code><br><code>POST /api/current state/install</code><br><code>POST /api/current state/import</code><br><code>POST /api/current state/verify</code></td><td>读取当前配置、安装外部配置包、发布 read-model、执行验收检查。</td></tr>
-            <tr><td>Catalog</td><td><code>GET /api/catalog</code><br><code>GET /api/dashboard</code><br><code>GET /api/current state/catalog-index</code></td><td>提供服务、工作流、接口节点、用例、模板、夹具和绑定的页面视图。</td></tr>
+            <tr><td>Template Packages</td><td><code>GET /api/template-packages/current</code><br><code>POST /api/template-packages/install</code><br><code>POST /api/template-packages/import</code><br><code>POST /api/template-packages/verify</code></td><td>读取当前配置、安装外部配置包、发布 read-model、执行验收检查。</td></tr>
+            <tr><td>Catalog</td><td><code>GET /api/catalog</code><br><code>GET /api/dashboard</code><br><code>GET /api/template-packages/catalog-index</code></td><td>提供服务、工作流、接口节点、用例、模板、夹具和绑定的页面视图。</td></tr>
             <tr><td>Interface</td><td><code>GET /api/interface-nodes</code><br><code>GET /api/interface-node</code><br><code>GET /api/interface-node/coverage</code><br><code>GET /api/interface-node/coverage-gaps</code></td><td>接口节点目录、节点详情、工作流覆盖和缺口视图。</td></tr>
             <tr><td>Runs</td><td><code>GET /api/runs</code><br><code>POST /api/workflow-runs</code><br><code>GET /api/workflow-runs/{id}</code><br><code>GET /api/workflow-runs/step</code></td><td>运行索引、工作流快照、步骤详情和最新步骤结果。</td></tr>
             <tr><td>Cases</td><td><code>GET /api/cases/capabilities</code><br><code>POST /api/cases/run</code><br><code>POST /api/cases/batch-runs</code><br><code>GET /api/cases/batch-runs/{id}</code></td><td>可运行用例矩阵、单用例执行、异步批量执行和报告查询。</td></tr>
@@ -630,11 +630,11 @@
     <section id="data-flow">
       <div class="section-head">
         <h2>后端数据流 / Backend Data Flow</h2>
-        <p class="note">这条链路解释为什么核心可以保持通用：团队差异进入配置包，运行事实进入 Store 和 Evidence，核心只负责通用编排。Team-specific differences enter current state bundles; runtime facts enter Store and Evidence; the core stays generic.</p>
+        <p class="note">这条链路解释为什么核心可以保持通用：团队差异进入外部模板包或 Store 记录，运行事实进入 Store 和 Evidence，核心只负责通用编排。Team-specific differences enter external template packages or Store records; runtime facts enter Store and Evidence; the core stays generic.</p>
       </div>
       <div class="flow">
-        <article class="flow-node"><strong>1. 外部配置<br>External current state</strong><p>配置包保留在核心仓库外，作为可审阅源资产。current states stay outside core as reviewable source.</p></article>
-        <article class="flow-node"><strong>2. 审计发布<br>Audit and publish</strong><p>current state audit/verify 检查引用完整性，再发布 read-model。Audit references, then publish read-models.</p></article>
+        <article class="flow-node"><strong>1. 外部配置<br>External template package</strong><p>配置包保留在核心仓库外，作为可审阅源资产。Template packages stay outside core as reviewable source.</p></article>
+        <article class="flow-node"><strong>2. 审计发布<br>Audit and publish</strong><p>template-package audit/verify 检查引用完整性，再发布 read-model。Audit references, then publish read-models.</p></article>
         <article class="flow-node"><strong>3. Store 索引<br>Store index</strong><p>Active Store 保存目录、运行事实、基线、耗时和后处理任务。The active Store keeps catalogs, run facts, baselines, timing, and tasks.</p></article>
         <article class="flow-node"><strong>4. 目标发现<br>Discover</strong><p>agent 或页面从 catalog 搜索接口节点和工作流。Agents/pages search interface nodes and workflows.</p></article>
         <article class="flow-node"><strong>5. 执行记录<br>Execute</strong><p>runner 写请求、响应、断言、摘要和 case run id。The runner records request, response, assertions, summary, and IDs.</p></article>
@@ -651,7 +651,7 @@
       <div class="skills">
         <article class="skill-card"><span class="number">1</span><h3>发现技能<br>Discovery</h3><p>读取项目简介和命令帮助，调用 <code>discover</code> 搜索候选目标，再从结果中选择精确 ID。Read docs/help, discover targets, then select exact IDs.</p></article>
         <article class="skill-card"><span class="number">2</span><h3>报告技能<br>Reporting</h3><p>使用精确 ID 生成 HTML/JSON 报告。报告是产物，用例失败是内容，不是 CLI 崩溃。Generate HTML/JSON reports; failed cases are report content.</p></article>
-        <article class="skill-card"><span class="number">3</span><h3>配置技能<br>Configuration</h3><p>维护外部配置包，先审计和验证，再发布到 Store/read-model。Maintain external current states, audit and verify, then publish.</p></article>
+        <article class="skill-card"><span class="number">3</span><h3>配置技能<br>Configuration</h3><p>维护外部配置包，先审计和验证，再发布到 Store/read-model。Maintain external template packages, audit and verify, then publish.</p></article>
         <article class="skill-card"><span class="number">4</span><h3>证据技能<br>Evidence</h3><p>从 Store 和 evidence 文件定位请求、响应、运行摘要、日志与拓扑，形成可复查结论。Inspect requests, responses, summaries, logs, and topology.</p></article>
         <article class="skill-card"><span class="number">5</span><h3>守卫技能<br>Guardrails</h3><p>每个后端切片都要有测试和守卫，避免通用核心被团队词汇或临时运行产物污染。Keep tests and guardrails around every backend slice.</p></article>
       </div>
@@ -667,8 +667,8 @@
           <thead><tr><th>能力域</th><th>命令</th><th>用途</th><th>状态</th></tr></thead>
           <tbody>
             <tr><td>Store</td><td><code>store status</code>, <code>store upgrade</code></td><td>检查和升级当前 active Store schema；PostgreSQL 与 MySQL 都是产品 Store 引擎。</td><td><span class="status ready">ready</span></td></tr>
-            <tr><td>current state</td><td><code>current state init</code>, <code>install</code>, <code>pack</code>, <code>verify</code></td><td>管理外部配置包，并过滤运行产物。</td><td><span class="status ready">ready</span></td></tr>
-            <tr><td>Publish</td><td><code>current state import</code>, <code>config publish</code></td><td>将外部配置发布为 Store catalog 和 read-model。</td><td><span class="status ready">ready</span></td></tr>
+            <tr><td>Template Package</td><td><code>template-package init</code>, <code>install</code>, <code>pack</code>, <code>verify</code></td><td>管理外部配置包，并过滤运行产物。</td><td><span class="status ready">ready</span></td></tr>
+            <tr><td>Publish</td><td><code>template-package import</code>, <code>config publish</code></td><td>将外部配置发布为 Store catalog 和 read-model。</td><td><span class="status ready">ready</span></td></tr>
             <tr><td>Discover</td><td><code>interface-node discover</code>, <code>workflow discover</code></td><td>搜索可测目标，返回精确 ID。</td><td><span class="status active">active</span></td></tr>
             <tr><td>Report</td><td><code>interface-node case report</code>, <code>workflow report</code></td><td>按 ID 生成临时 HTML/JSON 报告。</td><td><span class="status active">active</span></td></tr>
             <tr><td>Case</td><td><code>case run</code>, <code>case incomplete-batches</code></td><td>运行单个通用 API case，或检查未完成覆盖。</td><td><span class="status ready">ready</span></td></tr>
@@ -710,12 +710,12 @@
         <article class="goal-card"><div class="phase">Next</div><div><h3>强化前置数据与上下文传递</h3><p>继续把 fixture、case dependency、workflow exports 和 Store 运行记录整合成通用前置数据能力，不写团队规则到核心。</p></div></article>
         <article class="goal-card"><div class="phase">Next</div><div><h3>后处理异步化</h3><p>拓扑、日志裁剪、报告补全等重处理任务落入 post-process task，记录耗时和状态，避免页面和 runner 被慢操作拖住。</p></div></article>
         <article class="goal-card"><div class="phase">Now</div><div><h3>团队模式 Store</h3><p>以 active Store interface 为主路径，PostgreSQL 与 MySQL 都承载产品化和团队协作场景。</p></div></article>
-        <article class="goal-card"><div class="phase">Later</div><div><h3>公开发布准备</h3><p>完善 current state 格式文档、报告样式、守卫说明、最小示例和贡献指南，让项目可被其他团队直接接入。</p></div></article>
+        <article class="goal-card"><div class="phase">Later</div><div><h3>公开发布准备</h3><p>完善 template package 格式文档、报告样式、守卫说明、最小示例和贡献指南，让项目可被其他团队直接接入。</p></div></article>
       </div>
     </section>
 
     <footer class="footer">
-      Source of truth: this page summarizes the current core module shape in <code>cmd/otsandbox</code>, <code>internal/controlplane</code>, <code>internal/store</code>, and <code>docs</code>. Keep this document generic; place team-specific scenarios in external current state bundles.
+      Source of truth: this page summarizes the current core module shape in <code>cmd/otsandbox</code>, <code>internal/controlplane</code>, <code>internal/store</code>, and <code>docs</code>. Keep this document generic; place team-specific scenarios in external template packages or private Store records.
     </footer>
   </main>
 </body>

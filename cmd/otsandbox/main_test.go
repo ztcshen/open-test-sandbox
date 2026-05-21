@@ -453,7 +453,7 @@ func TestDailyStoreReferenceRejectsLegacySQLiteStoreURL(t *testing.T) {
 		if err == nil {
 			t.Fatalf("daily Store reference should reject legacy SQLite store URL %q", legacyStoreURL)
 		}
-		for _, want := range []string{"--store-url", "daily commands require PostgreSQL or MySQL Store", "SQLite", "store config set NAME --url postgres://", "store config set NAME --url mysql://"} {
+		for _, want := range []string{"--store-url", "compatibility", "daily commands", "--store NAME_OR_DSN", "sqlite://PATH"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("daily Store reference error missing %q: %v", want, err)
 			}
@@ -461,29 +461,28 @@ func TestDailyStoreReferenceRejectsLegacySQLiteStoreURL(t *testing.T) {
 	}
 }
 
-func TestDailyStoreReferenceRejectsNamedSQLiteConfig(t *testing.T) {
+func TestDailyStoreReferenceAcceptsNamedSQLiteConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+	storeRef := "sqlite://" + filepath.Join(dir, "store.sqlite")
 	if err := saveStoreConfig(storeConfigFile{
 		Stores: map[string]storeConfigEntry{
-			"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
+			"local-sqlite": {Name: "local-sqlite", URL: storeRef, Backend: "sqlite"},
 		},
 	}); err != nil {
 		t.Fatalf("save store config: %v", err)
 	}
 
-	_, err := resolveRequiredDailyStoreReference("legacy-local", "")
-	if err == nil {
-		t.Fatal("daily Store reference should reject named SQLite config")
+	resolved, err := resolveRequiredDailyStoreReference("local-sqlite", "")
+	if err != nil {
+		t.Fatalf("daily Store reference should accept named SQLite config: %v", err)
 	}
-	for _, want := range []string{`Store config "legacy-local"`, "daily commands require PostgreSQL or MySQL Store", "SQLite", "store config set NAME --url postgres://", "store config set NAME --url mysql://"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("daily Store reference error missing %q: %v", want, err)
-		}
+	if resolved != storeRef {
+		t.Fatalf("named SQLite Store resolved to %q want %q", resolved, storeRef)
 	}
 }
 
-func TestDailyStoreReferenceKeepsDirectSQLiteStoreFlagAsExplicitCompatibility(t *testing.T) {
+func TestDailyStoreReferenceAcceptsDirectSQLiteStoreFlag(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	for _, tc := range []struct {
 		storeRef string
@@ -494,69 +493,31 @@ func TestDailyStoreReferenceKeepsDirectSQLiteStoreFlagAsExplicitCompatibility(t 
 	} {
 		resolved, err := resolveRequiredDailyStoreReference(tc.storeRef, "")
 		if err != nil {
-			t.Fatalf("daily Store reference should keep explicit SQLite compatibility store flag %q: %v", tc.storeRef, err)
+			t.Fatalf("daily Store reference should accept explicit SQLite Store flag %q: %v", tc.storeRef, err)
 		}
 		if resolved != tc.want {
-			t.Fatalf("direct SQLite compatibility store flag = %q want %q", resolved, tc.want)
+			t.Fatalf("direct SQLite Store flag = %q want %q", resolved, tc.want)
 		}
 	}
 }
 
-func TestEnvironmentCommandsRejectActiveSQLiteStore(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "register",
-			args: []string{"register", "--id", "env.legacy", "--verification-workflow", "workflow.legacy"},
+func TestEnvironmentCommandsAcceptActiveSQLiteStore(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+	if err := saveStoreConfig(storeConfigFile{
+		Active: "local-sqlite",
+		Stores: map[string]storeConfigEntry{
+			"local-sqlite": {Name: "local-sqlite", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
 		},
-		{
-			name: "discover",
-			args: []string{"discover", "--json"},
-		},
-		{
-			name: "inspect",
-			args: []string{"inspect", "env.legacy"},
-		},
-		{
-			name: "bootstrap",
-			args: []string{"bootstrap", "env.legacy"},
-		},
-		{
-			name: "verify",
-			args: []string{"verify", "--run", "run.legacy", "--status", "passed", "env.legacy"},
-		},
-		{
-			name: "publish verified",
-			args: []string{"publish-verified", "env.legacy"},
-		},
+	}); err != nil {
+		t.Fatalf("save store config: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
-			if err := saveStoreConfig(storeConfigFile{
-				Active: "legacy-local",
-				Stores: map[string]storeConfigEntry{
-					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
-				},
-			}); err != nil {
-				t.Fatalf("save store config: %v", err)
-			}
-
-			err := runEnvironment(context.Background(), tt.args)
-			if err == nil {
-				t.Fatalf("%s unexpectedly succeeded", tt.name)
-			}
-			out := err.Error()
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
-				if !strings.Contains(out, want) {
-					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
-				}
-			}
-		})
+	if err := runEnvironment(context.Background(), []string{"register", "--id", "env.sqlite", "--verification-workflow", "workflow.sqlite"}); err != nil {
+		t.Fatalf("register with active SQLite Store: %v", err)
+	}
+	if err := runEnvironment(context.Background(), []string{"discover", "--json"}); err != nil {
+		t.Fatalf("discover with active SQLite Store: %v", err)
 	}
 }
 
@@ -1089,17 +1050,19 @@ func runEnvironmentCommandsUseNamedActiveStore(t *testing.T, storeRef string, en
 func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	remoteRepo := createBareGitRepo(t, "main")
+	remoteURL := "https://example.test/entry-gateway.git"
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer healthServer.Close()
 	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	installGitRemoteFixture(t, filepath.Dir(dockerCallsPath), remoteURL, remoteRepo)
 
 	runCLI(t, "environment", "register",
 		"--store", "sqlite://"+storePath,
 		"--id", "env.restore",
-		"--repo", "entry-gateway="+remoteRepo,
+		"--repo", "entry-gateway="+remoteURL,
 		"--branch", "entry-gateway=main",
 		"--checkout", "entry-gateway=services/entry-gateway",
 		"--compose-file", "docker-compose.yml",
@@ -1107,7 +1070,20 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 		"--health-url", healthServer.URL+"/health",
 		"--verification-workflow", "workflow.core-10",
 	)
-	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
+	sourceCompose := filepath.Join(t.TempDir(), "docker-compose.yml")
+	writeFile(t, sourceCompose, "services: {}\n")
+	runCLI(t, "environment", "startup-file", "put",
+		"--store", "sqlite://"+storePath,
+		"--file", "docker-compose.yml="+sourceCompose,
+		"env.restore",
+	)
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "entry-gateway", Kind: "app", Role: "business-service", ComposeService: "entry-gateway", Required: true, HealthCheckJSON: `{"type":"url","url":"` + healthServer.URL + `/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+	}))
+	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.restore")
 
 	dryRunOut := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.restore")
 	var dryRun struct {
@@ -1161,7 +1137,7 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	if !dryRun.Preflight.OK || !restorePreflightHasTool(dryRun.Preflight.Tools, "git", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker compose", true) || len(dryRun.Preflight.HeavySteps) == 0 {
 		t.Fatalf("restore dry-run preflight = %#v", dryRun.Preflight)
 	}
-	if !dryRun.Readiness.OK || !dryRun.Readiness.PauseBeforeHeavyValidation || !restoreReadinessHasItem(dryRun.Readiness.Items, "service-repositories", true, "will be cloned") || !restoreReadinessHasItem(dryRun.Readiness.Items, "compose-services-and-middleware", true, "including middleware") || !restoreReadinessHasItem(dryRun.Readiness.Items, "health-probes", true, "1 Store-backed") || !restoreReadinessHasItem(dryRun.Readiness.Items, "operator-pause", true, "pause before") {
+	if !dryRun.Readiness.OK || !dryRun.Readiness.PauseBeforeHeavyValidation || !restoreReadinessHasItem(dryRun.Readiness.Items, "component-repositories", true, "will be cloned") || !restoreReadinessHasItem(dryRun.Readiness.Items, "compose-services-and-middleware", true, "including middleware") || !restoreReadinessHasItem(dryRun.Readiness.Items, "health-probes", true, "1 Store-backed") || !restoreReadinessHasItem(dryRun.Readiness.Items, "operator-pause", true, "pause before") {
 		t.Fatalf("restore dry-run readiness = %#v", dryRun.Readiness)
 	}
 	if len(dryRun.NextActions) == 0 || !strings.Contains(strings.Join(dryRun.NextActions, "\n"), "workflow.core-10") {
@@ -1308,8 +1284,8 @@ func TestEnvironmentRestoreRequiresRemoteGitSourcesForSQLOneClickEnvironment(t *
 			if report.OK || report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || len(report.SourcePolicy.Violations) != 1 || report.Docker.Action != "skipped-due-to-source-policy" {
 				t.Fatalf("%s remote source policy report = %#v", tt.name, report)
 			}
-			if !strings.Contains(report.SourcePolicy.Violations[0], "service llt") {
-				t.Fatalf("%s source policy should only reject service repositories, got %#v", tt.name, report.SourcePolicy.Violations)
+			if !strings.Contains(report.SourcePolicy.Violations[0], "component llt") {
+				t.Fatalf("%s source policy should only reject component repositories, got %#v", tt.name, report.SourcePolicy.Violations)
 			}
 			if !restoreTypedReadinessHasItem(report.Readiness.Items, "remote-git-sources", false, "remote Git URL") {
 				t.Fatalf("%s readiness should include remote source violation: %#v", tt.name, report.Readiness.Items)
@@ -4551,45 +4527,19 @@ func TestCaseQueryCommandsAcceptStoreFlag(t *testing.T) {
 	}
 }
 
-func TestCaseReadCommandsRejectActiveSQLiteStore(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "runs",
-			args: []string{"case", "runs", "--json"},
-		},
-		{
-			name: "evidence",
-			args: []string{"case", "evidence", "--case-run", "case-run-legacy", "--json"},
-		},
-		{
-			name: "timing",
-			args: []string{"case", "timing", "--kind", "case", "--json"},
-		},
+func TestCaseReadCommandsUseNamedSQLiteActiveStore(t *testing.T) {
+	configureNamedSQLiteActiveStore(t, "daily-case-read-sqlite")
+	runID := uniqueTestID(t, "case-run-sqlite")
+	createStoredCaseRun(t, runID, "SQLite")
+
+	if out := runCLI(t, "case", "runs", "--json"); !strings.Contains(out, runID) {
+		t.Fatalf("SQLite case runs output = %q", out)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
-			if err := saveStoreConfig(storeConfigFile{
-				Active: "legacy-local",
-				Stores: map[string]storeConfigEntry{
-					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
-				},
-			}); err != nil {
-				t.Fatalf("save store config: %v", err)
-			}
-
-			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
-				if !strings.Contains(out, want) {
-					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
-				}
-			}
-		})
+	if out := runCLI(t, "case", "evidence", "--case-run", runID+".case", "--json"); !strings.Contains(out, runID) || !strings.Contains(out, "/v1/items") {
+		t.Fatalf("SQLite case evidence output = %q", out)
+	}
+	if out := runCLI(t, "case", "timing", "--kind", "case", "--json"); !strings.Contains(out, runID+".case") {
+		t.Fatalf("SQLite case timing output = %q", out)
 	}
 }
 
@@ -6673,50 +6623,9 @@ func runWorkflowRunCommandsReadStoredRuns(t *testing.T, storeRef string, label s
 	}
 }
 
-func TestWorkflowRunReadCommandsRejectActiveSQLiteStore(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "runs",
-			args: []string{"workflow", "runs", "--json"},
-		},
-		{
-			name: "run",
-			args: []string{"workflow", "run", "--run", "run.legacy", "--json"},
-		},
-		{
-			name: "step",
-			args: []string{"workflow", "step", "--run", "run.legacy", "--step", "step.legacy", "--json"},
-		},
-		{
-			name: "latest step",
-			args: []string{"workflow", "latest-step", "--workflow", "workflow.legacy", "--step", "step.legacy", "--json"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
-			if err := saveStoreConfig(storeConfigFile{
-				Active: "legacy-local",
-				Stores: map[string]storeConfigEntry{
-					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
-				},
-			}); err != nil {
-				t.Fatalf("save store config: %v", err)
-			}
-
-			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
-				if !strings.Contains(out, want) {
-					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
-				}
-			}
-		})
-	}
+func TestWorkflowRunCommandsUseNamedSQLiteActiveStore(t *testing.T) {
+	storeRef := configureNamedSQLiteActiveStore(t, "daily-workflow-runs-sqlite")
+	runWorkflowRunCommandsReadStoredRuns(t, storeRef, "SQLite")
 }
 
 func TestTraceTopologyCollectCommandPersistsTopology(t *testing.T) {
@@ -7383,42 +7292,9 @@ func runEvidenceListCommandRejectsMissingRun(t *testing.T, label string) {
 	}
 }
 
-func TestEvidenceReadCommandsRejectActiveSQLiteStore(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "list",
-			args: []string{"evidence", "list", "--json"},
-		},
-		{
-			name: "tasks",
-			args: []string{"evidence", "tasks", "--run", "run.legacy", "--json"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
-			if err := saveStoreConfig(storeConfigFile{
-				Active: "legacy-local",
-				Stores: map[string]storeConfigEntry{
-					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
-				},
-			}); err != nil {
-				t.Fatalf("save store config: %v", err)
-			}
-
-			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
-				if !strings.Contains(out, want) {
-					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
-				}
-			}
-		})
-	}
+func TestEvidenceCommandsUseNamedSQLiteActiveStore(t *testing.T) {
+	configureNamedSQLiteActiveStore(t, "daily-evidence-sqlite")
+	runEvidenceListCommandPrintsStoreRecords(t, "SQLite")
 }
 
 func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
@@ -7533,7 +7409,7 @@ func TestCaseRunCommandRequiresActiveStoreBeforeFileExecution(t *testing.T) {
 	}
 }
 
-func TestCaseRunCommandRejectsActiveSQLiteStoreBeforeFileExecution(t *testing.T) {
+func TestCaseRunCommandUsesActiveSQLiteStore(t *testing.T) {
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -7555,14 +7431,12 @@ func TestCaseRunCommandRejectsActiveSQLiteStoreBeforeFileExecution(t *testing.T)
 		t.Fatalf("save store config: %v", err)
 	}
 
-	out := runCLIFails(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-active-sqlite")
-	for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("case run with active SQLite store output missing %q: %q", want, out)
-		}
+	out := runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-active-sqlite")
+	if !strings.Contains(out, "case-run-active-sqlite") {
+		t.Fatalf("case run with active SQLite store output = %q", out)
 	}
-	if called {
-		t.Fatal("case run executed request before rejecting active SQLite Store")
+	if !called {
+		t.Fatal("case run did not execute request with active SQLite Store")
 	}
 }
 
@@ -8474,7 +8348,7 @@ func TestDiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector(t *testi
 	}
 }
 
-func TestDiscoverCommandsRejectActiveSQLiteStore(t *testing.T) {
+func TestDiscoverCommandsUseNamedSQLiteActiveStore(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
@@ -8486,22 +8360,10 @@ func TestDiscoverCommandsRejectActiveSQLiteStore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
-			if err := saveStoreConfig(storeConfigFile{
-				Active: "legacy-local",
-				Stores: map[string]storeConfigEntry{
-					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
-				},
-			}); err != nil {
-				t.Fatalf("save store config: %v", err)
-			}
-
-			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
-				if !strings.Contains(out, want) {
-					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
-				}
+			configureNamedSQLiteActiveStore(t, "daily-discover-sqlite-"+strings.ReplaceAll(tt.name, " ", "-"))
+			out := runCLI(t, tt.args...)
+			if !strings.Contains(out, `"ok": true`) {
+				t.Fatalf("%s SQLite output = %q", tt.name, out)
 			}
 		})
 	}
@@ -10770,6 +10632,16 @@ func configureNamedMySQLActiveStore(t *testing.T, name string) string {
 	return dsn
 }
 
+func configureNamedSQLiteActiveStore(t *testing.T, name string) string {
+	t.Helper()
+	storeRef := "sqlite://" + filepath.Join(t.TempDir(), "store.sqlite")
+	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	runCLI(t, "store", "config", "set", name, "--url", storeRef)
+	runCLI(t, "store", "use", name)
+	runCLI(t, "store", "upgrade")
+	return storeRef
+}
+
 func uniqueTestID(t *testing.T, prefix string) string {
 	t.Helper()
 	slug := strings.ToLower(t.Name())
@@ -10887,6 +10759,33 @@ func fakeDockerCommand(t *testing.T) ([]string, string) {
 		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"DOCKER_CALLS_FILE=" + callsPath,
 	}, callsPath
+}
+
+func installGitRemoteFixture(t *testing.T, binDir string, remoteURL string, fixtureRepo string) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find git: %v", err)
+	}
+	script := fmt.Sprintf(`#!/usr/bin/env bash
+set -euo pipefail
+remote_url=%q
+fixture_repo=%q
+args=()
+for arg in "$@"; do
+  if [[ "$arg" == "$remote_url" ]]; then
+    args+=("$fixture_repo")
+  else
+    args+=("$arg")
+  fi
+done
+exec %q "${args[@]}"
+`, remoteURL, fixtureRepo, realGit)
+	gitPath := filepath.Join(binDir, "git")
+	writeFile(t, gitPath, script)
+	if err := os.Chmod(gitPath, 0o755); err != nil {
+		t.Fatalf("chmod fake git: %v", err)
+	}
 }
 
 func runCLIWithEnv(t *testing.T, env []string, args ...string) string {

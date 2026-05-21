@@ -16,7 +16,7 @@ agent needs to run it.
 
 ## What Stays in Core
 
-- Generic Store interfaces, PostgreSQL implementation, and compatibility backends.
+- Generic Store interfaces and SQLite/PostgreSQL/MySQL implementations.
 - Template Package loading, auditing, installation, packing, and publishing.
 - API case execution and Evidence indexing.
 - Control plane APIs and React workbench pages.

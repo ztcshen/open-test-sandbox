@@ -63,7 +63,7 @@ func runStoreCopy(ctx context.Context, args []string) error {
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
-	fmt.Printf("Copied Store current state\n")
+	fmt.Printf("Copied current Store data\n")
 	fmt.Printf("Source: %s\n", report.Source)
 	fmt.Printf("Target: %s\n", report.Target)
 	fmt.Printf("Profile catalogs: %d\n", report.ProfileCatalogs)

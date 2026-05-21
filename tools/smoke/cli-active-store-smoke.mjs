@@ -25,6 +25,7 @@ const cliSmokeSteps = Array.from({ length: cliSmokeStepCount }, (_, index) => {
 function storeBackend(dsn) {
   if (/^postgres(?:ql)?:\/\//i.test(dsn)) return "postgres";
   if (/^mysql:\/\//i.test(dsn)) return "mysql";
+  if (/^(sqlite:\/\/|file:)/i.test(dsn)) return "sqlite";
   return "";
 }
 
@@ -34,7 +35,10 @@ export function requiredSQLStoreDSN(env = process.env) {
     throw new Error("Set OTSANDBOX_CLI_STORE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to run the active SQL Store CLI smoke");
   }
   if (!storeBackend(dsn)) {
-    throw new Error("The active Store CLI smoke requires a PostgreSQL or MySQL DSN");
+    throw new Error("The active Store CLI smoke requires a PostgreSQL, MySQL, or SQLite DSN");
+  }
+  if (storeBackend(dsn) === "sqlite" && /^(1|true|yes|on)$/i.test(String(env.OTSANDBOX_DISABLE_SQLITE_STORE || ""))) {
+    throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite active Store CLI smoke DSN");
   }
   if (/^mysql:\/\//i.test(dsn)) {
     requireSafeMySQLStoreDSN(dsn, { label: "The active Store CLI smoke" });

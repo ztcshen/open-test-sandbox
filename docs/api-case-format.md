@@ -112,7 +112,8 @@ SQL Store, template package, workflow records, or Environment Catalog records.
 
 The deprecated compatibility flag `--store-url` is reserved for migration and
 legacy compatibility paths. Daily SQL Store-first usage should use an active
-named Store or `--store NAME_OR_DSN`.
+named Store or `--store NAME_OR_DSN`, including explicit `sqlite://`,
+`postgres://`, and `mysql://` Store references.
 
 ## Async Batch Runs
 

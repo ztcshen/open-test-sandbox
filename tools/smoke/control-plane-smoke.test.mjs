@@ -74,7 +74,7 @@ describe("control-plane smoke Store selection", () => {
     assert.doesNotMatch(result.stderr, /secret/);
   });
 
-  it("requires a SQL DSN unless SQLite compatibility smoke is explicit", () => {
+  it("requires a SQL DSN unless temporary SQLite smoke is explicit", () => {
     const result = spawnSync(process.execPath, [
       "--input-type=module",
       "-e",
@@ -90,7 +90,7 @@ describe("control-plane smoke Store selection", () => {
     assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE/);
   });
 
-  it("keeps SQLite smoke behind an explicit compatibility switch", () => {
+  it("can create a temporary SQLite smoke Store", () => {
     const result = spawnSync(process.execPath, [
       "--input-type=module",
       "-e",
@@ -106,13 +106,31 @@ describe("control-plane smoke Store selection", () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
   });
 
+  it("accepts explicit SQLite smoke Store references", () => {
+    const result = spawnSync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
+        "const calls = [];",
+        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'sqlite:///tmp/ots-smoke/store.sqlite' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
+        "if (ref.storeRef !== 'smoke-sqlite') throw new Error(JSON.stringify(ref));",
+        "if (!calls.some((call) => call.args.includes('upgrade'))) throw new Error(JSON.stringify(calls));",
+      ].join("\n"),
+    ], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
   it("rejects non-SQL smoke Store references", () => {
     const result = spawnSync(process.execPath, [
       "--input-type=module",
       "-e",
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
-        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'sqlite:///tmp/ots-smoke/store.sqlite' }, () => {});",
+        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'redis://127.0.0.1:6379/0' }, () => {});",
       ].join("\n"),
     ], {
       cwd: rootDir,
@@ -120,7 +138,7 @@ describe("control-plane smoke Store selection", () => {
     });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE/);
-    assert.match(result.stderr, /PostgreSQL or MySQL Store DSN/);
+    assert.match(result.stderr, /PostgreSQL, MySQL, or SQLite Store DSN/);
   });
 
   it("rejects contradictory SQLite smoke flags", () => {
