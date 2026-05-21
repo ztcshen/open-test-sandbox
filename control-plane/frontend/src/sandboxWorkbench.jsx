@@ -277,7 +277,7 @@ function EnvironmentCatalogPanel({ catalog, onReload }) {
       <div className="section-head">
         <div>
           <h2>Environment Catalog</h2>
-          <p>PostgreSQL Store-first discovery</p>
+          <p>SQL Store-first discovery</p>
         </div>
         <span className="console-status-pill" role="status">{message}</span>
       </div>

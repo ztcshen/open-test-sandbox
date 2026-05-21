@@ -2513,3 +2513,29 @@ Current blocker:
   workbench Environment Catalog PostgreSQL-only wording with SQL Store wording
   and revisit the default `store ddl` behavior so MySQL users do not
   accidentally copy PostgreSQL DDL.
+
+## 2026-05-21 Workbench SQL Store Wording Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Updated the React workbench Environment Catalog section from
+  `PostgreSQL Store-first discovery` to `SQL Store-first discovery`, so a MySQL
+  active Store no longer presents the main UI entry as PostgreSQL-only.
+- Left the Environment Catalog behavior unchanged; this slice only removes a
+  misleading user-visible label found by the non-blocking sidecar audit.
+
+Validated:
+
+- `npm run build:frontend`
+- `rg -n 'PostgreSQL Store-first discovery|PostgreSQL Store-first' control-plane/frontend README.md README.zh-CN.md docs/store-backends.md docs/quickstart.md`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
