@@ -103,9 +103,12 @@ records:
 - one `api_case_runs` row keyed by the run id and case id;
 - one `evidence_records` row for each Evidence file produced.
 
-The profile id comes from `--profile` and defaults to `default`. Store indexing
-does not replace the Evidence bundle; it makes local runs searchable and
-connects them to the active SQL Store, template package, or workflow records.
+The profile id comes from `--profile` and defaults to `default`. When the run is
+started from an environment-scoped workflow or batch request, `runs.environment_id`
+records the Environment Catalog id so reports, Evidence, and topology can be
+joined back to the verified environment. Store indexing does not replace the
+Evidence bundle; it makes local runs searchable and connects them to the active
+SQL Store, template package, workflow records, or Environment Catalog records.
 
 The deprecated compatibility flag `--store-url` is reserved for migration and
 legacy compatibility paths. Daily SQL Store-first usage should use an active

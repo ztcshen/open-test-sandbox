@@ -2,47 +2,48 @@
 
 ## Scope
 
-This plan covers the verified Environment Catalog entry
-`scf-chain-core10-local-docker`, anchored to workflow
-`sandbox.financing_to_repay_result_query`.
+This plan describes the generic clean-machine Docker restore model for a
+Store-backed Environment Catalog entry anchored to that environment's configured
+verification workflow. Private validation environments may use their own
+workflow ids, component names, and step counts, but public documentation should
+describe the reusable model rather than a specific organization's suite.
 
 The sandbox Store is not part of the restored Docker target. The Store must be
 reachable before restore starts and must remain outside the Docker lifecycle
-that starts, stops, or removes target business containers.
+that starts, stops, or removes target application containers.
 
 ## Current Proven State
 
-- Store inspection is done through `otsandbox environment inspect --store
-  local-pg --json scf-chain-core10-local-docker`, not direct database SQL.
-- The environment is currently `verified=true` with the 10-step workflow and
-  SkyWalking acceptance already passed on the running local Docker environment.
-- `environment restore --execute --use-existing-containers` can adopt the
-  current 19 healthy containers and reach `ready-for-workflow-verification`
-  without changing Docker state.
-- The Store-backed startup payload currently contains only two generated
-  compose files, about 17.7 KB total by CLI inspection.
+- Store inspection, restore planning, and verification are done through
+  `otsandbox environment ...` CLI/API surfaces, not direct database SQL.
+- The SQL Store schema now has `environment_components`,
+  `component_dependencies`, and `component_config_assets` as the component graph
+  model. Workflow run records can link back to an environment through
+  `runs.environment_id`.
+- `environment restore` can dry-run or execute remote repository preparation,
+  Store-generated startup/config assets, Docker Compose pull/build/up, recorded
+  health gates, and the configured verification workflow.
+- Verified publication remains gated by a passed workflow run, indexed Evidence,
+  and complete real SkyWalking topology in the selected Store.
 
-## Current Blocker
+## Remaining Public Proof Gaps
 
-A clean workspace cannot yet be claimed as one-click Docker-ready. The generated
-compose files still refer to host startup assets that are not generated from the
-Store and are not guaranteed to exist after cloning service repos:
+The private validation path has exercised the full clean-machine shape, but the
+open-source repository still needs reusable public evidence and examples:
 
-- MySQL init SQL under `compose/mysql/init`.
-- Redis Sentinel config.
-- WireMock files and mappings.
-- Apollo and XXL-Job WireMock mappings.
-- Loki, Promtail, and Grafana config.
-- Business service launch scripts under `compose/scripts/run-*.sh`.
-
-`environment restore --clean-docker-state --json` now reports these as
-`startup-assets` preflight failures before any Docker command can start.
+- a small public example environment with remote repositories that anyone can
+  clone;
+- compact component-owned assets for middleware and application startup;
+- a documented restore transcript that starts from an empty workspace and a
+  Compose-scoped Docker cleanup;
+- a workflow acceptance report with Evidence and real or explicitly unavailable
+  topology status, depending on whether a live SkyWalking endpoint is provided.
 
 ## Component Graph Store Model
 
 The Store model should be a component graph, not a middleware-vs-service split.
 Every runtime unit in a suite is a component: middleware, platform service,
-mock, observability service, support process, or business service.
+mock, observability service, support process, or application service.
 
 - `environment_components`: one row per runtime unit in the suite.
 - `component_dependencies`: directed edges from a consumer component to a
@@ -70,8 +71,9 @@ configuration it needs in order to consume that capability.
 
 Examples:
 
-- `scf-loan -> mysql`: `scf-loan` owns its database name, DDL, and seed assets.
-- `scf-loan -> apollo`: `scf-loan` owns appId, namespace, and key/value assets.
+- `order-api -> mysql`: `order-api` owns its database name, DDL, and seed assets.
+- `order-api -> config-service`: `order-api` owns app id, namespace, and
+  key/value assets.
 - `redis-sentinel -> redis-master`: Sentinel owns the monitor configuration.
 - `grafana -> loki`: Grafana owns datasource provisioning that points to Loki.
 - `promtail -> loki`: Promtail owns its push endpoint configuration.
@@ -80,14 +82,14 @@ Examples:
 - `xxl-job-admin -> mysql`: XXL-job owns its tables and DB connection config.
 
 MySQL DDL and seed SQL are therefore not owned by the MySQL component. They are
-owned by the component that needs those schemas. Apollo follows the same rule:
-the Apollo component provides config-service capability, while each consuming
-component owns its appId, namespace, and key/value assets.
+owned by the component that needs those schemas. Configuration middleware
+follows the same rule: the provider exposes config-service capability, while
+each consuming component owns its app id, namespace, and key/value assets.
 
-The schema that has already landed is a first step. Before wiring restore to it,
-rename and generalize `service_dependencies` to `component_dependencies`, and
-`service_config_assets` to `component_config_assets`, preserving the current
-business-service cases as a subset of the component graph.
+The current SQL Store schema uses `component_dependencies` and
+`component_config_assets` directly. Legacy service-shaped metadata is treated as
+compatibility input and should be projected into the component graph for daily
+restore paths.
 
 ### Dependency Edge Semantics
 
@@ -159,10 +161,10 @@ Acceptance criteria for this adapter:
      generated by Store metadata or already present in the restore workspace.
 
 2. Isolated workspace preparation:
-   - Clone all service repos into a fresh workspace.
+   - Clone all component repositories into a fresh workspace.
    - Write Store-backed component assets in Gonum-derived dependency order.
    - Stop before Docker with `--prepare-repos-only`.
-   - Verify no business runtime files, logs, Docker images, Maven cache, or
+   - Verify no application runtime files, logs, Docker images, build cache, or
      Evidence payloads were written into the Store.
 
 3. Operator-approved Docker simulation:
@@ -172,7 +174,7 @@ Acceptance criteria for this adapter:
    - Start provider components first when possible, then consumer components,
      using explicit readiness gates for components with runtime cycles.
    - Wait for all recorded component health probes.
-   - Trigger async acceptance with the bound 10-step workflow.
+   - Trigger async acceptance with the bound verification workflow.
    - Publish verified only when Evidence and real SkyWalking topology are both
      complete.
 

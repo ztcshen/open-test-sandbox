@@ -254,11 +254,13 @@ The backend writes runtime artifacts that must not be committed:
 - Docker cleanup for clean-machine simulation is scoped to recorded target
   Compose projects only; the sandbox control-plane SQL Store must remain
   outside the restored Docker target environment. 干净机器模拟的 Docker 清理只作用于已登记的目标 Compose 项目；沙箱控制面的 SQL Store 必须位于被恢复的目标 Docker 环境之外。
-- SQL Store one-click environment restore pulls business service code from
-  remote Git repositories and writes only compact Store-backed startup files
-  into the restore workspace before Docker starts. It must not require a
-  separate local environment package repository as the daily restore source.
-  SQL Store 一键环境恢复从远程 Git 拉业务服务代码，并在 Docker 启动前只把紧凑的 Store 启动文件写入恢复工作区；日常恢复源不应要求单独的本地环境包仓库。
+- SQL Store one-click environment restore pulls component source code from
+  remote Git repositories and writes only compact Store-backed startup files or
+  component-owned config assets into the restore workspace before Docker starts.
+  It must not require a separate local environment package repository as the
+  daily restore source, and it must not store images, source archives, runtime
+  databases, logs, or Evidence payloads in the sandbox Store.
+  SQL Store 一键环境恢复从远程 Git 拉组件源码，并在 Docker 启动前只把紧凑的 Store 启动文件或组件配置资产写入恢复工作区；日常恢复源不应要求单独的本地环境包仓库，也不能把镜像、源码包、运行库、日志或 Evidence payload 存入沙箱 Store。
 - Template Package bundles are external configuration source, not core code. 配置包是外部配置源，不是核心代码。
 - HTML reports are temporary local artifacts. HTML 报告是本地临时产物。
 - Reports may contain failed cases; report generation success means the

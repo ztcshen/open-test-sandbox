@@ -8627,19 +8627,19 @@ func TestServerBatchRunAppliesWorkflowStepExportsAsOverrides(t *testing.T) {
 	}
 	defer s.Close()
 
-	var appliedPrincipal string
+	var appliedAmount string
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/trial":
-			_, _ = w.Write([]byte(`{"total_principal":500000}`))
+			_, _ = w.Write([]byte(`{"total_amount":500000}`))
 		case "/apply":
 			var request map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatalf("decode apply request: %v", err)
 			}
-			appliedPrincipal = strings.TrimSpace(fmt.Sprint(request["repay_principal"]))
-			if appliedPrincipal != "500000" {
+			appliedAmount = strings.TrimSpace(fmt.Sprint(request["requested_amount"]))
+			if appliedAmount != "500000" {
 				_, _ = w.Write([]byte(`{"result_status":"F"}`))
 				return
 			}
@@ -8670,11 +8670,11 @@ func TestServerBatchRunAppliesWorkflowStepExportsAsOverrides(t *testing.T) {
 		TemplateConfigs: []store.CatalogTemplateConfig{
 			{
 				ID: "cfg.trial", TemplateID: "TPL-CASE-EXECUTION-V1", WorkflowID: "workflow.exports", ScopeType: "step", ScopeID: "trial", Status: "active",
-				ConfigJSON: `{"caseId":"case.trial","caseExecution":{"method":"GET","nodeId":"node.trial","path":"/trial","expectedHttpCodes":[200]},"exports":[{"from":"responseBody","name":"repay_principal","path":"total_principal"}]}`,
+				ConfigJSON: `{"caseId":"case.trial","caseExecution":{"method":"GET","nodeId":"node.trial","path":"/trial","expectedHttpCodes":[200]},"exports":[{"from":"responseBody","name":"requested_amount","path":"total_amount"}]}`,
 			},
 			{
 				ID: "cfg.apply", TemplateID: "TPL-CASE-EXECUTION-V1", WorkflowID: "workflow.exports", ScopeType: "step", ScopeID: "apply", Status: "active",
-				ConfigJSON: `{"caseId":"case.apply","caseExecution":{"method":"POST","nodeId":"node.apply","path":"/apply","body":{"repay_principal":"{{override:repay_principal|}}"},"expectedHttpCodes":[200],"expectedResponseContains":["\"result_status\":\"S\""]}}`,
+				ConfigJSON: `{"caseId":"case.apply","caseExecution":{"method":"POST","nodeId":"node.apply","path":"/apply","body":{"requested_amount":"{{override:requested_amount|}}"},"expectedHttpCodes":[200],"expectedResponseContains":["\"result_status\":\"S\""]}}`,
 			},
 		},
 	}); err != nil {
@@ -8710,8 +8710,8 @@ func TestServerBatchRunAppliesWorkflowStepExportsAsOverrides(t *testing.T) {
 		t.Fatalf("decode batch response: %v", err)
 	}
 	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
-	if !report.OK || report.Passed != 2 || appliedPrincipal != "500000" {
-		t.Fatalf("workflow export report = %#v appliedPrincipal=%q", report, appliedPrincipal)
+	if !report.OK || report.Passed != 2 || appliedAmount != "500000" {
+		t.Fatalf("workflow export report = %#v appliedAmount=%q", report, appliedAmount)
 	}
 }
 

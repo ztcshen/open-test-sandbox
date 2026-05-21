@@ -66,7 +66,7 @@ What to point out:
   indexes to the active PostgreSQL/MySQL Store or an explicit
   `OTSANDBOX_DEMO_STORE=postgres://...` /
   `OTSANDBOX_DEMO_STORE=mysql://...`. MySQL demo Stores must use dedicated
-  sandbox/smoke/test/CI-looking database names, not business schemas.
+  sandbox/smoke/test/CI-looking database names, not application schemas.
 - `release-check` requires a PostgreSQL or MySQL smoke Store DSN, then runs
   guardrails, Go tests, the demo, the React build, active SQL Store CLI smoke,
   and SQL Store headless browser smoke tests.

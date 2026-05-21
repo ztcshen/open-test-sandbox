@@ -13,29 +13,30 @@ OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmod
 OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
 ```
 
-## Current MySQL Final Sign-Off Status
+## Optional Real-Environment Sign-Off
 
-Generic MySQL release-check wiring is available, but company-environment final
-sign-off is still pending until a real run records the following evidence:
+Generic MySQL release-check wiring is available. A project or organization that
+needs stricter real-environment evidence can run the optional MySQL +
+SkyWalking gate after supplying real endpoint values:
 
 - `OTSANDBOX_REAL_MYSQL_STORE_DSN` points at a dedicated sandbox/smoke/test/CI
-  MySQL Store database, not a business schema.
+  MySQL Store database, not an application schema.
 - `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
   `OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` are provided for the
   configured workflow.
 - `npm run release-check:mysql-real:preflight` passes with the same environment
   and shows the masked MySQL DSN plus the release-check command it would run.
 - `npm run release-check:mysql-real` or the manual `mysql-real-signoff` CI job
-  passes with the company MySQL Store and real SkyWalking endpoint.
+  passes with the selected MySQL Store and real SkyWalking endpoint.
 
-After that run passes, paste the exact command or CI run URL plus the Store
-database name, masked DSN, SkyWalking endpoint, and configured workflow report
-summary into `docs/progress/mysql-store-engine-progress.md`.
+For public release notes, record only non-secret evidence: the exact command or
+CI run URL, Store database name, masked DSN, SkyWalking endpoint host, and
+configured workflow report summary.
 
 The public GitHub Actions CI runs this same gate against a temporary MySQL 8.0
 service container and the `otsandbox_ci_smoke` Store database. That proves the
 generic release gate is executable without relying on a developer laptop or a
-company network.
+private network.
 
 For real SkyWalking validation, add an `http` or `https`
 `OTS_TRACE_GRAPHQL_URL` and `OTS_SMOKE_TRACE_IDS` step-to-trace mappings.
@@ -54,7 +55,7 @@ To make release-check fail unless it is using live topology evidence, set
 id mappings for every configured workflow step and rejects synthetic or partial
 smoke before the expensive gate starts.
 
-For company MySQL final sign-off, run
+For optional real MySQL sign-off, run
 `npm run release-check:mysql-real:preflight` first, then
 `npm run release-check:mysql-real` with a dedicated `mysql://` Store DSN. Both
 entrypoints require the same real SkyWalking mode, an `http` or `https`
@@ -68,7 +69,7 @@ Generic MySQL release-check sets the Store contract to existing-database mode
 unless `OTSANDBOX_MYSQL_TEST_DSN_MODE` is explicitly provided; `create-drop` is
 for local admin-only contract tests. The `release-check:mysql-real` wrapper
 rejects `create-drop` overrides and always signs off with an existing dedicated
-company smoke Store database.
+smoke Store database.
 
 CI also exposes a manual `workflow_dispatch` path named
 `mysql-real-signoff`. It is intentionally separate from pull requests and only

@@ -48,13 +48,14 @@ and validation tools all read the same facts.
 - **Daily workflow**: configure or switch a named Store once, then use the same
   CLI/API/UI commands for local and remote SQL Stores.
 - **Environment Catalog**: register environments, inspect bootstrap plans,
-  restore target Docker stacks from remote service repositories, record
-  acceptance workflow results, and publish only verified environments.
+  restore target Docker stacks from remote component repositories plus compact
+  Store-backed startup/config assets, record acceptance workflow results, and
+  publish only verified environments.
 - **Acceptance proof**: verified environments require a passed workflow run,
   indexed Evidence, and real SkyWalking topology stored in the selected Store.
-- **Release gates**: generic PostgreSQL/MySQL `release-check` is wired; company
-  MySQL final sign-off uses the stricter two-stage real SkyWalking gate and is
-  still pending real company secrets and trace ids.
+- **Release gates**: generic PostgreSQL/MySQL `release-check` is wired; optional
+  organization-owned real-environment sign-off can add the stricter two-stage
+  real SkyWalking gate with externally supplied secrets and trace ids.
 
 ## What You Get
 
@@ -67,7 +68,7 @@ and validation tools all read the same facts.
 | Workflow execution | Run ordered workflow steps and keep per-step Evidence, timing, status, logs, and topology. |
 | Environment restore | Store-backed Environment Catalog entries can plan or execute remote repository preparation, compact startup-file generation, Docker Compose pull/build/up, health checks, and the bound verification workflow. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. |
-| Real topology gate | Synthetic SkyWalking smoke is useful for wiring, but final verified-environment and company MySQL sign-off require a live SkyWalking endpoint and trace ids for every configured workflow step. |
+| Real topology gate | Synthetic SkyWalking smoke is useful for wiring, but verified-environment publication and optional real-environment sign-off require a live SkyWalking endpoint and trace ids for every configured workflow step. |
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
 | Open-source guardrails | Release checks prevent generated state and source-domain terms from entering the generic core. |
 
@@ -102,7 +103,7 @@ The demo command starts a temporary local HTTP endpoint, runs the generic
 `OTSANDBOX_DEMO_STORE=postgres://...` /
 `OTSANDBOX_DEMO_STORE=mysql://...`, and prints the Evidence bundle path. The
 demo and release gate require dedicated MySQL Store database names that look
-like sandbox/smoke/test/CI targets; do not point them at a business schema. The
+like sandbox/smoke/test/CI targets; do not point them at an application schema. The
 release gate requires a PostgreSQL or MySQL smoke Store DSN.
 It runs whitespace checks, generated-state checks, source-domain guardrails, Go
 tests, the demo, the React build, active SQL Store CLI smoke tests, and
@@ -126,7 +127,7 @@ Sandbox APIs and UI
   -> active SQL Store (PostgreSQL or MySQL)
   -> catalog read-models
   -> Environment Catalog and component graph
-  -> remote service repos plus target Docker runtime
+  -> remote component repositories plus target Docker runtime
   -> CLI discovery, Control plane APIs, React workbench
   -> case and workflow execution
   -> Evidence files plus Store indexes
@@ -157,7 +158,7 @@ Core packages stay generic:
 | [API Case Format](docs/api-case-format.md) | Runnable HTTP case JSON and Evidence output contract. |
 | [Store Backends](docs/store-backends.md) | PostgreSQL/MySQL Store setup, MySQL safety guards, and SQLite compatibility boundary. |
 | [CLI and API Contracts](docs/cli-api-contracts.md) | Agent/CI discovery, Environment Catalog lifecycle, reports, asynchronous batches, topology collection, and failed-case Evidence lookup. |
-| [Release Checklist](docs/release-checklist.md) | Local gates, CI gates, real SkyWalking requirements, and company MySQL final sign-off. |
+| [Release Checklist](docs/release-checklist.md) | Local gates, CI gates, real SkyWalking requirements, and optional real-environment sign-off. |
 | [Visual Overview](docs/core-capabilities-skills-goals.html) | Bilingual capability map, API surface, data flow, and goals. |
 
 ## Project Principles
@@ -195,17 +196,18 @@ Current working areas:
 - Workbench: local React pages backed by Control plane APIs for catalog,
   workflow, environment, run, Evidence, and topology review.
 - Release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`
-  or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`; for a
-  company MySQL Store sign-off, run `npm run release-check:mysql-real:preflight`
-  first, then `npm run release-check:mysql-real` with
+  or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`; for an
+  optional organization-owned MySQL Store sign-off, run
+  `npm run release-check:mysql-real:preflight` first, then
+  `npm run release-check:mysql-real` with
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
   `OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` for every configured
   workflow step.
 
-Remaining release proof is operational rather than architectural: the company
-MySQL final sign-off still needs the real MySQL Store DSN, real SkyWalking
+Remaining optional real-environment proof is operational rather than
+architectural: operators must supply a real MySQL Store DSN, real SkyWalking
 GraphQL endpoint, configured workflow step count, and complete trace-id mapping
-for that workflow to run the strict gate.
+for that workflow before running the strict gate.
 
 ## Contributing
 

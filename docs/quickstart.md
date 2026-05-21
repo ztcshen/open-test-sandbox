@@ -42,7 +42,7 @@ The demo command starts a temporary local HTTP endpoint, runs the generic
 `OTSANDBOX_DEMO_STORE=postgres://...` / `OTSANDBOX_DEMO_STORE=mysql://...`, and
 prints the Evidence bundle path.
 MySQL demo Stores must use dedicated sandbox/smoke/test/CI-looking database
-names and must not point at business schemas.
+names and must not point at application schemas.
 Demo output is kept under the system temp directory so you can inspect it after
 the command exits. Set `OTSANDBOX_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.
@@ -57,12 +57,12 @@ automatically.
 ./bin/otsandbox.sh store upgrade --store local-personal
 ./bin/otsandbox.sh store ddl --backend postgres > otsandbox-schema.sql
 
-./bin/otsandbox.sh store config set company-mysql \
+./bin/otsandbox.sh store config set team-mysql \
   --url "mysql://user:pass@host:3306/otsandbox_local?tls=false"
-./bin/otsandbox.sh store use company-mysql
-./bin/otsandbox.sh store status --store company-mysql
-./bin/otsandbox.sh store upgrade --store company-mysql
-./bin/otsandbox.sh store ddl --store company-mysql > otsandbox-mysql-schema.sql
+./bin/otsandbox.sh store use team-mysql
+./bin/otsandbox.sh store status --store team-mysql
+./bin/otsandbox.sh store upgrade --store team-mysql
+./bin/otsandbox.sh store ddl --store team-mysql > otsandbox-mysql-schema.sql
 ```
 
 Use a private PostgreSQL or MySQL database for unverified local work and a
@@ -71,10 +71,11 @@ for legacy compatibility while SQL Store rollout continues.
 The Open Test Sandbox Store is the control-plane database and should already
 exist outside any Docker environment restored for a tested target. Do not point
 the Store DSN at a Docker database that `environment restore` is responsible
-for starting; business databases used by the tested services belong to the
+for starting; application databases used by the tested services belong to the
 target environment, while the sandbox Store remains independent.
 
-For the company MySQL path, validate against a dedicated sandbox Store database:
+For an optional organization-owned MySQL path, validate against a dedicated
+sandbox Store database:
 
 ```sh
 OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
@@ -97,7 +98,7 @@ checks the MySQL DSN, dedicated database-name guard, existing-database mode,
 real SkyWalking settings, configured workflow trace-id mapping, and credential masking
 without running the heavy release gate. The full wrapper rejects non-MySQL DSNs
 and database names that do not look dedicated to sandbox/smoke/test/CI
-validation. It uses existing-database contract mode, so the company account
+validation. It uses existing-database contract mode, so the operator account
 needs normal DDL/DML permissions on that dedicated Store database but does not
 need permission to create or drop databases. It also requires the real
 SkyWalking release mode and trace ids for every configured workflow step;
@@ -105,11 +106,11 @@ SkyWalking release mode and trace ids for every configured workflow step;
 smoke is not accepted by this wrapper, and `OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop`
 overrides are rejected.
 Direct Go MySQL contract tests also require an explicit
-`OTSANDBOX_MYSQL_TEST_DSN_MODE`; use `existing` for company smoke databases and
+`OTSANDBOX_MYSQL_TEST_DSN_MODE`; use `existing` for shared smoke databases and
 reserve `create-drop` for local admin-only tests.
 The generic MySQL release-check path, CLI smoke, frontend smoke, and standalone
 MySQL API smoke apply the same dedicated database-name guard before running
-Store upgrades or smoke writes, so do not point them at a business schema.
+Store upgrades or smoke writes, so do not point them at an application schema.
 
 Daily discovery commands do not change when you switch between a local
 PostgreSQL Store, a remote team PostgreSQL Store, and a team MySQL Store. Use
@@ -148,23 +149,23 @@ promotion. The `--topology-complete` flag is only a recorded completeness
 signal; collect real topology separately through a configured SkyWalking
 endpoint before publishing a verified environment.
 
-`environment restore` is anchored to the environment's verification workflow,
-for example the team core configured workflow. It prepares the local machine from
+`environment restore` is anchored to the environment's verification workflow.
+It prepares the local machine from
 the Store-backed environment facts instead of acting as a generic Docker
 launcher. The SQL Store stores compact source pointers and restore rules, not
 source archives, Docker images, logs, or Evidence payloads. For
 SQL Store-backed one-click environments, source pointers must be cloneable
 remote Git URLs, including private GitLab and public GitHub repositories. Local
 paths are reserved for SQLite compatibility tests and ad-hoc development, not
-published one-click environments. The optional environment package repository
-contains the Compose files and validation assets; service repositories contain
-the business code mounted or built by Compose. Small service-adjacent cert/key
-material can be stored as bounded, redacted environment metadata when it is
-required for startup, but large source/runtime artifacts stay outside the Store. By
-default restore is a dry run: it resolves the optional package and service
+published one-click environments. Component repositories contain the code
+mounted or built by Compose; component-owned Store assets contain only bounded
+startup/config material such as generated Compose files, small cert/key
+material, DDL, seed SQL, or launch scripts. Large source/runtime artifacts stay
+outside the Store. By default restore is a dry run: it resolves component
 checkouts under `--workspace`, shows Git clone commands when sources are
-recorded, and prints preflight tool checks, Docker Compose pull/build/up
-commands, and recorded health checks. Preflight checks `git` when a missing
+recorded, writes Store-generated startup files/assets, and prints preflight
+tool checks, Docker Compose pull/build/up commands, and recorded health checks.
+Preflight checks `git` when a missing
 checkout must be cloned, then checks both `docker` and `docker compose version`
 when a compose plan is recorded; it also labels heavy Docker steps so an
 operator can review them before destructive local validation. Add
@@ -197,14 +198,14 @@ restore fails before invoking Docker if it is missing.
 The restore report also includes `readiness`, the final pre-Docker review gate
 for a colleague-machine simulation. It checks that the sandbox SQL Store
 is outside the target Docker environment, the restore is anchored to a
-verification workflow, all recorded service repositories can be cloned or
+verification workflow, all recorded component repositories can be cloned or
 validated before Docker, a Compose/start plan exists, recorded Compose services
-cover the business services and middleware images, at least one health probe is
+cover the application services and middleware images, at least one health probe is
 recorded, cleanup commands are reviewable when requested, and the operator pause
 is preserved before container/image deletion or long downloads. If a workflow
-needs five business services, those five services should appear as repository
+needs several application services, those services should appear as repository
 items or existing checkout items and must pass before Docker pull/build/up can
-start. Middleware such as Apollo or MySQL normally appears through the recorded
+start. Middleware such as config services or databases normally appears through the recorded
 Compose service plan and image pull/build plan, then is checked through the
 same health probe gate.
 
@@ -225,7 +226,7 @@ for GET 2xx checks, `--health-tcp HOST:PORT` for port readiness,
 `--health-command CMD` for workspace-local command probes, and
 `--health-compose-service SERVICE` to inspect a Docker Compose service after
 startup. Restore does not run probes during dry-run. During `--execute`, all
-registered service repositories must clone, fetch, and ref-prepare first; only
+registered component repositories must clone, fetch, and ref-prepare first; only
 then does restore run Compose pull/build/up, wait for health probes, and run the
 verification workflow. A failed repository precheck stops before Docker startup,
 and a failed probe records `phase=health-check` in `summary.lastRestore`.
@@ -247,7 +248,7 @@ When you want to evaluate a new colleague machine without touching the current
 machine's running target containers, use `--assume-clean-docker` on a dry-run.
 That mode assumes the target Docker containers do not exist on the colleague
 machine, skips local fixed-name container conflict blocking, and still checks
-the SQL Store boundary, remote service repositories, Store-generated startup
+the SQL Store boundary, remote component repositories, Store-generated startup
 files, component startup batches, Docker Compose commands, and health gates. It
 cannot be combined with `--execute`, container adoption, or cleanup flags.
 

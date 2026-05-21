@@ -5,11 +5,11 @@ one backend for a workspace or team, and daily CLI/API/UI commands operate
 against the selected Store without changing command shape. The active product
 path is SQL Store-first: PostgreSQL and MySQL are supported product Store
 engines, and teams should choose the engine that matches their operational
-environment. The Store holds environment catalogs, service and interface
-registrations, workflows, maintained API cases, run records, Evidence indexes,
-trace topology indexes, baseline gates, timing data, and post-process task
-state. Evidence files and local logs may still live on disk, but their indexes
-belong in the selected Store.
+environment. The Store holds environment catalogs, component graph metadata,
+service and interface registrations, workflows, maintained API cases, run
+records, Evidence indexes, trace topology indexes, baseline gates, timing data,
+and post-process task state. Evidence files and local logs may still live on
+disk, but their indexes belong in the selected Store.
 
 ## Backend Selection
 
@@ -36,9 +36,27 @@ Dialect responsibilities:
 
 The first shared DDL builder is `sqlstore.CoreSchemaSQL`. It generates the
 core workflow tables for runs, API case runs, Evidence indexes, trace topology,
-post-process tasks, and baseline gates with dialect-specific JSON/time/bool
-types. New Store tables should follow this pattern instead of adding SQLite-only
-SQL to the daily Store path.
+post-process tasks, baseline gates, Environment Catalog rows, and component
+graph tables with dialect-specific JSON/time/bool types. New Store tables
+should follow this pattern instead of adding SQLite-only SQL to the daily Store
+path.
+
+Current SQL Store schema boundaries:
+
+- `runs.environment_id` links workflow, batch, and API case run records back to
+  the Environment Catalog entry that produced them when a run is environment
+  scoped. Existing upgraded rows may keep an empty value.
+- `environments` stores the environment lifecycle, verification workflow,
+  restore summary, Evidence completeness, and topology completeness flags.
+- `environment_components` stores every Docker-side runtime unit: application,
+  middleware, mock, observability, platform, or support process.
+- `component_dependencies` stores component-to-component consumption edges.
+  Restore projects blocking phases into provider-before-consumer startup order.
+- `component_config_assets` stores bounded startup/config material owned by a
+  component, such as generated Compose snippets, small cert/key material, DDL,
+  seed SQL, Apollo-style key/value assets, or service launch scripts. It must
+  not store Docker images, source repositories, large binaries, runtime
+  databases, runtime logs, or Evidence payloads.
 
 ## SQL Store First
 
@@ -53,7 +71,7 @@ Configure named Stores with:
 ```sh
 otsandbox store config set local-personal --url postgres://user:pass@host:5432/otsandbox_local?sslmode=disable
 otsandbox store config set team-verified --url postgres://user:pass@host:5432/otsandbox_team?sslmode=disable
-otsandbox store config set company-mysql --url mysql://user:pass@host:3306/otsandbox_team?tls=false
+otsandbox store config set team-mysql --url mysql://user:pass@host:3306/otsandbox_team?tls=false
 otsandbox store use local-personal
 otsandbox store current
 ```
@@ -150,8 +168,8 @@ OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false
 npm run smoke:frontend
 ```
 
-For a company MySQL validation pass, use a dedicated sandbox Store database and
-run the guarded MySQL release wrapper:
+For an optional organization-owned MySQL validation pass, use a dedicated
+sandbox Store database and run the guarded MySQL release wrapper:
 
 ```sh
 OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
@@ -171,22 +189,23 @@ npm run release-check:mysql-real
 
 The preflight should run first with the same environment; it validates the
 guarded wrapper inputs and masks credentials without running the full release
-gate. The wrapper accepts only `mysql://` and refuses database names that do not
-look like a sandbox, smoke, test, or CI database. This keeps the sandbox
-control-plane Store separate from business schemas used by the services under
-test.
+gate. This external sign-off is intentionally separate from local documentation
+and schema maintenance work. The wrapper accepts only `mysql://` and refuses
+database names that do not look like a sandbox, smoke, test, or CI database.
+This keeps the sandbox control-plane Store separate from application schemas
+used by the services under test.
 The generic MySQL release-check, CLI smoke, frontend smoke, and standalone
 MySQL API smoke use the same database-name guard before Store upgrades or smoke
 writes begin.
-It also runs the MySQL Store contract in existing-database mode, so the company
-account needs normal DDL/DML permissions on that dedicated database but does not
-need permission to create or drop databases. This wrapper is final-signoff
+It also runs the MySQL Store contract in existing-database mode, so the
+operator account needs normal DDL/DML permissions on that dedicated database
+but does not need permission to create or drop databases. This wrapper is signoff
 oriented: it also requires `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
 an `http` or `https` `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
 `OTS_SMOKE_TRACE_IDS` for all configured workflow steps. It rejects
 `OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop` overrides.
 Direct Go contract tests require an explicit `OTSANDBOX_MYSQL_TEST_DSN_MODE`.
-Use `existing` for company smoke databases. Use `create-drop` only for local
+Use `existing` for shared smoke databases. Use `create-drop` only for local
 admin-only contract tests where the account is allowed to create and drop
 temporary databases.
 

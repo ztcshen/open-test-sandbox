@@ -74,9 +74,9 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 
 ## Later / 后续
 
-- Collect company-environment MySQL sign-off evidence with a real MySQL Store
-  DSN, live SkyWalking GraphQL endpoint, and trace ids for every configured
-  workflow step.
+- Document optional organization-owned MySQL sign-off evidence with a real
+  MySQL Store DSN, live SkyWalking GraphQL endpoint, and trace ids for every
+  configured workflow step.
 - Deepen clean-machine restore evidence across more Docker Compose stacks and
   middleware combinations.
 - Publish versioned releases and binary artifacts.
@@ -87,7 +87,7 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 - Build a small public demo site or recorded walkthrough.
 
 - 使用真实 MySQL Store DSN、live SkyWalking GraphQL endpoint 和覆盖配置工作流的
-  trace id 收集公司环境 MySQL 最终验收证据。
+  trace id 记录组织自有环境的可选验收证据。
 - 在更多 Docker Compose 栈和中间件组合上深化干净机器恢复证据。
 - 发布版本化 release 和二进制产物。
 - 为可选导入、导出、审阅资产提供插件式模板包工作流。

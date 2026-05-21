@@ -43,8 +43,8 @@ CLI、Control plane API、React 工作台、报告和验证工具读取同一份
   Docker 环境、记录验收工作流结果，并只发布 verified 环境。
 - **验收证明**：verified 环境需要通过的 workflow run、已索引 Evidence，以及写入
   所选 Store 的真实 SkyWalking 拓扑。
-- **发布门禁**：通用 PostgreSQL/MySQL `release-check` 已接好；公司 MySQL 最终验收
-  走更严格的两阶段 real SkyWalking 门禁，仍等待真实公司 secrets 和 trace id。
+- **发布门禁**：通用 PostgreSQL/MySQL `release-check` 已接好；组织自有真实环境
+  可选验收可以额外走两阶段 real SkyWalking 门禁，并由操作者提供 secrets 和 trace id。
 
 ## 核心能力
 
@@ -57,7 +57,7 @@ CLI、Control plane API、React 工作台、报告和验证工具读取同一份
 | 工作流执行 | 按顺序执行工作流步骤，并保留每一步 Evidence、耗时、状态、日志和拓扑。 |
 | 环境恢复 | Store-backed Environment Catalog 可以规划或执行远端仓库准备、紧凑启动文件生成、Docker Compose pull/build/up、健康检查和绑定的验收工作流。 |
 | 证据详情 API | 按 run 或 case run 查询请求、响应、断言、前置上下文、拓扑、日志、产物清单、失败摘要、状态和耗时。 |
-| 真实拓扑门禁 | synthetic SkyWalking smoke 只验证 wiring；verified 环境和公司 MySQL 最终验收必须使用 live SkyWalking endpoint 和覆盖配置工作流所有 step 的 trace id。 |
+| 真实拓扑门禁 | synthetic SkyWalking smoke 只验证 wiring；verified 环境发布和可选真实环境验收必须使用 live SkyWalking endpoint 和覆盖配置工作流所有 step 的 trace id。 |
 | Control plane 工作台 | React 页面读取同一套 Store/read-model，和 CLI/API 共用运行事实。 |
 | 开源守卫 | release-check 防止生成态和来源域词汇进入通用核心。 |
 
@@ -141,7 +141,7 @@ SkyWalking endpoint 时，拓扑采集必须
 | [API Case Format](docs/api-case-format.md) | 可运行 HTTP 用例 JSON 和 Evidence 输出契约。 |
 | [Store Backends](docs/store-backends.md) | PostgreSQL/MySQL Store 设置、MySQL 安全保护和 SQLite 兼容边界。 |
 | [CLI and API Contracts](docs/cli-api-contracts.md) | agent/CI 目标发现、Environment Catalog 生命周期、报告、异步批量、拓扑采集和失败证据查询。 |
-| [Release Checklist](docs/release-checklist.md) | 本地门禁、CI 门禁、真实 SkyWalking 要求和公司 MySQL 最终验收。 |
+| [Release Checklist](docs/release-checklist.md) | 本地门禁、CI 门禁、真实 SkyWalking 要求和可选真实环境验收。 |
 | [Visual Overview](docs/core-capabilities-skills-goals.html) | 双语能力地图、API 面、数据流和迭代目标。 |
 
 ## 项目原则
@@ -174,15 +174,15 @@ SkyWalking endpoint 时，拓扑采集必须
 - 工作台：基于 Control plane API 的本地 React 页面，支持 catalog、workflow、
   environment、run、Evidence 和 topology 审阅；
 - 发布门禁：`OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check` 或
-  `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`；公司 MySQL
-  Store 最终验收先运行 `npm run release-check:mysql-real:preflight`，再运行
+  `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`；组织自有 MySQL
+  Store 可选真实验收先运行 `npm run release-check:mysql-real:preflight`，再运行
   `npm run release-check:mysql-real`，并必须同时提供
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`、`OTS_TRACE_GRAPHQL_URL`、
   `OTS_SMOKE_EXPECTED_STEPS` 和覆盖配置工作流所有 step 的 `OTS_SMOKE_TRACE_IDS`。
 
-剩余发布证明主要是运营输入，而不是架构缺口：公司 MySQL 最终验收仍需要真实
+剩余可选真实环境证明主要是运营输入，而不是架构缺口：操作者需要提供真实
 MySQL Store DSN、真实 SkyWalking GraphQL endpoint、配置工作流 step 数和该
-workflow 的 trace-id 映射来跑严格门禁。
+workflow 的 trace-id 映射，才能运行严格门禁。
 
 ## 贡献
 
