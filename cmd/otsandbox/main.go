@@ -251,7 +251,7 @@ Usage:
   otsandbox store current [--json]
   otsandbox store status [--store NAME_OR_DSN]
   otsandbox store upgrade [--store NAME_OR_DSN]
-  otsandbox store ddl [--backend postgres|mysql]
+  otsandbox store ddl [--backend postgres|mysql] [--store NAME_OR_DSN]
   otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-generated-file TARGET=SOURCE_FILE]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
@@ -451,11 +451,24 @@ func runStore(ctx context.Context, args []string) error {
 func runStoreDDL(args []string) error {
 	flags := flag.NewFlagSet("store ddl", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	backend := flags.String("backend", "postgres", "Store backend")
+	backend := flags.String("backend", "", "Store backend")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(*backend)) {
+	selectedBackend := strings.ToLower(strings.TrimSpace(*backend))
+	if selectedBackend == "" {
+		inferredBackend, err := inferStoreDDLBackend(*storeRef, *storeURL)
+		if err != nil {
+			return err
+		}
+		selectedBackend = inferredBackend
+	}
+	if selectedBackend == "" {
+		selectedBackend = "postgres"
+	}
+	switch selectedBackend {
 	case "postgres", "postgresql":
 		fmt.Println(strings.Join(sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{}), "\n\n"))
 		return nil
@@ -465,6 +478,50 @@ func runStoreDDL(args []string) error {
 	default:
 		return fmt.Errorf("unsupported DDL backend %q; supported backends: postgres, mysql", *backend)
 	}
+}
+
+func inferStoreDDLBackend(storeRef string, legacyStoreURL string) (string, error) {
+	storeRef = strings.TrimSpace(storeRef)
+	legacyStoreURL = strings.TrimSpace(legacyStoreURL)
+	if legacyStoreURL != "" {
+		normalized, err := normalizeLegacyStoreURL(legacyStoreURL)
+		if err != nil {
+			return "", err
+		}
+		backend, err := storeBackendFromURL(normalized)
+		if err != nil {
+			return "", err
+		}
+		return backend, nil
+	}
+	if storeRef != "" {
+		if backend, err := storeBackendFromURL(storeRef); err == nil && backend != "" {
+			return backend, nil
+		}
+		cfg, err := loadStoreConfig()
+		if err != nil {
+			return "", err
+		}
+		entry, ok := cfg.Stores[storeRef]
+		if !ok {
+			return "", fmt.Errorf("store config %q not found", storeRef)
+		}
+		if strings.TrimSpace(entry.Backend) != "" {
+			return strings.ToLower(strings.TrimSpace(entry.Backend)), nil
+		}
+		return storeBackendFromURL(entry.URL)
+	}
+	entry, err := activeStoreConfig()
+	if err != nil {
+		if errors.Is(err, errNoActiveStoreConfigured) {
+			return "", nil
+		}
+		return "", err
+	}
+	if strings.TrimSpace(entry.Backend) != "" {
+		return strings.ToLower(strings.TrimSpace(entry.Backend)), nil
+	}
+	return storeBackendFromURL(entry.URL)
 }
 
 func runEnvironment(ctx context.Context, args []string) error {

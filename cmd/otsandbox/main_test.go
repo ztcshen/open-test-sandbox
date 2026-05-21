@@ -101,6 +101,38 @@ func TestStoreDDLCommandPrintsMySQLSchema(t *testing.T) {
 	}
 }
 
+func TestStoreDDLCommandInfersMySQLBackendFromNamedStore(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@example.com:3306/team_verified?tls=false")
+
+	out := runStoreCommand(t, "ddl", "--store", "team-mysql")
+	if !strings.Contains(out, "create table if not exists schema_versions") {
+		t.Fatalf("mysql ddl should include schema_versions table:\n%s", out)
+	}
+	if !strings.Contains(out, "json not null") || !strings.Contains(out, "datetime(6)") {
+		t.Fatalf("named mysql ddl should use MySQL json and datetime columns:\n%s", out)
+	}
+	if strings.Contains(out, "jsonb") || strings.Contains(out, "create index if not exists") {
+		t.Fatalf("named mysql ddl should not emit PostgreSQL-specific DDL:\n%s", out)
+	}
+}
+
+func TestStoreDDLCommandInfersActiveMySQLBackend(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	runStoreCommand(t, "config", "set", "local-mysql", "--url", "mysql://user:secret@example.com:3306/otsandbox_local?tls=false")
+	runStoreCommand(t, "use", "local-mysql")
+
+	out := runStoreCommand(t, "ddl")
+	if !strings.Contains(out, "json not null") || !strings.Contains(out, "datetime(6)") {
+		t.Fatalf("active mysql ddl should use MySQL DDL:\n%s", out)
+	}
+	if strings.Contains(out, "jsonb") || strings.Contains(out, "create index if not exists") {
+		t.Fatalf("active mysql ddl should not emit PostgreSQL-specific DDL:\n%s", out)
+	}
+}
+
 func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 	configHome := t.TempDir()
 	env := []string{"OTSANDBOX_CONFIG_HOME=" + configHome}
