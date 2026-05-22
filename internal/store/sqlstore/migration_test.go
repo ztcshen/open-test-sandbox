@@ -41,6 +41,7 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 				"id varchar(255) primary key",
 				"profile_id varchar(128) not null",
 				"environment_id varchar(128) not null",
+				"evidence_root mediumtext not null",
 				"applied_at datetime(6) not null",
 				"summary_json json not null",
 				"started_at datetime(6)",
@@ -464,6 +465,53 @@ func TestUpgradeSchemaAddsRunEnvironmentAndDropsLegacyServiceGraphTables(t *test
 				}
 			}
 		})
+	}
+}
+
+func TestUpgradeSchemaWidensMySQLTextColumnsFromVersionSix(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	dialect := sqlstore.MySQLDialect{}
+
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(6)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+	})
+
+	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
+	if err != nil {
+		t.Fatalf("upgrade mysql v6 schema: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+		t.Fatalf("upgraded mysql v6 schema status = %#v", status)
+	}
+	joinedExecs := strings.Builder{}
+	for _, exec := range state.execsSnapshot() {
+		joinedExecs.WriteString(exec.query)
+		joinedExecs.WriteByte('\n')
+	}
+	for _, want := range []string{
+		"alter table `runs` modify column `evidence_root` mediumtext not null",
+		"alter table `component_config_assets` modify column `target_path` mediumtext not null",
+		"alter table `component_config_assets` modify column `content_inline` mediumtext not null",
+		"alter table `component_config_assets` modify column `sha256` mediumtext not null",
+	} {
+		if !strings.Contains(joinedExecs.String(), want) {
+			t.Fatalf("mysql v6 upgrade missing %q:\n%s", want, joinedExecs.String())
+		}
 	}
 }
 

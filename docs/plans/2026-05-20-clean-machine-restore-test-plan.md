@@ -180,9 +180,13 @@ Acceptance criteria for this adapter:
 
 ## Storage Boundary
 
-PostgreSQL stores compact environment metadata and small deterministic startup
-text. It must not store Docker images, code repositories, Maven caches, runtime
-databases, runtime logs, Evidence payloads, or large binaries.
+The selected SQL Store stores compact environment metadata and deterministic
+startup text such as DDL, seed SQL, launch scripts, certificates, keys, and
+configuration assets. It must not store Docker images, code repositories, Maven
+caches, runtime databases, runtime logs, Evidence payloads, or large binaries.
+There are no per-kind limits for deterministic text assets. If an inline asset,
+environment definition/summary, or component graph crosses 1 MB, the Store write
+must block and report the exact offending field, asset, or graph-size reason.
 
 The current 5.6 MB WireMock dependency jar is not a Store candidate. It should
 come from a remote artifact, a purpose-built image, or a remote repo build step.

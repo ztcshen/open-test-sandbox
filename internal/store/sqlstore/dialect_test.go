@@ -38,20 +38,24 @@ func TestDialectCapturesSQLDifferences(t *testing.T) {
 		name        string
 		dialect     sqlstore.Dialect
 		wantBind3   string
+		wantText    string
 		wantJSON    string
 		wantTime    string
 		wantKeyText string
 		wantUpsert  string
 		wantQuoteID string
 	}{
-		{name: "postgres", dialect: sqlstore.PostgresDialect{}, wantBind3: "$3", wantJSON: "jsonb", wantTime: "timestamptz", wantKeyText: "text", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
-		{name: "mysql", dialect: sqlstore.MySQLDialect{}, wantBind3: "?", wantJSON: "json", wantTime: "datetime(6)", wantKeyText: "varchar(128)", wantUpsert: "on duplicate key update name = values(name)", wantQuoteID: "`runs`"},
-		{name: "sqlite", dialect: sqlstore.SQLiteDialect{}, wantBind3: "?", wantJSON: "text", wantTime: "text", wantKeyText: "text", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
+		{name: "postgres", dialect: sqlstore.PostgresDialect{}, wantBind3: "$3", wantText: "text", wantJSON: "jsonb", wantTime: "timestamptz", wantKeyText: "text", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
+		{name: "mysql", dialect: sqlstore.MySQLDialect{}, wantBind3: "?", wantText: "mediumtext", wantJSON: "json", wantTime: "datetime(6)", wantKeyText: "varchar(128)", wantUpsert: "on duplicate key update name = values(name)", wantQuoteID: "`runs`"},
+		{name: "sqlite", dialect: sqlstore.SQLiteDialect{}, wantBind3: "?", wantText: "text", wantJSON: "text", wantTime: "text", wantKeyText: "text", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.dialect.BindVar(3); got != tt.wantBind3 {
 				t.Fatalf("bind var = %q want %q", got, tt.wantBind3)
+			}
+			if got := tt.dialect.TextType(); got != tt.wantText {
+				t.Fatalf("text type = %q want %q", got, tt.wantText)
 			}
 			if got := tt.dialect.JSONType(); got != tt.wantJSON {
 				t.Fatalf("json type = %q want %q", got, tt.wantJSON)

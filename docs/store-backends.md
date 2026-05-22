@@ -53,11 +53,24 @@ Current SQL Store schema boundaries:
   middleware, mock, observability, platform, or support process.
 - `component_dependencies` stores component-to-component consumption edges.
   Restore projects blocking phases into provider-before-consumer startup order.
-- `component_config_assets` stores bounded startup/config material owned by a
-  component, such as generated Compose snippets, small cert/key material, DDL,
+- `component_config_assets` stores deterministic startup/config material owned
+  by a component, such as generated Compose snippets, cert/key material, DDL,
   seed SQL, Apollo-style key/value assets, or service launch scripts. It must
   not store Docker images, source repositories, large binaries, runtime
-  databases, runtime logs, or Evidence payloads.
+  databases, runtime logs, or Evidence payloads. Inline Store material has no
+  per-kind size limit; DDL, seed SQL, certificates, keys, and launch scripts all
+  use the same 1 MB safety boundary. When an inline asset, environment
+  definition/summary, or combined component graph crosses that boundary, the
+  Store write is blocked with the exact field, asset, or largest-contributor
+  reason.
+
+Dependencies and assets are related but separate. A dependency row records that a
+consumer needs a provider capability; the asset rows record the concrete
+consumer-owned material needed to use that capability. For example,
+`order-api -> mysql` is the edge, while `order-api` owns its MySQL DDL and seed
+assets targeted at `mysql`. Likewise, `order-api -> apollo` or
+`order-api -> config-service` is the edge, while `order-api` owns its app id,
+namespace, and key/value assets targeted at that configuration provider.
 
 ## SQL Store First
 
@@ -82,6 +95,112 @@ Display commands, including JSON output, mask passwords in PostgreSQL and MySQL
 DSNs.
 The on-disk Store config keeps the real DSN so CLI commands can still open the
 selected database.
+
+To publish a locally verified environment into a team Store, upgrade the target
+Store first and then copy the current restore-critical metadata:
+
+```sh
+npm run store:publish:mysql -- \
+  --from local-personal \
+  --to team-mysql \
+  --environment local-sample \
+  --workflow workflow.local-sample \
+  --min-components 1 \
+  --min-assets 1 \
+  --verify-control-plane-url http://127.0.0.1:58663
+
+otsandbox store status --store team-mysql
+otsandbox store status --store team-mysql --json
+tools/smoke/mysql-store-preflight.sh --store team-mysql \
+  --output-prefix .runtime/team-mysql-preflight
+python3 tools/smoke/mysql-handshake-probe.py \
+  --url "mysql://user:xxxxx@host:3306/otsandbox_local?tls=false" \
+  --json
+otsandbox store provision --store team-mysql --json
+otsandbox store upgrade --store team-mysql
+otsandbox store copy --from local-personal --to team-mysql \
+  --require-environment local-sample \
+  --require-verification-workflow workflow.local-sample \
+  --require-verified-environment \
+  --require-min-components 1 \
+  --require-min-assets 1 \
+  --json
+```
+
+`store:publish:mysql` is the shortest repeatable path for MySQL team Store
+promotion. It first proves the source Store already contains the verified
+environment and component graph, then runs the MySQL handshake preflight,
+provisions/upgrades the target Store through the CLI, runs `store copy` with
+verified-environment gates, asserts the copy report includes the profile
+catalog, profile index, active config version, and read models needed by the
+acceptance workflow, reads the environment back from the target Store, asserts
+the upgraded schema has no pending migrations, switches the local active Store,
+verifies `store current --json` points at the MySQL target, optionally verifies
+a running control plane's `/api/store/current` with
+`--verify-control-plane-url URL`, and can run `environment restore` when
+`--restore --workspace PATH --server-url URL` are provided.
+
+`store copy` copies catalog/read-model data, environments, and component graphs
+needed for one-click restore. Use `--require-environment` and
+`--require-verification-workflow` plus `--require-verified-environment` in
+shared-Store promotion scripts so a missing, wrong-workflow, or unverified
+acceptance environment blocks the copy before restore starts. Add minimum
+component/dependency/asset thresholds when the environment has an expected
+component graph shape. The command intentionally skips historical runs,
+Evidence indexes, and topology rows because the acceptance workflow should be
+rerun against the shared Store before publishing the environment as verified.
+
+For the colleague/new-machine path, use the shared Store as the source of truth
+and do not copy local Store data:
+
+```sh
+npm run store:restore:mysql -- \
+  --store team-mysql \
+  --store-url "mysql://user:pass@host:3306/otsandbox_team?tls=false" \
+  --environment local-sample \
+  --workspace "$HOME/open-test-runtime" \
+  --server-url http://127.0.0.1:58663 \
+  --min-components 1 \
+  --min-assets 1 \
+  --min-acceptance-steps 1
+```
+
+`store:restore:mysql` verifies the named Store's MySQL handshake, schema
+readiness, active Store selection, running control plane Store selection, copied
+verified Environment Catalog entry, component graph thresholds, Docker restore,
+and final SkyWalking-backed acceptance report. It is the expected new-machine
+proof after an operator has already run `store:publish:mysql`.
+
+Use `store:audit:mysql-goal` for a read-only completion audit:
+
+```sh
+npm run store:audit:mysql-goal -- \
+  --from local-personal \
+  --to team-mysql \
+  --environment local-sample \
+  --workflow workflow.local-sample \
+  --control-plane-url http://127.0.0.1:58663 \
+  --min-components 1 \
+  --min-assets 1
+```
+
+The audit writes JSON and Markdown evidence and exits non-zero until all
+read-only gates are true: source Store ready, target MySQL handshake reachable,
+target schema current, target environment copied, local active Store selected,
+and running control plane selected. Its `nextAction` field points operators to
+the publish wrapper while the target Store is not ready, or to the colleague
+restore wrapper once the shared Store gates are green. `nextCommand` is a
+machine-readable argv array and `nextCommandShell` is the same command rendered
+for terminal use.
+
+Treat a TCP or SOCKS `connect` result as only a network hint. Shared MySQL Store
+promotion requires a real MySQL initial handshake before provisioning. If
+`tools/smoke/mysql-handshake-probe.py` reports that the connection closes before
+reading the 4-byte MySQL packet header, fix the VPN route or proxy rule first;
+do not run `store provision`, `store upgrade`, or `store copy` through that
+path. For scripted shared-Store promotion, capture route and handshake
+diagnostics before provisioning so failures can be triaged without touching the
+remote database.
 
 Keep the sandbox control-plane Store outside restored Docker environments. The
 Store may describe and verify a target environment, but it must not be hosted

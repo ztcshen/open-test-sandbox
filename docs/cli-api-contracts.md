@@ -47,10 +47,10 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
 | Area | CLI commands |
 | --- | --- |
 | General | `version`, `help` |
-| Store | `store config set/list/remove`, `store use`, `store current`, `store status`, `store upgrade`, `store ddl` |
+| Store | `store config set/list/remove`, `store use`, `store current`, `store status`, `store provision`, `store upgrade`, `store ddl`, `store copy` |
 | Environment catalog | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment verify`, `environment publish-verified` |
 | Sandbox runtime | `sandbox start`, `sandbox service register`, `sandbox interface register` |
-| Template package lifecycle | `template-package ...` / `template-packages ...` aliases for `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile audit-plan`, `profile verify`, `profile import` |
+| Template package lifecycle | `template-package ...` / `template-packages ...` aliases for `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile audit-plan`, `profile doctor`, `profile repair`, `profile verify`, `profile import` |
 | Template package generation/import planning | `template-package generation-plan openapi`, `template-package import-plan openapi`, `template-package import-plan http-capture` aliases for the legacy `profile ...` commands |
 | Config publication | `config publish` (`config apply` alias) |
 | Executor planning | `executor plan` |
@@ -59,7 +59,7 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
 | Baseline | `baseline get`, `baseline set` |
 | Template | `template render` |
 | Interface node | `interface-node discover`, `interface-node case audit`, `interface-node case draft`, `interface-node case apply`, `interface-node case report` |
-| API case | `case discover`, `case run`, `case incomplete-batches` |
+| API case | `case discover`, `case run`, `case batch start`, `case batch report`, `case incomplete-batches` |
 | Case suite | `case suite report`, `case suite coverage`, `case suite stability`, `case suite priority`, `case suite brief`, `case suite quality`, `case suite quality-plan`, `case suite quality-report`, `case suite inspect`, `case suite plan`, `case suite impact`, `case suite impact-report` |
 | Server | `serve` |
 
@@ -109,8 +109,13 @@ remain compatibility inputs and are not the SQL Store daily restore source.
 For already-registered environments, `environment startup-file put ENV_ID
 --file TARGET=SOURCE_FILE` updates only `compose.generatedFiles` and preserves
 the existing workflow, services, repositories, and health checks.
-Component graph assets are bounded startup/config material, not source archives,
-Docker images, runtime databases, logs, or Evidence payloads.
+Component graph assets are deterministic startup/config material, not source
+archives, Docker images, runtime databases, logs, or Evidence payloads. Inline
+assets have no per-kind size limit: DDL, seed SQL, Apollo-style configuration,
+certificates, keys, and launch scripts all follow the same rule. If one inline
+asset, an environment definition/summary, or the combined component graph
+crosses the 1 MB safety boundary, the Store write is blocked with the exact
+field, asset, or largest-contributor reason.
 Full restore preflight checks fixed Compose `container_name` values against
 existing Docker containers and blocks non-destructive startup when names already
 exist; `--prepare-repos-only` can still clone repos and write Store startup
@@ -179,6 +184,13 @@ Template package CLI commands prefer `--template-package` where a package
 reference is needed for inspect, pack, audit, audit-plan, and verify. Legacy
 `--profile` flags remain accepted during migration.
 
+`profile import` includes a Store diff summary for API cases and per-node case
+counts. `profile doctor --case-id ID` checks one case across the loaded profile,
+catalog entry, runnable case file, interface node, request template, fixtures,
+and JSON model fields. `profile repair --from-manifest PATH` restores catalog
+case entries and case files from an explicit manifest; it is dry-run by default
+and writes only when `--apply` is supplied.
+
 ## API/CLI Parity Matrix
 
 | Capability | CLI | API | Parity |
@@ -186,7 +198,7 @@ reference is needed for inspect, pack, audit, audit-plan, and verify. Legacy
 | Serve control plane | `serve` | Not applicable | CLI-only bootstrap. |
 | Version/help | `version`, `help` | None | CLI-only. |
 | Store selection visibility | `store current` | `/api/store/current` | Paired as read-only visibility. CLI reports the active named Store; API reports the Store selected when `serve` started. Neither surface exposes raw DSN passwords. |
-| Store status, schema upgrade, and DDL | `store status`, `store upgrade`, `store ddl` | None | CLI-only. `store ddl --backend postgres` and `store ddl --backend mysql` print schema DDL for externally provisioned control-plane databases. |
+| Store status, schema upgrade, DDL, and migration | `store status`, `store provision`, `store upgrade`, `store ddl`, `store copy` | None | CLI-only. `store status --json` emits masked, machine-readable backend/version/pending status for migration scripts; when a Store cannot be reached it still writes `ok=false` plus the masked target and error before exiting non-zero. `store provision --store NAME_OR_DSN --json` creates the named MySQL Store database when the server account is reachable and authorized; it does not host the sandbox Store in Docker and does not copy Store data. `store ddl --backend postgres` and `store ddl --backend mysql` print schema DDL for externally provisioned control-plane databases. `store copy --from SOURCE --to TARGET` promotes current restore-critical Store metadata from a local Store into a shared PostgreSQL or MySQL Store; `--require-environment ENV_ID --require-verification-workflow WORKFLOW_ID --require-verified-environment` turns the expected verified environment and acceptance workflow into a built-in copy gate, and optional component/dependency/asset minimum flags can gate the copied component graph size. Its JSON report lists copied environment ids, verification workflow ids, verification flags, component graph counts, asset counts, and inline asset bytes so operators can prove the restore catalog was copied. Historical runs, Evidence indexes, and topology rows are intentionally rerun on the target Store. |
 | Environment catalog lifecycle | `environment register`, `environment startup-file put`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment verify`, `environment publish-verified` | `/api/environments`, `/api/environments/{environmentId}`, `GET /api/environments/{environmentId}/bootstrap`, `/api/environments/{environmentId}/verify`, `/api/environments/{environmentId}/publish-verified` | Mostly paired. CLI and API use the active Store or `--store NAME_OR_DSN`; `startup-file put` updates compact Store-backed startup files for an existing environment without re-registering its workflow, services, repositories, or health checks; inspect and bootstrap expose component graph restore-readiness, including blocking dependency order, cycle status, health gate counts, and remote asset readiness; bootstrap and restore also expose `componentStartupPlan`, grouping components into provider-before-consumer startup batches with static health gates derived from Store component checks; `restore` is currently CLI-only local machine preparation anchored to the environment verification workflow. It dry-runs by default, can clone remote component repositories into a workspace with `--execute`, can lock cloned or clean existing repos to recorded `--repo-ref SERVICE=REF` values, gives recorded refs precedence over `--pull` for existing checkouts, validates existing checkouts against the recorded `origin` and clean work tree state, can generate compact Store-backed startup files and component-owned assets under the workspace before Docker starts, reports a readiness gate for Store boundary, remote component repositories, Store startup files/assets, Compose services/middleware, existing container-name conflicts, health probes, cleanup review, and operator pause, runs the recorded Docker Compose pull/build/up plan or recorded start command only after repository preparation and non-destructive preflight succeed, or explicitly adopts already-running fixed-name containers with `--use-existing-containers`, waits for recorded health checks, and can run the recorded verification workflow with `--execute --run-workflow`. Each restore attempt writes `summary.lastRestore` back to the selected Environment Catalog entry for inspect/API visibility, including readiness status. CLI restore can also plan Compose-scoped target cleanup with `--clean-docker-state`/`--clean-docker-images`; execution is blocked unless `--allow-destructive-docker-cleanup` is supplied. Cleanup is a local CLI operation only, not an API execution surface. `verify` records run status and completeness flags, while `publish-verified` inspects the selected Store for a passed run, indexed Evidence, and complete SkyWalking topology before verified discovery. |
 | Start registered sandbox service | `sandbox start` | None | CLI-only local execution. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote SQL Stores use the same command. |
 | Register sandbox service/interface in Store | `sandbox service register`, `sandbox interface register` | `/api/sandbox/services`, `/api/sandbox/interfaces` | Paired. CLI and API share the same Store catalog registration path; CLI accepts active Store or `--store NAME_OR_DSN`. |
@@ -194,7 +206,7 @@ reference is needed for inspect, pack, audit, audit-plan, and verify. Legacy
 | Current template package summary/assets | `template-package inspect` (`profile inspect` legacy alias) | `/api/template-packages/current`, `/api/template-packages/assets` | Partial. CLI inspects a package/reference; API reports the active served template package. Legacy `/api/profile*` routes remain. |
 | Template package import/publish | `template-package import`, `config publish` (`profile import` legacy alias) | `/api/template-packages/import` | Mostly paired through Store-first aliases. CLI accepts active Store or `--store NAME_OR_DSN` and can also audit/require audit ok. |
 | Template package verify | `template-package verify` (`profile verify` legacy alias) | `/api/template-packages/verify` | Paired through Store-first aliases. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote SQL Stores use the same command. |
-| Template package audit repair plan | `template-package audit-plan` (`profile audit-plan` legacy alias) | `/api/template-packages/audit-plan` | Paired through Store-first aliases. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Template package audit/repair helpers | `template-package audit-plan`, `template-package doctor`, `template-package repair` (`profile ...` legacy aliases) | `/api/template-packages/audit-plan` | Partial. `audit-plan` is paired. `doctor` and `repair` are CLI-only local profile/package file helpers; `repair` defaults to dry-run and requires `--apply` before writing. |
 | Template package init/pack/audit | `template-package init`, `template-package pack`, `template-package audit` (`profile ...` legacy aliases) | None | CLI-only package authoring. |
 | Template package import/generation planning | `template-package import-plan openapi`, `template-package import-plan http-capture`, `template-package generation-plan openapi` (`profile ...` legacy aliases) | `/api/template-packages/import-plan/openapi`, `/api/template-packages/import-plan/http-capture`, `/api/template-packages/generation-plan/openapi` | Paired for current OpenAPI import, static HTTP capture import, and OpenAPI generation planners. |
 | Template package catalog index | `template-package catalog-index` (`profile catalog-index` legacy alias) | `/api/template-packages/catalog-index` | Paired through Store-first alias; CLI accepts active Store or `--store NAME_OR_DSN`. Legacy `/api/profile/catalog-index` remains. |
@@ -206,7 +218,7 @@ reference is needed for inspect, pack, audit, audit-plan, and verify. Legacy
 | Case discovery/capabilities | `case discover` | `/api/cases/capabilities`, `/api/catalog` | Partial. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote SQL Stores use the same command. CLI has richer maintenance filters. |
 | Single case run by file | `case run --case PATH` | `/api/cases/run` with `casePath` | Paired. CLI writes Store records through the active Store or `--store NAME_OR_DSN`; local and remote SQL Stores use the same command. |
 | Single case run by catalog id | `case run --case-id ID` | `/api/test-kit/run` with `caseId` | Paired. CLI and API execute the Store catalog case through the same test-kit runner, write run/case/Evidence indexes to the active Store, and accept the same command shape for local and remote SQL Stores. |
-| Case batch run | `case suite report`, `workflow report`, `interface-node case report` | `/api/cases/batch-runs`, `/api/test-kit/run-batch` | Partial. CLI variants are synchronous reports; API variants are async or test-kit oriented. |
+| Case batch run | `case batch start`, `case batch report`, `case suite report`, `workflow report`, `interface-node case report` | `/api/cases/batch-runs`, `/api/test-kit/run-batch` | Mostly paired for async batch execution through `case batch start/report`; report-specific CLI variants remain synchronous artifact generators. |
 | Case run list | `case runs` | `/api/case/runs` | Paired. CLI reads Store runs, API case runs, and Evidence counts through the active Store or `--store NAME_OR_DSN`. |
 | Case evidence detail | `case evidence` | `/api/case/evidence`, `/api/case-run/evidence` | Paired. CLI reuses the control-plane case Evidence payload and accepts active Store or `--store NAME_OR_DSN`. |
 | Case timing | `case timing` | `/api/case/timing` | Paired. CLI reuses the control-plane timing summary payload and accepts active Store or `--store NAME_OR_DSN`. |
@@ -289,10 +301,10 @@ parity in this order:
    `template-package init/pack/audit` and `interface-node case draft/apply` are
    review/migration utilities, not mandatory runtime operations.
 
-4. Normalize report execution semantics:
-   either add synchronous API report endpoints, or add CLI commands that start
-   async batch runs and poll `/api/cases/batch-runs/{batchRunId}`. The current
-   split is workable, but it is not one-to-one.
+4. Report execution now has a shared async CLI entrypoint:
+   `case batch start/report` starts and polls `/api/cases/batch-runs`. The
+   remaining split is limited to synchronous CLI artifact generators such as
+   `case suite report`, `interface-node case report`, and `workflow report`.
 
 ## Notes for Future Changes
 

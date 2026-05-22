@@ -64,6 +64,7 @@ type apiCaseBatchCasePlan struct {
 	Overrides       map[string]any
 	Execution       *caseExecutionConfig
 	Exports         []map[string]any
+	Case            profile.APICase
 }
 
 type apiCaseBatchCaseReport struct {
@@ -439,6 +440,9 @@ func materializeAPICaseBatchExecution(ctx context.Context, bundle profile.Bundle
 	if err != nil {
 		return "", "", err
 	}
+	if err := applyAPICaseRequestModel(&request, plan.Case); err != nil {
+		return "", "", err
+	}
 	body := mapFromAny(request.body)
 	apiCase := apicase.Case{
 		ID:    plan.ID,
@@ -714,6 +718,9 @@ func collectAPICaseBatchTraceTopology(ctx context.Context, runtime store.Store, 
 	payload := map[string]any{
 		"workflowId": workflowID,
 		"stepId":     plan.StepID,
+	}
+	if plan.Execution != nil && strings.TrimSpace(plan.Execution.TraceEndpoint) != "" {
+		payload["traceEndpoint"] = plan.Execution.TraceEndpoint
 	}
 	resultPayload := map[string]any{
 		"ok":         true,
@@ -1201,6 +1208,7 @@ func apiCaseBatchNodePlans(ctx context.Context, bundle profile.Bundle, runtime s
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
 			Exports:         exports,
+			Case:            item,
 		})
 	}
 	return out
@@ -1269,6 +1277,7 @@ func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runt
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
 			Exports:         exports,
+			Case:            item,
 		})
 	}
 	return out
@@ -1329,6 +1338,7 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 			Execution:       execution,
 			Exports:         exports,
+			Case:            item,
 		})
 	}
 	return out

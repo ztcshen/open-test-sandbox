@@ -127,6 +127,9 @@ func TestCopyStoreCurrentStateCopiesCatalogAndEnvironmentGraph(t *testing.T) {
 		ComposeJSON:            `{"composeFiles":["compose.yml"]}`,
 		HealthChecksJSON:       `[{"id":"alpha","url":"http://127.0.0.1:18080/health"}]`,
 		VerificationWorkflowID: "workflow.alpha",
+		LastVerificationStatus: "passed",
+		EvidenceComplete:       true,
+		TopologyComplete:       true,
 		SummaryJSON:            `{"restoreReady":true}`,
 		CreatedAt:              now,
 		UpdatedAt:              now,
@@ -162,6 +165,37 @@ func TestCopyStoreCurrentStateCopiesCatalogAndEnvironmentGraph(t *testing.T) {
 	if report.ProfileCatalogs != 1 || report.ProfileIndexes != 1 || report.ConfigVersions != 1 || len(report.ReadModels) == 0 || !report.RunsSkipped || report.Environments != 1 || report.ComponentGraphs != 1 {
 		t.Fatalf("copy report = %#v", report)
 	}
+	if len(report.EnvironmentIDs) != 1 || report.EnvironmentIDs[0] != "env.alpha" || len(report.EnvironmentRefs) != 1 || !report.EnvironmentRefs[0].Verified || report.EnvironmentRefs[0].VerificationWorkflowID != "workflow.alpha" {
+		t.Fatalf("copy environment refs = %#v ids=%#v", report.EnvironmentRefs, report.EnvironmentIDs)
+	}
+	if len(report.ComponentRefs) != 1 || report.ComponentRefs[0].EnvironmentID != "env.alpha" || report.ComponentRefs[0].Components != 1 || report.ComponentRefs[0].Assets != 1 || report.ComponentRefs[0].InlineAssetBytes != len("services: {}\n") || report.ComponentRefs[0].LargestInlineAssetID != "compose.alpha" {
+		t.Fatalf("copy component refs = %#v", report.ComponentRefs)
+	}
+	if err := validateStoreCopyRequirements(report, storeCopyRequirements{EnvironmentID: "env.alpha", VerificationWorkflowID: "workflow.alpha", VerifiedEnvironment: true, MinComponents: 1, MinAssets: 1, MinInlineAssetBytes: len("services: {}\n")}); err != nil {
+		t.Fatalf("expected env.alpha copy requirements to pass: %v", err)
+	}
+	if err := validateStoreCopyRequirements(report, storeCopyRequirements{EnvironmentID: "env.missing"}); err == nil || !strings.Contains(err.Error(), "was not copied") {
+		t.Fatalf("expected missing environment requirement failure, got %v", err)
+	}
+	if err := validateStoreCopyRequirements(report, storeCopyRequirements{EnvironmentID: "env.alpha", VerificationWorkflowID: "workflow.other"}); err == nil || !strings.Contains(err.Error(), "verification workflow") {
+		t.Fatalf("expected workflow requirement failure, got %v", err)
+	}
+	if err := validateStoreCopyRequirements(report, storeCopyRequirements{EnvironmentID: "env.alpha", MinComponents: 2}); err == nil || !strings.Contains(err.Error(), "component count") {
+		t.Fatalf("expected min component requirement failure, got %v", err)
+	}
+	graphlessReport := storeCopyStateReport{
+		OK: true,
+		EnvironmentRefs: []storeCopyEnvironmentReport{{
+			ID:     "env.graphless",
+			Status: "draft",
+		}},
+	}
+	if err := validateStoreCopyRequirements(graphlessReport, storeCopyRequirements{EnvironmentID: "env.graphless"}); err != nil {
+		t.Fatalf("presence-only environment requirement should not require a component graph: %v", err)
+	}
+	if err := validateStoreCopyRequirements(graphlessReport, storeCopyRequirements{EnvironmentID: "env.graphless", MinComponents: 1}); err == nil || !strings.Contains(err.Error(), "component graph") {
+		t.Fatalf("component minimum should require a component graph, got %v", err)
+	}
 	catalog, err := target.GetProfileCatalog(ctx)
 	if err != nil {
 		t.Fatalf("target profile catalog: %v", err)
@@ -195,6 +229,119 @@ func TestCopyStoreCurrentStateCopiesCatalogAndEnvironmentGraph(t *testing.T) {
 	}
 }
 
+func TestStoreCopyRequirementFailureJSONReportsNotOK(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
+	targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+	sourceRef := "sqlite://" + sourcePath
+	targetRef := "sqlite://" + targetPath
+	ctx := context.Background()
+	source, err := sqlite.Open(ctx, sqlite.Config{Path: sourcePath})
+	if err != nil {
+		t.Fatalf("open source Store: %v", err)
+	}
+	defer source.Close()
+	now := time.Now().UTC()
+	if _, err := source.UpsertEnvironment(ctx, store.Environment{
+		ID:        "env.graphless",
+		Status:    "draft",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed graphless environment: %v", err)
+	}
+
+	out := runCLIFails(t, "store", "copy", "--from", sourceRef, "--to", targetRef, "--require-environment", "env.graphless", "--require-min-components", "1", "--json")
+	var report storeCopyStateReport
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode store copy failure json: %v\n%s", err, out)
+	}
+	if report.OK || !strings.Contains(report.Error, "component graph") {
+		t.Fatalf("store copy failure report = %#v raw=%s", report, out)
+	}
+}
+
+func TestProfileExportWritesActiveStoreCatalogAsProfileBundle(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := runtime.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "profile.export",
+		IndexedAt: now,
+		Services: []store.CatalogService{{
+			ID:          "service.alpha",
+			DisplayName: "Service Alpha",
+			ServicePort: 18080,
+		}},
+		Workflows: []store.CatalogWorkflow{{
+			ID:          "workflow.alpha",
+			DisplayName: "Workflow Alpha",
+		}},
+		InterfaceNodes: []store.CatalogInterfaceNode{{
+			ID:          "node.alpha",
+			DisplayName: "Node Alpha",
+			ServiceID:   "service.alpha",
+			Method:      "GET",
+			Path:        "/v1/items",
+		}},
+		APICases: []store.CatalogAPICase{{
+			ID:          "case.alpha",
+			DisplayName: "Case Alpha",
+			NodeID:      "node.alpha",
+			Status:      "active",
+		}},
+		TemplateConfigs: []store.CatalogTemplateConfig{{
+			ID:         "cfg.case.alpha",
+			TemplateID: "case-execution",
+			NodeID:     "node.alpha",
+			ScopeType:  "case",
+			ScopeID:    "case.alpha",
+			ConfigJSON: `{"caseId":"case.alpha","caseExecution":{"method":"GET","nodeId":"node.alpha","path":"/v1/items","query":{"id":"item-001"},"expectedHttpCodes":[200]}}`,
+			Status:     "active",
+		}},
+	}); err != nil {
+		t.Fatalf("seed profile catalog: %v", err)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	outputDir := filepath.Join(t.TempDir(), "exported-profile")
+	out := runCLI(t, "profile", "export", "--store", "sqlite://"+storePath, "--output", outputDir, "--json")
+	var report struct {
+		OK        bool   `json:"ok"`
+		ProfileID string `json:"profileId"`
+		Output    string `json:"output"`
+		Counts    struct {
+			Services        int `json:"services"`
+			Workflows       int `json:"workflows"`
+			InterfaceNodes  int `json:"interfaceNodes"`
+			APICases        int `json:"apiCases"`
+			TemplateConfigs int `json:"templateConfigs"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode export report: %v\n%s", err, out)
+	}
+	if !report.OK || report.ProfileID != "profile.export" || report.Output != outputDir || report.Counts.TemplateConfigs != 2 {
+		t.Fatalf("export report = %#v", report)
+	}
+	bundle, err := profile.Load(outputDir)
+	if err != nil {
+		t.Fatalf("load exported profile: %v", err)
+	}
+	if bundle.ID != "profile.export" || len(bundle.Services) != 1 || len(bundle.APICases) != 1 || len(bundle.TemplateConfigs) != 2 {
+		t.Fatalf("exported bundle = %#v", bundle)
+	}
+	configs := caseExecutionConfigIDs(bundle.TemplateConfigs)
+	if configs["case.alpha"] != "cfg.case.alpha" || !strings.Contains(bundle.TemplateConfigs[1].ConfigJSON+bundle.TemplateConfigs[0].ConfigJSON, `"query":{"id":"item-001"}`) {
+		t.Fatalf("exported template configs lost case query: %#v", bundle.TemplateConfigs)
+	}
+}
+
 func TestStoreDDLCommandPrintsPostgreSQLSchema(t *testing.T) {
 	out := runStoreCommand(t, "ddl", "--backend", "postgres")
 	if !strings.Contains(out, "create table if not exists schema_versions") {
@@ -218,6 +365,9 @@ func TestStoreDDLCommandPrintsMySQLSchema(t *testing.T) {
 	}
 	if !strings.Contains(out, "id varchar(255) primary key") || !strings.Contains(out, "profile_id varchar(128) not null") || !strings.Contains(out, "environment_id varchar(128) not null") {
 		t.Fatalf("mysql ddl should use long runtime IDs and bounded graph keys:\n%s", out)
+	}
+	if !strings.Contains(out, "content_inline mediumtext not null") || !strings.Contains(out, "evidence_root mediumtext not null") {
+		t.Fatalf("mysql ddl should use mediumtext so Store metadata is not constrained by small text columns:\n%s", out)
 	}
 	if strings.Contains(out, "service_dependencies") || strings.Contains(out, "service_config_assets") {
 		t.Fatalf("mysql ddl should not include legacy service-only graph tables:\n%s", out)
@@ -399,6 +549,105 @@ func TestStoreStatusCanUseNamedMySQLStore(t *testing.T) {
 	}
 }
 
+func TestStoreStatusCanEmitJSONForNamedMySQLStore(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	withMySQLSchemaStatus(t, func(_ context.Context, cfg mysql.Config) (mysql.SchemaStatusResult, error) {
+		return mysql.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 1, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
+	})
+	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@example.com:3306/team_verified?tls=false")
+
+	out := runStoreCommand(t, "status", "--store", "team-mysql", "--json")
+	var report struct {
+		OK             bool   `json:"ok"`
+		Backend        string `json:"backend"`
+		URL            string `json:"url"`
+		CurrentVersion int    `json:"currentVersion"`
+		TargetVersion  int    `json:"targetVersion"`
+		Pending        int    `json:"pending"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode status json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Backend != "mysql" || !strings.Contains(report.URL, "team_verified") || strings.Contains(report.URL, "secret") || report.CurrentVersion != 1 || report.TargetVersion != sqlstore.CurrentSchemaVersion || report.Pending != sqlstore.CurrentSchemaVersion-1 {
+		t.Fatalf("mysql status json = %#v raw=%s", report, out)
+	}
+}
+
+func TestStoreProvisionCanCreateNamedMySQLDatabase(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	withMySQLProvisionDatabase(t, func(_ context.Context, cfg mysql.Config) (mysql.ProvisionDatabaseResult, error) {
+		return mysql.ProvisionDatabaseResult{URL: cfg.URL, Database: "team_verified", Created: true}, nil
+	})
+	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@example.com:3306/team_verified?tls=false")
+
+	out := runStoreCommand(t, "provision", "--store", "team-mysql", "--json")
+	var report struct {
+		OK       bool   `json:"ok"`
+		Backend  string `json:"backend"`
+		URL      string `json:"url"`
+		Database string `json:"database"`
+		Created  bool   `json:"created"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode provision json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Backend != "mysql" || report.Database != "team_verified" || !report.Created || strings.Contains(report.URL, "secret") {
+		t.Fatalf("mysql provision json = %#v raw=%s", report, out)
+	}
+}
+
+func TestStoreProvisionJSONReportsMySQLConnectionError(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	withMySQLProvisionDatabase(t, func(context.Context, mysql.Config) (mysql.ProvisionDatabaseResult, error) {
+		return mysql.ProvisionDatabaseResult{}, errors.New("dial tcp 10.0.20.108:3306: i/o timeout")
+	})
+	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@10.0.20.108:3306/OTS_SANDBOX_TEST?tls=false")
+
+	out := runStoreCommandFails(t, "provision", "--store", "team-mysql", "--json")
+	var report struct {
+		OK            bool   `json:"ok"`
+		Backend       string `json:"backend"`
+		URL           string `json:"url"`
+		TargetVersion int    `json:"targetVersion"`
+		Pending       int    `json:"pending"`
+		Error         string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode provision error json: %v\n%s", err, out)
+	}
+	if report.OK || report.Backend != "mysql" || !strings.Contains(report.URL, "OTS_SANDBOX_TEST") || strings.Contains(report.URL, "secret") || !strings.Contains(report.Error, "i/o timeout") {
+		t.Fatalf("mysql provision error json = %#v raw=%s", report, out)
+	}
+}
+
+func TestStoreStatusJSONReportsMySQLConnectionError(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	withMySQLSchemaStatus(t, func(context.Context, mysql.Config) (mysql.SchemaStatusResult, error) {
+		return mysql.SchemaStatusResult{}, errors.New("dial tcp 10.0.20.108:3306: i/o timeout")
+	})
+	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@10.0.20.108:3306/OTS_SANDBOX_TEST?tls=false")
+
+	out := runStoreCommandFails(t, "status", "--store", "team-mysql", "--json")
+	var report struct {
+		OK            bool   `json:"ok"`
+		Backend       string `json:"backend"`
+		URL           string `json:"url"`
+		TargetVersion int    `json:"targetVersion"`
+		Pending       int    `json:"pending"`
+		Error         string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode status error json: %v\n%s", err, out)
+	}
+	if report.OK || report.Backend != "mysql" || !strings.Contains(report.URL, "OTS_SANDBOX_TEST") || strings.Contains(report.URL, "secret") || report.TargetVersion != sqlstore.CurrentSchemaVersion || report.Pending != sqlstore.CurrentSchemaVersion || !strings.Contains(report.Error, "i/o timeout") {
+		t.Fatalf("mysql status error json = %#v raw=%s", report, out)
+	}
+}
+
 func TestStoreReferenceResolutionKeepsLocalAndRemotePostgresCommandShape(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
@@ -536,14 +785,18 @@ func TestEnvironmentRegisterRequiresVerificationWorkflow(t *testing.T) {
 func TestEnvironmentRegisterRejectsOversizedDefinitionMetadata(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	large := strings.Repeat("x", store.EnvironmentDefinitionMaxBytes)
-	out := runCLIFails(t, "environment", "register",
-		"--store", "sqlite://"+storePath,
+	err := runEnvironment(context.Background(), []string{"register",
+		"--store", "sqlite://" + storePath,
 		"--id", "env.too-large",
 		"--description", large,
 		"--verification-workflow", "workflow.core-10",
-	)
-	if !strings.Contains(out, "maximum is 65536 bytes") || !strings.Contains(out, "not code, images, logs, evidence payloads, or large files") {
-		t.Fatalf("oversized environment metadata output = %q", out)
+	})
+	if err == nil {
+		t.Fatal("expected oversized environment metadata to be rejected")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "write blocked") || !strings.Contains(got, fmt.Sprintf("1 MB safety boundary is %d bytes", store.EnvironmentDefinitionMaxBytes)) || !strings.Contains(got, "Reason:") || !strings.Contains(got, "largest contributor") {
+		t.Fatalf("oversized environment metadata error = %q", got)
 	}
 }
 
@@ -645,13 +898,13 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	}
 
 	verifyOut := runCLI(t, "environment", "verify",
+		"env.team.verified",
 		"--store", storeRef,
 		"--run", "run.core-10",
 		"--status", "passed",
 		"--evidence-complete",
 		"--topology-complete",
 		"--json",
-		"env.team.verified",
 	)
 	var verified struct {
 		Environment struct {
@@ -675,7 +928,7 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	}
 	seedEnvironmentVerificationArtifacts(t, storeRef, "run.core-10")
 
-	publishOut := runCLI(t, "environment", "publish-verified", "--store", storeRef, "--json", "env.team.verified")
+	publishOut := runCLI(t, "environment", "publish-verified", "env.team.verified", "--store", storeRef, "--json")
 	var published struct {
 		Environment struct {
 			Status   string `json:"status"`
@@ -821,6 +1074,83 @@ func TestWorkflowAcceptanceCLIStartsAndReadsAsyncReport(t *testing.T) {
 	}
 	if !report.Acceptance.OK || report.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Acceptance.TopologyProvider != "skywalking" {
 		t.Fatalf("workflow acceptance report = %#v", report.Acceptance)
+	}
+}
+
+func TestCaseBatchCLIStartsAndReadsAsyncReport(t *testing.T) {
+	var startPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/cases/batch-runs":
+			if err := json.NewDecoder(r.Body).Decode(&startPayload); err != nil {
+				t.Fatalf("decode start payload: %v", err)
+			}
+			writeTestJSON(t, w, http.StatusAccepted, map[string]any{
+				"ok":         true,
+				"batchRunId": "batch.case.001",
+				"requestId":  "case-batch-001",
+				"status":     "running",
+				"total":      2,
+				"reportUrl":  "/api/cases/batch-runs/batch.case.001",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/cases/batch-runs/batch.case.001":
+			writeTestJSON(t, w, http.StatusOK, map[string]any{
+				"ok":         true,
+				"batchRunId": "batch.case.001",
+				"status":     "passed",
+				"total":      2,
+				"passed":     2,
+				"failed":     0,
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	startOut := runCLI(t, "case", "batch", "start",
+		"--server-url", server.URL,
+		"--case", "case.alpha",
+		"--case", "case.beta",
+		"--request-id", "case-batch-001",
+		"--base-url", "http://127.0.0.1:18080",
+		"--timeout-seconds", "30",
+		"--json",
+	)
+	var started struct {
+		OK         bool   `json:"ok"`
+		BatchRunID string `json:"batchRunId"`
+		Status     string `json:"status"`
+		Total      int    `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(startOut), &started); err != nil {
+		t.Fatalf("decode case batch start: %v\n%s", err, startOut)
+	}
+	if !started.OK || started.BatchRunID != "batch.case.001" || started.Status != "running" || started.Total != 2 {
+		t.Fatalf("case batch start = %#v", started)
+	}
+	caseIDs, _ := startPayload["caseIds"].([]any)
+	if len(caseIDs) != 2 || caseIDs[0] != "case.alpha" || caseIDs[1] != "case.beta" || startPayload["requestId"] != "case-batch-001" || startPayload["baseUrl"] != "http://127.0.0.1:18080" || startPayload["timeoutSeconds"] != float64(30) {
+		t.Fatalf("case batch start payload = %#v", startPayload)
+	}
+
+	reportOut := runCLI(t, "case", "batch", "report",
+		"--server-url", server.URL,
+		"--run", "batch.case.001",
+		"--json",
+	)
+	var report struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+		Total  int    `json:"total"`
+		Passed int    `json:"passed"`
+		Failed int    `json:"failed"`
+	}
+	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
+		t.Fatalf("decode case batch report: %v\n%s", err, reportOut)
+	}
+	if !report.OK || report.Status != "passed" || report.Total != 2 || report.Passed != 2 || report.Failed != 0 {
+		t.Fatalf("case batch report = %#v", report)
 	}
 }
 
@@ -973,12 +1303,12 @@ func runEnvironmentCommandsUseNamedActiveStore(t *testing.T, storeRef string, en
 	}
 
 	verifyOut := runCLI(t, "environment", "verify",
+		envID,
 		"--run", runID,
 		"--status", "passed",
 		"--evidence-complete",
 		"--topology-complete",
 		"--json",
-		envID,
 	)
 	var verified struct {
 		Environment struct {
@@ -1002,7 +1332,7 @@ func runEnvironmentCommandsUseNamedActiveStore(t *testing.T, storeRef string, en
 	}
 	seedEnvironmentVerificationArtifacts(t, storeRef, runID)
 
-	publishOut := runCLI(t, "environment", "publish-verified", "--json", envID)
+	publishOut := runCLI(t, "environment", "publish-verified", envID, "--json")
 	var published struct {
 		Environment struct {
 			Status   string `json:"status"`
@@ -2091,7 +2421,9 @@ func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
 	}))
 	replaceOut := runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "--json", "env.component.inspect-readiness")
 	inspectOut := runCLI(t, "environment", "components", "inspect", "--store", "sqlite://"+storePath, "--json", "env.component.inspect-readiness")
-	for _, out := range []string{replaceOut, inspectOut} {
+	documentedReplaceOut := runCLI(t, "environment", "components", "replace", "env.component.inspect-readiness", "--store", "sqlite://"+storePath, "--file", graphPath, "--json")
+	documentedInspectOut := runCLI(t, "environment", "components", "inspect", "env.component.inspect-readiness", "--store", "sqlite://"+storePath, "--json")
+	for _, out := range []string{replaceOut, inspectOut, documentedReplaceOut, documentedInspectOut} {
 		var payload struct {
 			ComponentGraph struct {
 				RestoreReadiness struct {
@@ -2337,6 +2669,186 @@ func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) 
 	}
 	if !report.OK || len(report.Repos) != 0 || !report.Docker.OK || report.Docker.Action != "run-docker-compose" || len(report.Docker.HealthChecks) != 1 || !report.Docker.HealthChecks[0].OK {
 		t.Fatalf("docker-only restore report = %#v", report)
+	}
+}
+
+func TestEnvironmentRestoreAppliesAssetsBoundToDependencyEdges(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+	for _, kv := range fakeDockerEnv {
+		parts := strings.SplitN(kv, "=", 2)
+		t.Setenv(parts[0], parts[1])
+	}
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID: "env.edge.assets",
+		ComposeJSON: `{
+			"composeFile":"compose.yml",
+			"generatedFiles":{
+				"compose.yml":"services:\n  mysql:\n    image: mysql:8\n  apollo:\n    image: wiremock/wiremock\n  app:\n    image: alpine:3.20\n",
+				"compose/platform/apollo/mappings/app.json":"{\"request\":{\"url\":\"/configs/app\"},\"response\":{\"status\":200}}\n"
+			},
+			"services":["mysql","apollo","app"],
+			"skipPull":true,
+			"skipBuild":true
+		}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.edge-assets",
+	}, workspace, true, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql", Required: true, HealthCheckJSON: `{"type":"compose-service","service":"mysql"}`},
+			{ComponentID: "apollo", Kind: "middleware", Role: "config", ComposeService: "apollo", Required: true, HealthCheckJSON: `{"type":"compose-service","service":"apollo"}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"` + healthServer.URL + `/health"}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{"assetIds":["app.mysql.schema"]}`},
+			{ConsumerComponentID: "app", ProviderComponentID: "apollo", Phase: "startup", Capability: "config", Required: true, ProfileJSON: `{"assetIds":["app.apollo.config"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "app.mysql.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database if not exists app;\n", SizeBytes: int64(len("create database if not exists app;\n")), ApplyOrder: 10, SummaryJSON: `{}`},
+			{OwnerComponentID: "app", AssetID: "app.apollo.config", AssetKind: "apollo-config", TargetComponentID: "apollo", TargetPath: "compose/platform/apollo/mappings/app.json", ContentInline: "{\"request\":{\"url\":\"/configs/app\"},\"response\":{\"status\":200}}\n", ApplyOrder: 20, SummaryJSON: `{}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build edge asset restore report: %v", err)
+	}
+	if !report.OK || !report.Docker.OK || len(report.Docker.AppliedAssets) != 2 {
+		t.Fatalf("edge asset restore report = %#v", report.Docker)
+	}
+	actions := map[string]string{}
+	for _, asset := range report.Docker.AppliedAssets {
+		actions[asset.AssetID] = asset.Action
+	}
+	if actions["app.mysql.schema"] != "apply-mysql-sql" || actions["app.apollo.config"] != "verify-generated-file" {
+		t.Fatalf("edge asset actions = %#v assets=%#v", actions, report.Docker.AppliedAssets)
+	}
+	dockerCalls, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if !strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" up -d mysql apollo app") ||
+		!strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" exec -T mysql sh -lc") ||
+		strings.Contains(string(dockerCalls), "-proot") {
+		t.Fatalf("edge asset docker calls:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentRestoreEdgeAssetsAvoidNonSQLMySQLAndDuplicateApply(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	writeFile(t, filepath.Join(workspace, "compose", "mysql", "config.cnf"), "[mysqld]\n")
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "config", ProfileJSON: `{"assetIds":["mysql.config"]}`},
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["shared.schema"]}`},
+			{ConsumerComponentID: "worker", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["shared.schema"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "mysql", AssetID: "mysql.config", AssetKind: "mysql-config", TargetComponentID: "mysql", TargetPath: "compose/mysql/config.cnf"},
+			{OwnerComponentID: "app", AssetID: "shared.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/shared.sql", ContentInline: "create database if not exists app;\n"},
+		},
+	}
+	items := environmentRestoreApplyEdgeAssets(context.Background(), "env.edge.dedupe", graph, map[string]any{
+		"generatedFiles": map[string]any{
+			"compose/mysql/config.cnf": "[mysqld]\n",
+		},
+	}, workspace, false, []string{"-f", "compose.yml"})
+	if len(items) != 2 {
+		t.Fatalf("edge assets should dedupe repeated asset ids, got %#v", items)
+	}
+	actions := map[string]string{}
+	commands := map[string]string{}
+	for _, item := range items {
+		actions[item.AssetID] = item.Action
+		commands[item.AssetID] = strings.Join(item.Command, " ")
+	}
+	if actions["mysql.config"] != "project-generated-file" || commands["mysql.config"] != "" {
+		t.Fatalf("non-SQL MySQL asset should not run through mysql client: actions=%#v commands=%#v", actions, commands)
+	}
+	if actions["shared.schema"] != "plan-apply-mysql-sql" || strings.Contains(commands["shared.schema"], "-proot") || !strings.Contains(commands["shared.schema"], "MYSQL_ROOT_PASSWORD") {
+		t.Fatalf("SQL MySQL asset command should use container env credentials: actions=%#v commands=%#v", actions, commands)
+	}
+	if strings.Contains(commands["shared.schema"], "MYSQL_DATABASE") || !strings.Contains(commands["shared.schema"], "OTSANDBOX_MYSQL_APPLY_DATABASE") {
+		t.Fatalf("SQL MySQL asset command should not force MYSQL_DATABASE by default: %#v", commands)
+	}
+}
+
+func TestEnvironmentRestoreEdgeAssetsRequireMySQLProviderSignal(t *testing.T) {
+	workspace := t.TempDir()
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "postgres", Kind: "middleware", Role: "database", ComposeService: "postgres"},
+			{ComponentID: "mysql.primary", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "postgres", Capability: "sql", ProfileJSON: `{"assetIds":["postgres.schema"]}`},
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql.primary", Capability: "sql", ProfileJSON: `{"assetIds":["shared.schema"]}`},
+			{ConsumerComponentID: "worker", ProviderComponentID: "postgres", Capability: "sql", ProfileJSON: `{"assetIds":["shared.schema"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "postgres.schema", AssetKind: "postgres-ddl", TargetComponentID: "postgres", TargetPath: "postgres.sql", ContentInline: "create schema app;\n"},
+			{OwnerComponentID: "app", AssetID: "shared.schema", AssetKind: "schema", TargetPath: "shared.sql", ContentInline: "create database if not exists shared;\n"},
+		},
+	}
+	items := environmentRestoreApplyEdgeAssets(context.Background(), "env.edge.mysql-signal", graph, nil, workspace, false, []string{"-f", "compose.yml"})
+	if len(items) != 3 {
+		t.Fatalf("shared asset should be applied once per effective target, got %#v", items)
+	}
+	actionsByTarget := map[string]string{}
+	for _, item := range items {
+		actionsByTarget[item.AssetID+"@"+item.TargetComponentID] = item.Action
+	}
+	if actionsByTarget["postgres.schema@postgres"] == "plan-apply-mysql-sql" {
+		t.Fatalf("postgres SQL asset should not use MySQL apply: %#v", actionsByTarget)
+	}
+	if actionsByTarget["shared.schema@mysql.primary"] != "plan-apply-mysql-sql" {
+		t.Fatalf("shared schema should use MySQL apply for MySQL target: %#v", actionsByTarget)
+	}
+	if actionsByTarget["shared.schema@postgres"] == "plan-apply-mysql-sql" {
+		t.Fatalf("shared schema should not use MySQL apply for PostgreSQL target: %#v", actionsByTarget)
+	}
+}
+
+func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
+	item := environmentRestoreApplyEdgeAsset(context.Background(),
+		store.ComponentDependency{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["bad.schema"]}`},
+		store.ComponentConfigAsset{OwnerComponentID: "app", AssetID: "bad.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: ".."},
+		map[string]store.EnvironmentComponent{"mysql": {ComponentID: "mysql", ComposeService: "mysql"}},
+		nil,
+		t.TempDir(),
+		false,
+		[]string{"-f", "compose.yml"},
+	)
+	if item.OK || !strings.Contains(item.Error, "target path is required") {
+		t.Fatalf("parent path edge asset should be rejected: %#v", item)
+	}
+}
+
+func TestEnvironmentRestoreRetriesMySQLAssetUntilServiceReady(t *testing.T) {
+	workspace := t.TempDir()
+	command, callsPath := fakeMySQLApplyCommandWithFirstFailure(t)
+	_, attempts, errText := runRestoreMySQLCommandWithInputRetry(context.Background(), workspace, command, "create database if not exists app;\n")
+	if errText != "" {
+		t.Fatalf("mysql retry command failed: %s", errText)
+	}
+	if attempts != 2 {
+		t.Fatalf("mysql asset attempts = %d, want 2", attempts)
+	}
+	calls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read mysql retry calls: %v", err)
+	}
+	if got := strings.Count(string(calls), "apply"); got != 2 {
+		t.Fatalf("mysql command calls = %d, want 2\n%s", got, calls)
 	}
 }
 
@@ -3287,7 +3799,7 @@ func TestEnvironmentRestoreFailsBeforeDockerWhenComposeFileIsMissing(t *testing.
 		"--verification-workflow", "workflow.core-10",
 	)
 
-	out := runCLIFails(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.missing.compose")
+	out := runCLIFails(t, "environment", "restore", "env.missing.compose", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json")
 	if !strings.Contains(out, "missing-compose-file") || !strings.Contains(out, "missing-compose.yml") {
 		t.Fatalf("missing compose restore output = %q", out)
 	}
@@ -5205,6 +5717,85 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 	if got := sqliteScalar(t, dbPath, "select value from kv where key = 'active_profile_id';"); got != "empty" {
 		t.Fatalf("active profile catalog index = %q", got)
+	}
+}
+
+func TestProfileImportReportsNodeCaseDiff(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	profileDir := writeProfileWithCatalogCases(t, []string{"case.alpha"})
+	runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+dbPath)
+
+	profileDir = writeProfileWithCatalogCases(t, []string{"case.alpha", "case.beta"})
+	out := runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
+	var report struct {
+		Diff struct {
+			HasPreviousCatalog bool `json:"hasPreviousCatalog"`
+			APICases           struct {
+				Before int      `json:"before"`
+				After  int      `json:"after"`
+				Added  []string `json:"added"`
+			} `json:"apiCases"`
+			NodeCaseDeltas []struct {
+				NodeID string `json:"nodeId"`
+				Before int    `json:"before"`
+				After  int    `json:"after"`
+				Delta  int    `json:"delta"`
+			} `json:"nodeCaseDeltas"`
+		} `json:"diff"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode import diff: %v\n%s", err, out)
+	}
+	if !report.Diff.HasPreviousCatalog || report.Diff.APICases.Before != 1 || report.Diff.APICases.After != 2 || strings.Join(report.Diff.APICases.Added, ",") != "case.beta" {
+		t.Fatalf("import case diff = %#v", report.Diff.APICases)
+	}
+	if len(report.Diff.NodeCaseDeltas) != 1 || report.Diff.NodeCaseDeltas[0].NodeID != "node.alpha" || report.Diff.NodeCaseDeltas[0].Before != 1 || report.Diff.NodeCaseDeltas[0].After != 2 || report.Diff.NodeCaseDeltas[0].Delta != 1 {
+		t.Fatalf("import node deltas = %#v", report.Diff.NodeCaseDeltas)
+	}
+}
+
+func TestProfileDoctorAndRepairManifest(t *testing.T) {
+	profileDir := writeProfileWithCatalogCases(t, []string{"case.alpha", "case.beta"})
+	manifestPath := writeProfileRepairManifest(t, profileDir, []string{"case.beta"})
+	removeProfileCatalogCase(t, profileDir, "case.beta")
+	if err := os.Remove(filepath.Join(profileDir, "cases", "case.beta.json")); err != nil {
+		t.Fatalf("remove case file: %v", err)
+	}
+
+	out := runCLIFails(t, "profile", "doctor", "--profile", profileDir, "--case-id", "case.beta", "--json")
+	var doctorBefore profileDoctorReport
+	if err := json.Unmarshal([]byte(jsonPrefix(out)), &doctorBefore); err != nil {
+		t.Fatalf("decode doctor before repair: %v\n%s", err, out)
+	}
+	if doctorBefore.OK {
+		t.Fatalf("doctor should fail before repair: %#v", doctorBefore)
+	}
+
+	dryRunOut := runCLI(t, "profile", "repair", "--from-manifest", manifestPath, "--profile", profileDir, "--json")
+	var dryRun profileRepairReport
+	if err := json.Unmarshal([]byte(dryRunOut), &dryRun); err != nil {
+		t.Fatalf("decode dry-run repair: %v\n%s", err, dryRunOut)
+	}
+	if _, err := os.Stat(filepath.Join(profileDir, "cases", "case.beta.json")); dryRun.Applied || dryRun.Summary.CatalogCasesRestored != 1 || dryRun.Summary.CaseFilesRestored != 1 || err == nil {
+		t.Fatalf("dry-run repair = %#v", dryRun)
+	}
+
+	applyOut := runCLI(t, "profile", "repair", "--from-manifest", manifestPath, "--profile", profileDir, "--apply", "--json")
+	var applied profileRepairReport
+	if err := json.Unmarshal([]byte(applyOut), &applied); err != nil {
+		t.Fatalf("decode applied repair: %v\n%s", err, applyOut)
+	}
+	if !applied.Applied || applied.Summary.CatalogCasesRestored != 1 || applied.Summary.CaseFilesRestored != 1 {
+		t.Fatalf("applied repair = %#v", applied)
+	}
+
+	doctorOut := runCLI(t, "profile", "doctor", "--profile", profileDir, "--case-id", "case.beta", "--json")
+	var doctorAfter profileDoctorReport
+	if err := json.Unmarshal([]byte(doctorOut), &doctorAfter); err != nil {
+		t.Fatalf("decode doctor after repair: %v\n%s", err, doctorOut)
+	}
+	if !doctorAfter.OK {
+		t.Fatalf("doctor should pass after repair: %#v", doctorAfter)
 	}
 }
 
@@ -10597,6 +11188,16 @@ func mustJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
+func extractJSONObject(t *testing.T, output string) string {
+	t.Helper()
+	start := strings.Index(output, "{")
+	end := strings.LastIndex(output, "}")
+	if start < 0 || end < start {
+		t.Fatalf("output does not contain a JSON object:\n%s", output)
+	}
+	return output[start : end+1]
+}
+
 func writeTestJSON(t *testing.T, w http.ResponseWriter, status int, value any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
@@ -10761,6 +11362,35 @@ func fakeDockerCommand(t *testing.T) ([]string, string) {
 	}, callsPath
 }
 
+func fakeMySQLApplyCommandWithFirstFailure(t *testing.T) ([]string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	callsPath := filepath.Join(dir, "mysql-apply-calls.txt")
+	statePath := filepath.Join(dir, "mysql-exec-attempts.txt")
+	commandPath := filepath.Join(dir, "mysql-apply")
+	writeFile(t, commandPath, `#!/usr/bin/env bash
+set -euo pipefail
+printf 'apply\n' >> "$MYSQL_APPLY_CALLS_FILE"
+attempts=0
+if [[ -f "$MYSQL_EXEC_ATTEMPTS_FILE" ]]; then
+  attempts=$(cat "$MYSQL_EXEC_ATTEMPTS_FILE")
+fi
+attempts=$((attempts + 1))
+printf '%s\n' "$attempts" > "$MYSQL_EXEC_ATTEMPTS_FILE"
+if [[ "$attempts" -eq 1 ]]; then
+  printf "mysql: [Warning] Using a password on the command line interface can be insecure.\nERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: YES)\n" >&2
+  exit 1
+fi
+cat >/dev/null
+`)
+	if err := os.Chmod(commandPath, 0o755); err != nil {
+		t.Fatalf("chmod fake mysql apply command: %v", err)
+	}
+	t.Setenv("MYSQL_APPLY_CALLS_FILE", callsPath)
+	t.Setenv("MYSQL_EXEC_ATTEMPTS_FILE", statePath)
+	return []string{commandPath}, callsPath
+}
+
 func installGitRemoteFixture(t *testing.T, binDir string, remoteURL string, fixtureRepo string) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -10833,6 +11463,29 @@ func runStoreCommand(t *testing.T, args ...string) string {
 	return string(out)
 }
 
+func runStoreCommandFails(t *testing.T, args ...string) string {
+	t.Helper()
+	readPipe, writePipe, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	originalStdout := os.Stdout
+	os.Stdout = writePipe
+	runErr := runStore(context.Background(), args)
+	if closeErr := writePipe.Close(); closeErr != nil {
+		t.Fatalf("close stdout pipe: %v", closeErr)
+	}
+	os.Stdout = originalStdout
+	out, readErr := io.ReadAll(readPipe)
+	if readErr != nil {
+		t.Fatalf("read stdout pipe: %v", readErr)
+	}
+	if runErr == nil {
+		t.Fatalf("store %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
+	}
+	return string(out)
+}
+
 func withPostgresSchemaStatus(t *testing.T, fn func(context.Context, postgres.Config) (postgres.SchemaStatusResult, error)) {
 	t.Helper()
 	original := postgresSchemaStatus
@@ -10848,6 +11501,15 @@ func withMySQLSchemaStatus(t *testing.T, fn func(context.Context, mysql.Config) 
 	mysqlSchemaStatus = fn
 	t.Cleanup(func() {
 		mysqlSchemaStatus = original
+	})
+}
+
+func withMySQLProvisionDatabase(t *testing.T, fn func(context.Context, mysql.Config) (mysql.ProvisionDatabaseResult, error)) {
+	t.Helper()
+	original := mysqlProvisionDatabase
+	mysqlProvisionDatabase = fn
+	t.Cleanup(func() {
+		mysqlProvisionDatabase = original
 	})
 }
 
@@ -11180,6 +11842,124 @@ func writeInterfaceNodeCaseProfile(t *testing.T) string {
   ]
 }`)
 	return dir
+}
+
+func writeProfileWithCatalogCases(t *testing.T, caseIDs []string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha"}],
+  "apiCases": [],
+  "requestTemplates": [{"id":"tpl.alpha","nodeId":"node.alpha","method":"POST","path":"/alpha","templateJson":"{\"id\":\"{{serial:CASE}}\"}"}],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	var cases []map[string]any
+	for index, id := range caseIDs {
+		cases = append(cases, map[string]any{
+			"id":                id,
+			"nodeId":            "node.alpha",
+			"title":             "Case " + id,
+			"requestTemplateId": "tpl.alpha",
+			"expectedJson":      `{"expectedHttpCodes":[200]}`,
+			"status":            "active",
+			"sortOrder":         index + 1,
+		})
+		writeFile(t, filepath.Join(dir, "cases", id+".json"), `{"id":"`+id+`","nodeId":"node.alpha"}`)
+	}
+	rawCases, err := json.MarshalIndent(map[string]any{"interfaceNodeCases": cases}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal catalog cases: %v", err)
+	}
+	writeFile(t, filepath.Join(dir, "catalog.json"), string(rawCases))
+	return dir
+}
+
+func writeProfileRepairManifest(t *testing.T, profileDir string, caseIDs []string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(profileDir, "catalog.json"))
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+	var catalog struct {
+		InterfaceNodeCases []json.RawMessage `json:"interfaceNodeCases"`
+	}
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	want := map[string]bool{}
+	for _, id := range caseIDs {
+		want[id] = true
+	}
+	var selected []json.RawMessage
+	caseFiles := map[string]string{}
+	for _, item := range catalog.InterfaceNodeCases {
+		if !want[jsonID(item)] {
+			continue
+		}
+		selected = append(selected, item)
+		casePath := filepath.Join(profileDir, "cases", jsonID(item)+".json")
+		content, err := os.ReadFile(casePath)
+		if err != nil {
+			t.Fatalf("read case file: %v", err)
+		}
+		caseFiles[casePath] = string(content)
+	}
+	manifest := map[string]any{
+		"profilePath":  profileDir,
+		"catalogPath":  filepath.Join(profileDir, "catalog.json"),
+		"caseIds":      caseIDs,
+		"catalogCases": selected,
+		"caseFiles":    caseFiles,
+	}
+	rawManifest, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "repair-manifest.json")
+	writeFile(t, path, string(rawManifest))
+	return path
+}
+
+func removeProfileCatalogCase(t *testing.T, profileDir string, caseID string) {
+	t.Helper()
+	path := filepath.Join(profileDir, "catalog.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+	var catalog map[string]any
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	var kept []any
+	for _, item := range catalog["interfaceNodeCases"].([]any) {
+		rawItem, err := json.Marshal(item)
+		if err != nil {
+			t.Fatalf("marshal case: %v", err)
+		}
+		if jsonID(rawItem) != caseID {
+			kept = append(kept, item)
+		}
+	}
+	catalog["interfaceNodeCases"] = kept
+	out, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal catalog: %v", err)
+	}
+	writeFile(t, path, string(out))
+}
+
+func jsonPrefix(output string) string {
+	if index := strings.LastIndex(output, "\n}"); index >= 0 {
+		return output[:index+2]
+	}
+	return output
 }
 
 func writeInterfaceNodeCoverageProfile(t *testing.T) string {

@@ -193,22 +193,52 @@ type Environment struct {
 }
 
 const (
-	EnvironmentDefinitionMaxBytes = 64 * 1024
-	EnvironmentSummaryMaxBytes    = 128 * 1024
-	ComponentAssetInlineMaxBytes  = 16 * 1024
-	ComponentGraphMaxBytes        = 64 * 1024
+	StoreMetadataMaxBytes         = 1024 * 1024
+	EnvironmentDefinitionMaxBytes = StoreMetadataMaxBytes
+	EnvironmentSummaryMaxBytes    = StoreMetadataMaxBytes
+	ComponentAssetInlineMaxBytes  = StoreMetadataMaxBytes
+	ComponentGraphMaxBytes        = StoreMetadataMaxBytes
 )
 
 func ValidateEnvironmentDefinitionSize(e Environment) error {
-	total := len(e.ID) + len(e.DisplayName) + len(e.Description) + len(e.Status) +
-		len(e.ServicesJSON) + len(e.ReposJSON) + len(e.ComposeJSON) + len(e.HealthChecksJSON) + len(e.VerificationWorkflowID)
+	definitionFields := []namedSize{
+		{name: "id", size: len(e.ID)},
+		{name: "display_name", size: len(e.DisplayName)},
+		{name: "description", size: len(e.Description)},
+		{name: "status", size: len(e.Status)},
+		{name: "services_json", size: len(e.ServicesJSON)},
+		{name: "repos_json", size: len(e.ReposJSON)},
+		{name: "compose_json", size: len(e.ComposeJSON)},
+		{name: "health_checks_json", size: len(e.HealthChecksJSON)},
+		{name: "verification_workflow_id", size: len(e.VerificationWorkflowID)},
+	}
+	total := 0
+	for _, field := range definitionFields {
+		total += field.size
+	}
 	if total > EnvironmentDefinitionMaxBytes {
-		return fmt.Errorf("environment definition metadata is %d bytes; maximum is %d bytes. Store only compact restore metadata in the SQL Store, not code, images, logs, evidence payloads, or large files", total, EnvironmentDefinitionMaxBytes)
+		largest := largestNamedSize(definitionFields)
+		return fmt.Errorf("environment definition metadata is %d bytes; 1 MB safety boundary is %d bytes; write blocked. Reason: largest contributor %s contributes %d bytes in environment %q; below this boundary the Store accepts deterministic restore metadata, startup configuration, DDL, seed SQL, certificates, keys, and launch scripts without per-kind limits", total, EnvironmentDefinitionMaxBytes, largest.name, largest.size, e.ID)
 	}
 	if len(e.SummaryJSON) > EnvironmentSummaryMaxBytes {
-		return fmt.Errorf("environment summary metadata is %d bytes; maximum is %d bytes. Store only compact acceptance summaries and indexes in the SQL Store, not code, images, logs, evidence payloads, or large files", len(e.SummaryJSON), EnvironmentSummaryMaxBytes)
+		return fmt.Errorf("environment summary metadata is %d bytes; 1 MB safety boundary is %d bytes; write blocked. Reason: largest contributor summary_json contributes %d bytes in environment %q; below this boundary the Store accepts acceptance summaries, restore status, and indexes without per-kind limits", len(e.SummaryJSON), EnvironmentSummaryMaxBytes, len(e.SummaryJSON), e.ID)
 	}
 	return nil
+}
+
+type namedSize struct {
+	name string
+	size int
+}
+
+func largestNamedSize(items []namedSize) namedSize {
+	largest := namedSize{}
+	for _, item := range items {
+		if item.size > largest.size {
+			largest = item
+		}
+	}
+	return largest
 }
 
 type EnvironmentComponentGraph struct {
@@ -270,15 +300,18 @@ func ValidateEnvironmentComponentGraph(envID string, g EnvironmentComponentGraph
 	}
 	total := 0
 	componentIDs := map[string]bool{}
+	contributors := make([]namedSize, 0, len(g.Components)+len(g.Dependencies)+len(g.Assets))
 	for _, component := range g.Components {
 		id := strings.TrimSpace(component.ComponentID)
 		if id == "" {
 			return fmt.Errorf("component id is required")
 		}
 		componentIDs[id] = true
-		total += len(id) + len(component.DisplayName) + len(component.Kind) + len(component.Role) +
+		size := len(id) + len(component.DisplayName) + len(component.Kind) + len(component.Role) +
 			len(component.ComposeService) + len(component.Image) + len(component.RuntimeJSON) +
 			len(component.HealthCheckJSON) + len(component.SummaryJSON)
+		total += size
+		contributors = append(contributors, namedSize{name: fmt.Sprintf("component %q", id), size: size})
 	}
 	for _, dep := range g.Dependencies {
 		consumer := strings.TrimSpace(dep.ConsumerComponentID)
@@ -292,7 +325,9 @@ func ValidateEnvironmentComponentGraph(envID string, g EnvironmentComponentGraph
 		if !componentIDs[provider] {
 			return fmt.Errorf("component dependency provider %q is not registered in environment %s", provider, envID)
 		}
-		total += len(consumer) + len(provider) + len(dep.Phase) + len(dep.Capability) + len(dep.ProfileJSON)
+		size := len(consumer) + len(provider) + len(dep.Phase) + len(dep.Capability) + len(dep.ProfileJSON)
+		total += size
+		contributors = append(contributors, namedSize{name: fmt.Sprintf("dependency %q->%q", consumer, provider), size: size})
 	}
 	for _, asset := range g.Assets {
 		owner := strings.TrimSpace(asset.OwnerComponentID)
@@ -307,13 +342,16 @@ func ValidateEnvironmentComponentGraph(envID string, g EnvironmentComponentGraph
 			return fmt.Errorf("component config asset target %q is not registered in environment %s", target, envID)
 		}
 		if len(asset.ContentInline) > ComponentAssetInlineMaxBytes {
-			return fmt.Errorf("component config asset %q inline content is %d bytes; maximum is %d bytes. Store only compact deterministic startup text, not images, code, logs, evidence payloads, runtime databases, or large binaries", asset.AssetID, len(asset.ContentInline), ComponentAssetInlineMaxBytes)
+			return fmt.Errorf("component config asset %q inline content is %d bytes; 1 MB safety boundary is %d bytes; write blocked. Reason: owner=%q kind=%q target=%q path=%q is the single inline content contributor over the boundary; below this boundary the Store accepts deterministic text configuration, DDL, seed SQL, certificates, keys, and launch scripts without per-kind limits", asset.AssetID, len(asset.ContentInline), ComponentAssetInlineMaxBytes, owner, asset.AssetKind, target, asset.TargetPath)
 		}
-		total += len(owner) + len(asset.AssetID) + len(asset.AssetKind) + len(target) + len(asset.TargetPath) +
+		size := len(owner) + len(asset.AssetID) + len(asset.AssetKind) + len(target) + len(asset.TargetPath) +
 			len(asset.ContentInline) + len(asset.RemoteRefJSON) + len(asset.SHA256) + len(asset.SummaryJSON)
+		total += size
+		contributors = append(contributors, namedSize{name: fmt.Sprintf("asset %q owner=%q kind=%q target=%q path=%q", asset.AssetID, owner, asset.AssetKind, target, asset.TargetPath), size: size})
 	}
 	if total > ComponentGraphMaxBytes {
-		return fmt.Errorf("environment component graph metadata is %d bytes; maximum is %d bytes. Store only compact Docker restore metadata in the SQL Store", total, ComponentGraphMaxBytes)
+		largest := largestNamedSize(contributors)
+		return fmt.Errorf("environment component graph metadata is %d bytes; 1 MB safety boundary is %d bytes; write blocked. Reason: largest contributor %s contributes %d bytes in environment %q, and the combined component graph is over the boundary; below this boundary the Store accepts deterministic restore metadata and startup text without per-kind limits", total, ComponentGraphMaxBytes, largest.name, largest.size, envID)
 	}
 	return nil
 }

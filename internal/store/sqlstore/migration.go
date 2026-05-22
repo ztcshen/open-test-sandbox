@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 6
+	CurrentSchemaVersion = 7
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -347,6 +347,43 @@ func incrementalSchemaSQL(d Dialect, current int) []string {
 			fmt.Sprintf("drop table if exists %s;", d.QuoteIdent("service_config_assets")),
 			fmt.Sprintf("drop table if exists %s;", d.QuoteIdent("service_dependencies")),
 		)
+	}
+	if d.Name() == "mysql" && current < 7 {
+		statements = append(statements, mysqlMediumTextMigrationSQL()...)
+	}
+	return statements
+}
+
+func mysqlMediumTextMigrationSQL() []string {
+	type column struct {
+		table string
+		name  string
+	}
+	columns := []column{
+		{"schema_versions", "name"},
+		{"runs", "evidence_root"},
+		{"evidence_records", "uri"},
+		{"evidence_records", "media_type"},
+		{"evidence_records", "sha256"},
+		{"evidence_records", "summary"},
+		{"trace_topologies", "text_topology"},
+		{"post_process_tasks", "error"},
+		{"profile_indexes", "bundle_path"},
+		{"profile_indexes", "bundle_digest"},
+		{"config_versions", "source_path"},
+		{"config_versions", "bundle_digest"},
+		{"environments", "display_name"},
+		{"environments", "description"},
+		{"environment_components", "display_name"},
+		{"environment_components", "image"},
+		{"component_config_assets", "target_path"},
+		{"component_config_assets", "content_inline"},
+		{"component_config_assets", "sha256"},
+	}
+	statements := make([]string, 0, len(columns))
+	d := MySQLDialect{}
+	for _, column := range columns {
+		statements = append(statements, fmt.Sprintf("alter table %s modify column %s mediumtext not null;", d.QuoteIdent(column.table), d.QuoteIdent(column.name)))
 	}
 	return statements
 }

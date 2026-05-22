@@ -13,6 +13,8 @@ import (
 
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/mysql"
+
+	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
 func TestParseConfigFromURLAcceptsMySQLURL(t *testing.T) {
@@ -262,6 +264,45 @@ func TestSchemaStatusAndUpgradeUseConfiguredSQLDriver(t *testing.T) {
 	execs := state.execsSnapshot()
 	if len(execs) == 0 || !strings.Contains(execs[0].query, "create table if not exists schema_versions") || !strings.Contains(execs[0].query, "datetime(6)") {
 		t.Fatalf("mysql upgrade execs = %#v", execs)
+	}
+}
+
+func TestProvisionDatabaseCreatesMissingDatabase(t *testing.T) {
+	ctx := context.Background()
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox_test?tls=false")
+	if err != nil {
+		t.Fatalf("parse mysql url: %v", err)
+	}
+	driverCfg, err := mysqlDriver.ParseDSN(cfg.DSN)
+	if err != nil {
+		t.Fatalf("parse driver dsn: %v", err)
+	}
+	driverCfg.DBName = ""
+	serverDSN := driverCfg.FormatDSN()
+	registerFakeMySQLDriverOnce.Do(func() {
+		sql.Register(fakeMySQLDriverName, fakeMySQLDriver{})
+	})
+	state := &fakeMySQLState{name: serverDSN}
+	fakeMySQLRegistry.put(state)
+	state.queueRows(fakeMySQLRows{
+		columns: []string{"SCHEMA_NAME"},
+		values:  nil,
+	})
+
+	result, err := mysql.ProvisionDatabase(ctx, mysql.Config{
+		URL:        cfg.URL,
+		DSN:        cfg.DSN,
+		DriverName: fakeMySQLDriverName,
+	})
+	if err != nil {
+		t.Fatalf("provision database: %v", err)
+	}
+	if result.Database != "otsandbox_test" || !result.Created {
+		t.Fatalf("provision result = %#v", result)
+	}
+	exec := state.lastExec(t)
+	if !strings.Contains(exec.query, "CREATE DATABASE IF NOT EXISTS `otsandbox_test`") || !strings.Contains(exec.query, "CHARACTER SET utf8mb4") {
+		t.Fatalf("provision exec = %#v", exec)
 	}
 }
 
