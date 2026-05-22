@@ -4312,6 +4312,10 @@ func TestEnvironmentRestoreAcceptsExistingCheckoutWithoutRepoURL(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	checkout := filepath.Join(workspace, "entry-gateway")
 	fakeDockerEnv, _ := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
 	writeFile(t, filepath.Join(checkout, "README.md"), "# existing checkout\n")
 	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
 
@@ -4321,7 +4325,7 @@ func TestEnvironmentRestoreAcceptsExistingCheckoutWithoutRepoURL(t *testing.T) {
 		"--service", "entry-gateway",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", healthServer.URL+"/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -5050,7 +5054,7 @@ func TestCaseReadCommandsUseNamedSQLiteActiveStore(t *testing.T) {
 	if out := runCLI(t, "case", "evidence", "--case-run", runID+".case", "--json"); !strings.Contains(out, runID) || !strings.Contains(out, "/v1/items") {
 		t.Fatalf("SQLite case evidence output = %q", out)
 	}
-	if out := runCLI(t, "case", "timing", "--kind", "case", "--json"); !strings.Contains(out, runID+".case") {
+	if out := runCLI(t, "case", "timing", "--kind", "case", "--json"); !strings.Contains(out, `"caseRunCount": 1`) {
 		t.Fatalf("SQLite case timing output = %q", out)
 	}
 }
