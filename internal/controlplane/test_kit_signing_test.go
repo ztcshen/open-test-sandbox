@@ -55,10 +55,10 @@ func TestBuildCaseHTTPRequestAddsConfiguredAuthorization(t *testing.T) {
 func TestApplyAPICaseRequestModelAppliesTemplatePatchAndExpectedJSON(t *testing.T) {
 	request := caseHTTPRequest{
 		body: map[string]any{
-			"loan_apply_infos": []any{
+			"application_items": []any{
 				map[string]any{
 					"credit_contract_id": "CONTRACT-1",
-					"loan_amount":        12000,
+					"requested_amount":   12000,
 				},
 			},
 		},
@@ -67,7 +67,7 @@ func TestApplyAPICaseRequestModelAppliesTemplatePatchAndExpectedJSON(t *testing.
 	item := profile.APICase{
 		ID:           "case.patch",
 		RenderMode:   "template_patch",
-		PatchJSON:    `[{"op":"remove","path":"$.loan_apply_infos[0].credit_contract_id"},{"op":"replace","path":"$.loan_apply_infos[0].loan_amount","value":0}]`,
+		PatchJSON:    `[{"op":"remove","path":"$.application_items[0].credit_contract_id"},{"op":"replace","path":"$.application_items[0].requested_amount","value":0}]`,
 		ExpectedJSON: `{"expectedHttpCodes":[400],"expectedResponseContains":["PARAM_ERROR"]}`,
 	}
 
@@ -75,12 +75,12 @@ func TestApplyAPICaseRequestModelAppliesTemplatePatchAndExpectedJSON(t *testing.
 		t.Fatalf("apply request model: %v", err)
 	}
 	body := request.body.(map[string]any)
-	first := body["loan_apply_infos"].([]any)[0].(map[string]any)
+	first := body["application_items"].([]any)[0].(map[string]any)
 	if _, ok := first["credit_contract_id"]; ok {
 		t.Fatalf("credit_contract_id was not removed: %#v", first)
 	}
-	if first["loan_amount"] != float64(0) {
-		t.Fatalf("loan_amount = %#v", first["loan_amount"])
+	if first["requested_amount"] != float64(0) {
+		t.Fatalf("requested_amount = %#v", first["requested_amount"])
 	}
 	if len(request.expectedHTTPCodes) != 1 || request.expectedHTTPCodes[0] != 400 {
 		t.Fatalf("expected status codes = %#v", request.expectedHTTPCodes)
@@ -148,7 +148,7 @@ func TestApplyAPICaseRequestModelPatchesEquivalentBodyFields(t *testing.T) {
 	item := profile.APICase{
 		ID:           "case.body.equivalent.patch",
 		RenderMode:   "template_patch",
-		PatchJSON:    `[{"op":"replace","path":"$.approval_status","value":999},{"op":"remove","path":"$.financing_order_id"}]`,
+		PatchJSON:    `[{"op":"replace","path":"$.approval_status","value":999},{"op":"remove","path":"$.customer_order_id"}]`,
 		ExpectedJSON: `{"expectedHttpCodes":[200],"expectedResponseContains":["\"code\":-1"]}`,
 	}
 
@@ -164,10 +164,10 @@ func TestApplyAPICaseRequestModelPatchesEquivalentBodyFields(t *testing.T) {
 		t.Fatalf("orderId was not removed: %#v", data)
 	}
 	if body["id"] != "ROOT-ID" {
-		t.Fatalf("root id should not be patched by financing_order_id: %#v", body)
+		t.Fatalf("root id should not be patched by customer_order_id: %#v", body)
 	}
 	if data["id"] != "DATA-ID" {
-		t.Fatalf("nested id should not be patched by financing_order_id: %#v", data)
+		t.Fatalf("nested id should not be patched by customer_order_id: %#v", data)
 	}
 }
 

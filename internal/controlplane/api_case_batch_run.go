@@ -844,7 +844,7 @@ func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store,
 		WorkflowID:    strings.TrimSpace(workflowID),
 		Status:        report.Status,
 		EvidenceRoot:  evidenceRoot,
-		SummaryJSON:   compactJSON(report),
+		SummaryJSON:   compactJSON(apiCaseBatchRunStoreSummary(report)),
 		StartedAt:     startedAt,
 		FinishedAt:    finishedAt,
 		CreatedAt:     startedAt,
@@ -875,6 +875,42 @@ func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store,
 			CreatedAt: finishedAt,
 		})
 	}
+}
+
+func apiCaseBatchRunStoreSummary(report apiCaseBatchRunReport) map[string]any {
+	out := jsonObject(compactJSON(report))
+	steps := make([]map[string]any, 0, len(report.Cases))
+	for _, item := range report.Cases {
+		step := map[string]any{
+			"stepId":    item.StepID,
+			"caseId":    item.CaseID,
+			"nodeId":    item.NodeID,
+			"status":    item.Status,
+			"elapsedMs": item.ElapsedMs,
+		}
+		if item.RunID != "" {
+			step["runId"] = item.RunID
+		}
+		if item.CaseRunID != "" {
+			step["caseRunId"] = item.CaseRunID
+		}
+		if item.Error != "" {
+			step["error"] = item.Error
+		}
+		if item.FailureCategory != "" {
+			step["failureCategory"] = item.FailureCategory
+		}
+		steps = append(steps, step)
+	}
+	out["steps"] = steps
+	out["summary"] = map[string]any{
+		"expectedStepCount": report.Total,
+		"stepCount":         report.Completed,
+		"passed":            report.Passed,
+		"failed":            report.Failed,
+		"skipped":           report.Skipped,
+	}
+	return out
 }
 
 type apiCaseBatchReportEvidenceArtifact struct {
@@ -1199,8 +1235,8 @@ func apiCaseBatchNodePlans(ctx context.Context, bundle profile.Bundle, runtime s
 			NodeID:          item.NodeID,
 			NodeDisplayName: node.DisplayName,
 			Operation:       node.Operation,
-			Method:          node.Method,
-			Path:            node.Path,
+			Method:          apiCaseBatchPlanMethod(node, execution),
+			Path:            apiCaseBatchPlanPath(node, execution),
 			CasePath:        resolveBatchAPICasePath(ctx, runtime, bundle, casePath),
 			BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
 			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
@@ -1268,8 +1304,8 @@ func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runt
 			NodeID:          item.NodeID,
 			NodeDisplayName: node.DisplayName,
 			Operation:       node.Operation,
-			Method:          node.Method,
-			Path:            node.Path,
+			Method:          apiCaseBatchPlanMethod(node, execution),
+			Path:            apiCaseBatchPlanPath(node, execution),
 			CasePath:        resolveBatchAPICasePath(ctx, runtime, bundle, casePath),
 			BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
 			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
@@ -1328,8 +1364,8 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 			NodeID:          nodeID,
 			NodeDisplayName: node.DisplayName,
 			Operation:       node.Operation,
-			Method:          node.Method,
-			Path:            node.Path,
+			Method:          apiCaseBatchPlanMethod(node, execution),
+			Path:            apiCaseBatchPlanPath(node, execution),
 			StepID:          binding.StepID,
 			CasePath:        resolveBatchAPICasePath(ctx, runtime, bundle, casePath),
 			BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
@@ -1342,6 +1378,26 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 		})
 	}
 	return out
+}
+
+func apiCaseBatchPlanMethod(node profile.InterfaceNode, execution *caseExecutionConfig) string {
+	if strings.TrimSpace(node.Method) != "" {
+		return node.Method
+	}
+	if execution != nil {
+		return execution.Method
+	}
+	return ""
+}
+
+func apiCaseBatchPlanPath(node profile.InterfaceNode, execution *caseExecutionConfig) string {
+	if strings.TrimSpace(node.Path) != "" {
+		return node.Path
+	}
+	if execution != nil {
+		return execution.Path
+	}
+	return ""
 }
 
 func resolveBatchAPICasePath(ctx context.Context, runtime store.Store, bundle profile.Bundle, casePath string) string {

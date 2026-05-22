@@ -33,6 +33,8 @@ if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
   exit 1
 fi
 smoke_store_dsn="${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}"
+mysql_contract_dsn=""
+mysql_contract_mode=""
 if is_postgres_store_dsn "$smoke_store_dsn"; then
   export OTSANDBOX_TEST_PG_DSN="${OTSANDBOX_TEST_PG_DSN:-$smoke_store_dsn}"
 elif is_mysql_store_dsn "$smoke_store_dsn"; then
@@ -50,8 +52,8 @@ elif is_mysql_store_dsn "$smoke_store_dsn"; then
     echo "Use a dedicated sandbox/smoke/test/ci database name, not a business schema." >&2
     exit 1
   fi
-  export OTSANDBOX_MYSQL_TEST_DSN="${OTSANDBOX_MYSQL_TEST_DSN:-$smoke_store_dsn}"
-  export OTSANDBOX_MYSQL_TEST_DSN_MODE="${OTSANDBOX_MYSQL_TEST_DSN_MODE:-existing}"
+  mysql_contract_dsn="${OTSANDBOX_MYSQL_TEST_DSN:-$smoke_store_dsn}"
+  mysql_contract_mode="${OTSANDBOX_MYSQL_TEST_DSN_MODE:-existing}"
 elif is_sqlite_store_dsn "$smoke_store_dsn"; then
   if [[ "${OTSANDBOX_DISABLE_SQLITE_STORE:-}" == "1" ]]; then
     echo "OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite release-check Store." >&2
@@ -102,7 +104,16 @@ step "checking Store-first contract guardrail"
 tools/guardrails/check_store_first_contracts.sh
 
 step "running Go tests"
-go test ./... -count=1
+if is_mysql_store_dsn "$smoke_store_dsn"; then
+  env -u OTSANDBOX_MYSQL_TEST_DSN -u OTSANDBOX_MYSQL_TEST_DSN_MODE go test ./... -count=1
+
+  step "running MySQL Store contract"
+  OTSANDBOX_MYSQL_TEST_DSN="$mysql_contract_dsn" \
+    OTSANDBOX_MYSQL_TEST_DSN_MODE="$mysql_contract_mode" \
+    go test ./internal/store -run '^TestMySQLStoreContractWithExternalDatabase$' -count=1
+else
+  go test ./... -count=1
+fi
 
 step "running generic API case demo"
 if is_sqlite_store_dsn "$smoke_store_dsn"; then

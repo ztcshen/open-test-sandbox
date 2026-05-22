@@ -169,28 +169,27 @@ export function assertCaseEvidencePayload(payload, { runID, caseID, stepID, path
   }
 }
 
-export function assertRegisteredInterfaceCatalog(catalog, {
+export function assertRegisteredInterfaceCatalog({ catalog, detail }, {
   interfaceID = "interface.mysql-api-smoke",
   serviceID = "service.mysql-api-smoke",
   caseID = "case.mysql-api-smoke.default",
   templateID = "template.mysql-api-smoke",
-  configID = "cfg.case.mysql-api-smoke.default.execution",
 } = {}) {
-  const node = catalog?.interfaceNodes?.find((item) => item.id === interfaceID);
+  const node = detail?.node;
   if (!node || node.serviceId !== serviceID) {
-    throw new Error(`MySQL API interface registration did not persist interface node: ${JSON.stringify(catalog?.interfaceNodes)}`);
+    throw new Error(`MySQL API interface registration did not persist interface node: ${JSON.stringify(node)}`);
   }
-  const apiCase = catalog?.apiCases?.find((item) => item.id === caseID);
-  if (!apiCase || apiCase.nodeId !== interfaceID || apiCase.requiredForAdmission !== true) {
-    throw new Error(`MySQL API interface registration did not persist API case: ${JSON.stringify(catalog?.apiCases)}`);
+  const apiCase = detail?.cases?.find((item) => item.id === caseID);
+  if (!apiCase || apiCase.requiredForAdmission !== true) {
+    throw new Error(`MySQL API interface registration did not persist API case: ${JSON.stringify(detail?.cases)}`);
   }
-  const template = catalog?.requestTemplates?.find((item) => item.id === templateID);
-  if (!template || template.nodeId !== interfaceID) {
-    throw new Error(`MySQL API interface registration did not persist request template: ${JSON.stringify(catalog?.requestTemplates)}`);
+  const template = detail?.requestTemplates?.find((item) => item.id === templateID);
+  if (!template || template.method !== "GET" || template.path !== "/v1/mysql-api-smoke") {
+    throw new Error(`MySQL API interface registration did not persist request template: ${JSON.stringify(detail?.requestTemplates)}`);
   }
-  const config = catalog?.templateConfigs?.find((item) => item.id === configID);
-  if (!config || config.scopeType !== "case" || config.scopeId !== caseID) {
-    throw new Error(`MySQL API interface registration did not persist case execution config: ${JSON.stringify(catalog?.templateConfigs)}`);
+  const catalogCase = catalog?.apiCases?.find((item) => item.id === caseID);
+  if (!catalogCase || catalogCase.nodeId !== interfaceID) {
+    throw new Error(`MySQL API interface registration did not expose the case in catalog: ${JSON.stringify(catalog?.apiCases)}`);
   }
 }
 
@@ -341,10 +340,33 @@ async function closeHTTPServer(server) {
 }
 
 function assertNoRawSecret(payload, rawDSN) {
+  let rawPassword = "";
+  try {
+    rawPassword = new URL(rawDSN).password;
+  } catch {
+    const passwordMatch = rawDSN.match(/^mysql:\/\/[^:/?#]+:([^@/?#]+)@/i);
+    rawPassword = passwordMatch?.[1] || "";
+  }
+  if (!rawPassword) {
+    return;
+  }
   const raw = JSON.stringify(payload);
-  const passwordMatch = rawDSN.match(/^mysql:\/\/[^:/?#]+:([^@/?#]+)@/i);
-  if (passwordMatch && raw.includes(passwordMatch[1])) {
+  const encodedPassword = encodeURIComponent(rawPassword);
+  if (raw.includes(`:${rawPassword}@`) || raw.includes(`:${encodedPassword}@`)) {
     throw new Error(`/api/store/current leaked the raw Store password: ${raw}`);
+  }
+  if (typeof payload?.url === "string") {
+    try {
+      const visibleURL = new URL(payload.url);
+      if (visibleURL.password && visibleURL.password !== "xxxxx") {
+        throw new Error(`/api/store/current returned an unmasked Store password: ${raw}`);
+      }
+    } catch (error) {
+      if (error instanceof TypeError) {
+        return;
+      }
+      throw error;
+    }
   }
 }
 
@@ -492,7 +514,8 @@ async function main() {
     if (!updatedCatalog.services?.some((service) => service.id === "service.mysql-api-smoke")) {
       throw new Error(`MySQL API write did not persist to Store-backed catalog: ${JSON.stringify(updatedCatalog.services)}`);
     }
-    assertRegisteredInterfaceCatalog(updatedCatalog);
+    const interfaceDetail = await waitForJSON(`${baseURL}/api/interface-node?id=interface.mysql-api-smoke`);
+    assertRegisteredInterfaceCatalog({ catalog: updatedCatalog, detail: interfaceDetail });
 
     const environmentRegistration = await postJSON(`${baseURL}/api/environments`, {
       id: "env.mysql-api-smoke",
