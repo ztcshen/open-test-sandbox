@@ -2743,13 +2743,9 @@ func environmentRestoreApplyEdgeAssets(ctx context.Context, envID string, graph 
 	}
 	generated := stringMapFromAny(compose["generatedFiles"])
 	out := []environmentRestoreAppliedAsset{}
-	appliedAssetIDs := map[string]bool{}
+	appliedAssetTargets := map[string]bool{}
 	for _, dep := range graph.Dependencies {
 		for _, assetID := range environmentRestoreDependencyAssetIDs(dep) {
-			if appliedAssetIDs[assetID] {
-				continue
-			}
-			appliedAssetIDs[assetID] = true
 			asset, ok := assetsByID[assetID]
 			if !ok {
 				out = append(out, environmentRestoreAppliedAsset{
@@ -2762,6 +2758,12 @@ func environmentRestoreApplyEdgeAssets(ctx context.Context, envID string, graph 
 				})
 				continue
 			}
+			targetComponentID := firstNonEmpty(strings.TrimSpace(asset.TargetComponentID), strings.TrimSpace(dep.ProviderComponentID))
+			dedupeKey := assetID + "\x00" + targetComponentID
+			if appliedAssetTargets[dedupeKey] {
+				continue
+			}
+			appliedAssetTargets[dedupeKey] = true
 			item := environmentRestoreApplyEdgeAsset(ctx, dep, asset, componentByID, generated, workspace, execute, composeBaseArgs)
 			out = append(out, item)
 		}
@@ -2903,7 +2905,22 @@ func environmentRestoreIsMySQLSQLAsset(asset store.ComponentConfigAsset, dep sto
 	if !hasSQLToken {
 		return false
 	}
-	return hasMySQLToken || capability == "sql"
+	if hasMySQLToken {
+		return true
+	}
+	return capability == "sql" && (environmentRestoreHasMySQLComponentSignal(asset.TargetComponentID) || environmentRestoreHasMySQLComponentSignal(dep.ProviderComponentID))
+}
+
+func environmentRestoreHasMySQLComponentSignal(componentID string) bool {
+	tokens := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(componentID)), func(r rune) bool {
+		return r < 'a' || r > 'z'
+	})
+	for _, token := range tokens {
+		if token == "mysql" {
+			return true
+		}
+	}
+	return false
 }
 
 func environmentRestoreComponentComposeService(component store.EnvironmentComponent, defaultID string) string {
@@ -2922,7 +2939,7 @@ func environmentRestoreMySQLApplyCommand(composeBaseArgs []string, service strin
 func environmentRestoreMySQLClientScript() string {
 	return `user="${MYSQL_USER:-root}"
 password="${MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"
-database="${MYSQL_DATABASE:-}"
+database="${OTSANDBOX_MYSQL_APPLY_DATABASE:-}"
 set --
 if [ -n "$user" ]; then
   set -- "$@" "-u${user}"

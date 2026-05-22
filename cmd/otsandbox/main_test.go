@@ -2775,6 +2775,47 @@ func TestEnvironmentRestoreEdgeAssetsAvoidNonSQLMySQLAndDuplicateApply(t *testin
 	if actions["shared.schema"] != "plan-apply-mysql-sql" || strings.Contains(commands["shared.schema"], "-proot") || !strings.Contains(commands["shared.schema"], "MYSQL_ROOT_PASSWORD") {
 		t.Fatalf("SQL MySQL asset command should use container env credentials: actions=%#v commands=%#v", actions, commands)
 	}
+	if strings.Contains(commands["shared.schema"], "MYSQL_DATABASE") || !strings.Contains(commands["shared.schema"], "OTSANDBOX_MYSQL_APPLY_DATABASE") {
+		t.Fatalf("SQL MySQL asset command should not force MYSQL_DATABASE by default: %#v", commands)
+	}
+}
+
+func TestEnvironmentRestoreEdgeAssetsRequireMySQLProviderSignal(t *testing.T) {
+	workspace := t.TempDir()
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "postgres", Kind: "middleware", Role: "database", ComposeService: "postgres"},
+			{ComponentID: "mysql.primary", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "postgres", Capability: "sql", ProfileJSON: `{"assetIds":["postgres.schema"]}`},
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql.primary", Capability: "sql", ProfileJSON: `{"assetIds":["shared.schema"]}`},
+			{ConsumerComponentID: "worker", ProviderComponentID: "postgres", Capability: "sql", ProfileJSON: `{"assetIds":["shared.schema"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "postgres.schema", AssetKind: "postgres-ddl", TargetComponentID: "postgres", TargetPath: "postgres.sql", ContentInline: "create schema app;\n"},
+			{OwnerComponentID: "app", AssetID: "shared.schema", AssetKind: "schema", TargetPath: "shared.sql", ContentInline: "create database if not exists shared;\n"},
+		},
+	}
+	items := environmentRestoreApplyEdgeAssets(context.Background(), "env.edge.mysql-signal", graph, nil, workspace, false, []string{"-f", "compose.yml"})
+	if len(items) != 3 {
+		t.Fatalf("shared asset should be applied once per effective target, got %#v", items)
+	}
+	actionsByTarget := map[string]string{}
+	for _, item := range items {
+		actionsByTarget[item.AssetID+"@"+item.TargetComponentID] = item.Action
+	}
+	if actionsByTarget["postgres.schema@postgres"] == "plan-apply-mysql-sql" {
+		t.Fatalf("postgres SQL asset should not use MySQL apply: %#v", actionsByTarget)
+	}
+	if actionsByTarget["shared.schema@mysql.primary"] != "plan-apply-mysql-sql" {
+		t.Fatalf("shared schema should use MySQL apply for MySQL target: %#v", actionsByTarget)
+	}
+	if actionsByTarget["shared.schema@postgres"] == "plan-apply-mysql-sql" {
+		t.Fatalf("shared schema should not use MySQL apply for PostgreSQL target: %#v", actionsByTarget)
+	}
 }
 
 func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
