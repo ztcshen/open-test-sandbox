@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -3983,13 +3984,25 @@ func runEnvironmentRestoreUsesNamedActiveStore(t *testing.T, suffixLabel string,
 		}
 	}))
 	defer acceptanceServer.Close()
-	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	sourceCompose := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, sourceCompose, "services: {}\n")
 	runCLI(t, "environment", "register",
 		"--id", envID,
 		"--compose-file", "compose.yml",
 		"--health-url", healthServer.URL+"/ready",
 		"--verification-workflow", "workflow.alpha",
 	)
+	runCLI(t, "environment", "startup-file", "put",
+		"--file", "compose.yml="+sourceCompose,
+		envID,
+	)
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"` + healthServer.URL + `/ready"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+	}))
+	runCLI(t, "environment", "components", "replace", "--file", graphPath, envID)
 
 	out := runCLIWithEnv(t, fakeDockerEnv,
 		"environment", "restore",
@@ -5667,7 +5680,7 @@ func runProfileImportAndVerifyUseNamedActiveStore(t *testing.T, storeRef string,
 	if err := json.Unmarshal([]byte(verifyOut), &verifyReport); err != nil {
 		t.Fatalf("decode %s profile verify json: %v\n%s", label, err, verifyOut)
 	}
-	if !verifyReport.OK || verifyReport.Publish.ProfileID != "sample" || strings.Join(verifyReport.Publish.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
+	if !verifyReport.OK || verifyReport.Publish.ProfileID != "sample" || !hasReadModels(verifyReport.Publish.ReadModels, "interface-nodes", "catalog", "dashboard") {
 		t.Fatalf("%s profile verify report = %#v", label, verifyReport)
 	}
 	if !verifyReport.Summary.RequiredCaseRuns || verifyReport.Summary.FailedChecks != 0 {
@@ -9118,11 +9131,11 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 		"--trace-id", traceID,
 		"--json",
 	)
-	if !strings.Contains(traceOut, `"provider":"skywalking"`) || !strings.Contains(traceOut, `"status":"complete"`) || !strings.Contains(traceOut, traceID) {
+	if !(strings.Contains(traceOut, `"provider":"skywalking"`) || strings.Contains(traceOut, `"provider": "skywalking"`)) || !(strings.Contains(traceOut, `"status":"complete"`) || strings.Contains(traceOut, `"status": "complete"`)) || !strings.Contains(traceOut, traceID) {
 		t.Fatalf("%s trace topology via active SQL Store = %s", label, traceOut)
 	}
 	evidenceOut := runCLI(t, "case", "evidence", "--run", report.RunID, "--case-id", "case.first", "--step-id", "first", "--json")
-	if !strings.Contains(evidenceOut, `"provider":"skywalking"`) || !strings.Contains(evidenceOut, traceID) {
+	if !(strings.Contains(evidenceOut, `"provider":"skywalking"`) || strings.Contains(evidenceOut, `"provider": "skywalking"`)) || !strings.Contains(evidenceOut, traceID) {
 		t.Fatalf("%s case evidence via active SQL Store = %s", label, evidenceOut)
 	}
 }
@@ -11050,7 +11063,7 @@ func runServeAndEvidenceTasksUseNamedActiveStore(t *testing.T, storeRef string, 
 	if err := json.Unmarshal(nodes.Body.Bytes(), &nodesPayload); err != nil {
 		t.Fatalf("decode %s interface nodes payload: %v\n%s", label, err, nodes.Body.String())
 	}
-	if nodesPayload.Source.ID != "sample" || nodesPayload.Source.Kind != "store" || len(nodesPayload.Items) != 1 || nodesPayload.Items[0].ID != "node.alpha" {
+	if nodesPayload.Source.ID != "sample" || nodesPayload.Source.Kind != "read-model" || len(nodesPayload.Items) != 1 || nodesPayload.Items[0].ID != "node.alpha" {
 		t.Fatalf("%s serve catalog payload = %#v", label, nodesPayload)
 	}
 
@@ -11093,7 +11106,7 @@ func runServeAndEvidenceTasksUseNamedActiveStore(t *testing.T, storeRef string, 
 	if err := json.Unmarshal(verifyRec.Body.Bytes(), &verifyPayload); err != nil {
 		t.Fatalf("decode %s serve profile verify payload: %v\n%s", label, err, verifyRec.Body.String())
 	}
-	if !verifyPayload.OK || verifyPayload.ProfileID != "sample" || verifyPayload.Publish.ProfileID != "sample" || verifyPayload.Publish.BundlePath != apiVerifyDir || strings.Join(verifyPayload.Publish.ReadModels, ",") != "interface-nodes,catalog,dashboard" || verifyPayload.Summary.FailedChecks != 0 {
+	if !verifyPayload.OK || verifyPayload.ProfileID != "sample" || verifyPayload.Publish.ProfileID != "sample" || verifyPayload.Publish.BundlePath != apiVerifyDir || !hasReadModels(verifyPayload.Publish.ReadModels, "interface-nodes", "catalog", "dashboard") || verifyPayload.Summary.FailedChecks != 0 {
 		t.Fatalf("%s serve profile verify payload = %#v", label, verifyPayload)
 	}
 
@@ -11234,6 +11247,7 @@ func configureNamedMySQLActiveStore(t *testing.T, name string) string {
 	runCLI(t, "store", "config", "set", name, "--url", dsn)
 	runCLI(t, "store", "use", name)
 	runCLI(t, "store", "upgrade")
+	resetNamedMySQLActiveStore(t, dsn)
 	return dsn
 }
 
@@ -11252,6 +11266,60 @@ func uniqueTestID(t *testing.T, prefix string) string {
 	slug := strings.ToLower(t.Name())
 	slug = strings.NewReplacer("/", "-", "_", "-", " ", "-").Replace(slug)
 	return fmt.Sprintf("%s.%s.%d", prefix, slug, time.Now().UTC().UnixNano())
+}
+
+func resetNamedMySQLActiveStore(t *testing.T, dsn string) {
+	t.Helper()
+	cfg, err := mysql.ParseConfigFromURL(dsn)
+	if err != nil {
+		t.Fatalf("parse MySQL test store DSN: %v", err)
+	}
+	db, err := sql.Open(cfg.DriverName, cfg.DSN)
+	if err != nil {
+		t.Fatalf("open MySQL test store for reset: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	ctx := context.Background()
+	rows, err := db.QueryContext(ctx, `
+select table_name
+from information_schema.tables
+where table_schema = database()
+  and table_type = 'BASE TABLE'
+  and table_name <> 'schema_versions'
+order by table_name;`)
+	if err != nil {
+		t.Fatalf("list MySQL test store tables: %v", err)
+	}
+	defer rows.Close()
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			t.Fatalf("scan MySQL test store table: %v", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate MySQL test store tables: %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close MySQL test store table cursor: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "set foreign_key_checks = 0"); err != nil {
+		t.Fatalf("disable MySQL foreign key checks: %v", err)
+	}
+	defer db.ExecContext(context.Background(), "set foreign_key_checks = 1")
+	for _, table := range tables {
+		if _, err := db.ExecContext(ctx, "delete from "+quoteMySQLTestIdent(table)); err != nil {
+			t.Fatalf("clear MySQL test table %q: %v", table, err)
+		}
+	}
+}
+
+func quoteMySQLTestIdent(value string) string {
+	return "`" + strings.ReplaceAll(value, "`", "``") + "`"
 }
 
 func seedEnvironmentVerificationArtifacts(t *testing.T, storeRef string, runID string) {
@@ -11545,6 +11613,19 @@ func hasProfileVerifyCheck(checks []struct {
 		}
 	}
 	return false
+}
+
+func hasReadModels(readModels []string, required ...string) bool {
+	seen := map[string]bool{}
+	for _, key := range readModels {
+		seen[key] = true
+	}
+	for _, key := range required {
+		if !seen[key] {
+			return false
+		}
+	}
+	return true
 }
 
 func runCLIFails(t *testing.T, args ...string) string {

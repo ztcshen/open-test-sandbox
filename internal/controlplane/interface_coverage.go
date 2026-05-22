@@ -301,6 +301,7 @@ func interfaceNodeCoverageRows(bundle profile.Bundle, workflowID string) []map[s
 		row := map[string]any{
 			"workflowId":      binding.WorkflowID,
 			"stepId":          binding.StepID,
+			"nodeId":          binding.NodeID,
 			"caseId":          binding.CaseID,
 			"caseDisplayName": item.DisplayName,
 			"required":        binding.Required,
@@ -308,7 +309,6 @@ func interfaceNodeCoverageRows(bundle profile.Bundle, workflowID string) []map[s
 			"admissionStatus": "pending",
 		}
 		if mapped {
-			row["nodeId"] = node.ID
 			row["nodeDisplayName"] = node.DisplayName
 			row["serviceId"] = node.ServiceID
 			row["href"] = "/interface-node.html?id=" + node.ID
@@ -343,6 +343,7 @@ func interfaceNodeCoverageRowsFromCatalog(catalog store.ProfileCatalog, workflow
 		row := map[string]any{
 			"workflowId":      binding.WorkflowID,
 			"stepId":          binding.StepID,
+			"nodeId":          binding.NodeID,
 			"caseId":          binding.CaseID,
 			"caseDisplayName": item.DisplayName,
 			"required":        binding.Required,
@@ -350,7 +351,6 @@ func interfaceNodeCoverageRowsFromCatalog(catalog store.ProfileCatalog, workflow
 			"admissionStatus": "pending",
 		}
 		if mapped {
-			row["nodeId"] = node.ID
 			row["nodeDisplayName"] = node.DisplayName
 			row["serviceId"] = node.ServiceID
 			row["href"] = "/interface-node.html?id=" + node.ID
