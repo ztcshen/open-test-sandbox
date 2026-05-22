@@ -719,6 +719,9 @@ func collectAPICaseBatchTraceTopology(ctx context.Context, runtime store.Store, 
 		"workflowId": workflowID,
 		"stepId":     plan.StepID,
 	}
+	if plan.Execution != nil && strings.TrimSpace(plan.Execution.TraceEndpoint) != "" {
+		payload["traceEndpoint"] = plan.Execution.TraceEndpoint
+	}
 	resultPayload := map[string]any{
 		"ok":         true,
 		"caseId":     result.CaseID,

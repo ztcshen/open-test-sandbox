@@ -60,6 +60,9 @@ check_pattern 'release gate:[[:space:]]*`npm run release-check`|发布门禁：`
 check_current_docs_pattern 'PostgreSQL Store is the active source of truth|sandbox'\''s own PostgreSQL Store/control-plane database|PostgreSQL is the default product Store|PostgreSQL remains the default|PostgreSQL remains the default upstream|default product Store backend|PostgreSQL by default|PostgreSQL is default|PostgreSQL is the default Store backend|MySQL is supported for teams|MySQL Store can be used for the same smoke shape|PostgreSQL 是默认|PostgreSQL 仍是默认后端|默认产品 Store|默认 Store 后端|MySQL 支持团队测试环境|也支持 MySQL Store|也支持以[[:space:]]*MySQL' \
   "SQL Store docs must not describe PostgreSQL as the only active source or default product Store."
 
+check_current_docs_pattern '65536|131072|16384|16 KB|64 KB|128 KB' \
+  "Current Store docs must not mention superseded small Store payload limits; use the 1 MB-only Store boundary."
+
 check_pattern '^[[:space:]]*npm run demo:api-case[[:space:]]*$' \
   "API case demo examples must show OTSANDBOX_DEMO_STORE or active Store setup."
 

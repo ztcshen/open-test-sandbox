@@ -40,6 +40,7 @@ type caseExecutionConfig struct {
 	ExpectedResponse      []string       `json:"expectedResponseContains"`
 	RequireRequestID      bool           `json:"requireRequestId"`
 	Signed                bool           `json:"signed"`
+	TraceEndpoint         string         `json:"traceEndpoint"`
 	TraceCorrelatorFields []string       `json:"traceCorrelatorFields"`
 }
 
@@ -632,6 +633,7 @@ func renderCaseExecution(execution caseExecutionConfig, overrides map[string]any
 	rendered.Query = mapFromAny(renderCaseExecutionValue(rendered.Query, overrides))
 	rendered.Headers = mapFromAny(renderCaseExecutionValue(rendered.Headers, overrides))
 	rendered.Auth = mapFromAny(renderCaseExecutionValue(rendered.Auth, overrides))
+	rendered.TraceEndpoint = valueString(renderCaseExecutionValue(rendered.TraceEndpoint, overrides))
 	rendered.Body = renderCaseExecutionValue(rendered.Body, overrides)
 	return rendered
 }
@@ -1535,6 +1537,7 @@ func testKitTraceTopologyCollectPayload(runID string, payload map[string]any, re
 	response := mapFromAny(mapFromAny(result["result"])["response"])
 	headers := request["headers"]
 	endpoint := firstNonEmpty(
+		valueString(payload["traceEndpoint"]),
 		valueString(headerValue(headers, "X-Sandbox-Trace-Endpoint")),
 		valueString(headerValue(headers, "X-Sandbox-Callback-Path")),
 		valueString(request["path"]),
@@ -1554,16 +1557,21 @@ func testKitTraceTopologyCollectPayload(runID string, payload map[string]any, re
 
 func collectTraceTopologyWithRetry(ctx context.Context, runtime store.Store, collector traceCollector, payload map[string]any) (store.TraceTopology, traceTopology, error) {
 	var lastErr error
-	for attempt := 0; attempt < 4; attempt++ {
+	attempt := 0
+	for {
 		row, topology, err := collectTraceTopology(ctx, runtime, collector, payload)
 		if err == nil {
 			return row, topology, nil
 		}
 		lastErr = err
-		if !retryableTraceCollectError(err) || attempt == 3 {
+		if !retryableTraceCollectError(err) {
 			break
 		}
-		timer := time.NewTimer(time.Duration(attempt+1) * 500 * time.Millisecond)
+		attempt++
+		if attempt >= 15 {
+			break
+		}
+		timer := time.NewTimer(time.Second)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

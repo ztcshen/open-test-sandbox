@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -50,6 +51,7 @@ var postgresSchemaStatus = postgres.SchemaStatus
 var postgresUpgradeSchema = postgres.UpgradeSchema
 var mysqlSchemaStatus = mysql.SchemaStatus
 var mysqlUpgradeSchema = mysql.UpgradeSchema
+var mysqlProvisionDatabase = mysql.ProvisionDatabase
 
 type profileImportReport struct {
 	ProfileID     string               `json:"profileId"`
@@ -321,10 +323,11 @@ Usage:
   otsandbox store config list [--json]
   otsandbox store use NAME
   otsandbox store current [--json]
-  otsandbox store status [--store NAME_OR_DSN]
+  otsandbox store status [--store NAME_OR_DSN] [--json]
+  otsandbox store provision [--store NAME_OR_DSN] [--json]
   otsandbox store upgrade [--store NAME_OR_DSN]
   otsandbox store ddl [--backend postgres|mysql] [--store NAME_OR_DSN]
-  otsandbox store copy --from NAME_OR_DSN --to NAME_OR_DSN [--json]
+  otsandbox store copy --from NAME_OR_DSN --to NAME_OR_DSN [--require-environment ENV_ID] [--require-verification-workflow ID] [--require-verified-environment] [--require-min-components N] [--require-min-dependencies N] [--require-min-assets N] [--require-inline-asset-bytes N] [--json]
   otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-generated-file TARGET=SOURCE_FILE]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
@@ -351,6 +354,7 @@ Usage:
   otsandbox profile pack --profile PATH_OR_ID --output PATH [--profile-home PATH] [--force]
   otsandbox profile list [--profile-home PATH] [--json]
   otsandbox profile inspect --profile PATH_OR_ID [--profile-home PATH]
+  otsandbox profile export --store NAME_OR_DSN --output PATH [--force] [--json]
   otsandbox profile audit --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
   otsandbox profile audit-plan --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
   otsandbox profile doctor --profile PATH_OR_ID --case-id ID [--profile-home PATH] [--json]
@@ -440,6 +444,7 @@ func runStore(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -460,7 +465,15 @@ func runStore(ctx context.Context, args []string) error {
 		case "status":
 			status, err := postgresSchemaStatus(ctx, cfg)
 			if err != nil {
+				if *jsonOutput {
+					if jsonErr := writeIndentedJSON(postgresStoreStatusErrorReport(cfg.URL, err)); jsonErr != nil {
+						return jsonErr
+					}
+				}
 				return err
+			}
+			if *jsonOutput {
+				return writeIndentedJSON(postgresStoreStatusReport(status))
 			}
 			printPostgresStoreStatus(status)
 		case "upgrade":
@@ -485,9 +498,47 @@ func runStore(ctx context.Context, args []string) error {
 		case "status":
 			status, err := mysqlSchemaStatus(ctx, cfg)
 			if err != nil {
+				if *jsonOutput {
+					if jsonErr := writeIndentedJSON(mysqlStoreStatusErrorReport(cfg.URL, err)); jsonErr != nil {
+						return jsonErr
+					}
+				}
 				return err
 			}
+			if *jsonOutput {
+				return writeIndentedJSON(mysqlStoreStatusReport(status))
+			}
 			printMySQLStoreStatus(status)
+		case "provision":
+			result, err := mysqlProvisionDatabase(ctx, cfg)
+			if err != nil {
+				if *jsonOutput {
+					if jsonErr := writeIndentedJSON(map[string]any{
+						"ok":      false,
+						"backend": "mysql",
+						"url":     maskStoreURL(cfg.URL),
+						"error":   err.Error(),
+					}); jsonErr != nil {
+						return jsonErr
+					}
+				}
+				return err
+			}
+			if *jsonOutput {
+				return writeIndentedJSON(map[string]any{
+					"ok":       true,
+					"backend":  "mysql",
+					"url":      maskStoreURL(result.URL),
+					"database": result.Database,
+					"created":  result.Created,
+				})
+			}
+			if result.Created {
+				fmt.Printf("Created MySQL store database %s\n", result.Database)
+			} else {
+				fmt.Printf("MySQL store database already exists: %s\n", result.Database)
+			}
+			fmt.Printf("URL: %s\n", maskStoreURL(result.URL))
 		case "upgrade":
 			status, err := mysqlUpgradeSchema(ctx, cfg)
 			if err != nil {
@@ -510,7 +561,15 @@ func runStore(ctx context.Context, args []string) error {
 	case "status":
 		status, err := sqlite.SchemaStatus(ctx, cfg)
 		if err != nil {
+			if *jsonOutput {
+				if jsonErr := writeIndentedJSON(sqliteStoreStatusErrorReport(cfg, err)); jsonErr != nil {
+					return jsonErr
+				}
+			}
 			return err
+		}
+		if *jsonOutput {
+			return writeIndentedJSON(sqliteStoreStatusReport(status))
 		}
 		printStoreStatus(status)
 	case "upgrade":
@@ -1286,16 +1345,17 @@ type environmentRestoreReadinessItem struct {
 }
 
 type environmentRestoreDockerReport struct {
-	OK           bool                                  `json:"ok"`
-	Action       string                                `json:"action"`
-	ComposeFile  string                                `json:"composeFile,omitempty"`
-	Workdir      string                                `json:"workdir,omitempty"`
-	Generated    []environmentRestoreGeneratedFile     `json:"generatedFiles,omitempty"`
-	Cleanup      environmentRestoreDockerCleanupReport `json:"cleanup,omitempty"`
-	Commands     [][]string                            `json:"commands,omitempty"`
-	Output       []string                              `json:"output,omitempty"`
-	Error        string                                `json:"error,omitempty"`
-	HealthChecks []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
+	OK            bool                                  `json:"ok"`
+	Action        string                                `json:"action"`
+	ComposeFile   string                                `json:"composeFile,omitempty"`
+	Workdir       string                                `json:"workdir,omitempty"`
+	Generated     []environmentRestoreGeneratedFile     `json:"generatedFiles,omitempty"`
+	AppliedAssets []environmentRestoreAppliedAsset      `json:"appliedAssets,omitempty"`
+	Cleanup       environmentRestoreDockerCleanupReport `json:"cleanup,omitempty"`
+	Commands      [][]string                            `json:"commands,omitempty"`
+	Output        []string                              `json:"output,omitempty"`
+	Error         string                                `json:"error,omitempty"`
+	HealthChecks  []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
 }
 
 type environmentRestoreGeneratedFile struct {
@@ -1304,6 +1364,23 @@ type environmentRestoreGeneratedFile struct {
 	Action string `json:"action"`
 	OK     bool   `json:"ok"`
 	Error  string `json:"error,omitempty"`
+}
+
+type environmentRestoreAppliedAsset struct {
+	AssetID              string   `json:"assetId"`
+	OwnerComponentID     string   `json:"ownerComponentId,omitempty"`
+	TargetComponentID    string   `json:"targetComponentId,omitempty"`
+	TargetComposeService string   `json:"targetComposeService,omitempty"`
+	DependencyConsumer   string   `json:"dependencyConsumer,omitempty"`
+	DependencyProvider   string   `json:"dependencyProvider,omitempty"`
+	TargetPath           string   `json:"targetPath,omitempty"`
+	Bytes                int      `json:"bytes,omitempty"`
+	ApplyOrder           int      `json:"applyOrder,omitempty"`
+	Action               string   `json:"action"`
+	Command              []string `json:"command,omitempty"`
+	Attempts             int      `json:"attempts,omitempty"`
+	OK                   bool     `json:"ok"`
+	Error                string   `json:"error,omitempty"`
 }
 
 type environmentRestoreDockerCleanupReport struct {
@@ -1653,12 +1730,12 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 			}
 		}
 	} else if report.OK && cleanupOptions.UseExistingContainers {
-		report.Docker = environmentRestoreUseExistingContainers(ctx, compose, healthChecks, workspace, execute, healthTimeout)
+		report.Docker = environmentRestoreUseExistingContainers(ctx, env.ID, componentGraph, compose, healthChecks, workspace, execute, healthTimeout)
 		if !report.Docker.OK {
 			report.OK = false
 		}
 	} else if report.OK {
-		report.Docker = environmentRestoreDocker(ctx, compose, healthChecks, workspace, execute, healthTimeout, cleanupOptions)
+		report.Docker = environmentRestoreDocker(ctx, env.ID, componentGraph, compose, healthChecks, workspace, execute, healthTimeout, cleanupOptions)
 		if !report.Docker.OK {
 			report.OK = false
 		}
@@ -2430,7 +2507,15 @@ func environmentRestoreHealthCheckSignature(item map[string]any) string {
 
 func environmentRestoreRequiresRemoteSources(storeURL string) bool {
 	backend, err := storeBackendFromURL(strings.TrimSpace(storeURL))
-	return err == nil && isDailyStoreBackend(backend)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "postgres", "mysql":
+		return true
+	default:
+		return false
+	}
 }
 
 func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, remoteOnly bool) environmentRestoreSourcePolicy {
@@ -2638,6 +2723,221 @@ func environmentRestoreRemoteComponentAssets(ctx context.Context, envID string, 
 		out = append(out, report)
 	}
 	return out
+}
+
+func environmentRestoreApplyEdgeAssets(ctx context.Context, envID string, graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, execute bool, composeBaseArgs []string) []environmentRestoreAppliedAsset {
+	if len(graph.Dependencies) == 0 || len(graph.Assets) == 0 {
+		return nil
+	}
+	assetsByID := map[string]store.ComponentConfigAsset{}
+	for _, asset := range graph.Assets {
+		if id := strings.TrimSpace(asset.AssetID); id != "" {
+			assetsByID[id] = asset
+		}
+	}
+	componentByID := map[string]store.EnvironmentComponent{}
+	for _, component := range graph.Components {
+		if id := strings.TrimSpace(component.ComponentID); id != "" {
+			componentByID[id] = component
+		}
+	}
+	generated := stringMapFromAny(compose["generatedFiles"])
+	out := []environmentRestoreAppliedAsset{}
+	for _, dep := range graph.Dependencies {
+		for _, assetID := range environmentRestoreDependencyAssetIDs(dep) {
+			asset, ok := assetsByID[assetID]
+			if !ok {
+				out = append(out, environmentRestoreAppliedAsset{
+					AssetID:            assetID,
+					DependencyConsumer: dep.ConsumerComponentID,
+					DependencyProvider: dep.ProviderComponentID,
+					Action:             "missing-edge-asset",
+					OK:                 false,
+					Error:              "component dependency references missing config asset: " + assetID,
+				})
+				continue
+			}
+			item := environmentRestoreApplyEdgeAsset(ctx, dep, asset, componentByID, generated, workspace, execute, composeBaseArgs)
+			out = append(out, item)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].DependencyProvider != out[j].DependencyProvider {
+			return out[i].DependencyProvider < out[j].DependencyProvider
+		}
+		if out[i].DependencyConsumer != out[j].DependencyConsumer {
+			return out[i].DependencyConsumer < out[j].DependencyConsumer
+		}
+		if out[i].ApplyOrder != out[j].ApplyOrder {
+			return out[i].ApplyOrder < out[j].ApplyOrder
+		}
+		return out[i].AssetID < out[j].AssetID
+	})
+	return out
+}
+
+func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, components map[string]store.EnvironmentComponent, generated map[string]string, workspace string, execute bool, composeBaseArgs []string) environmentRestoreAppliedAsset {
+	targetComponentID := firstNonEmpty(strings.TrimSpace(asset.TargetComponentID), strings.TrimSpace(dep.ProviderComponentID))
+	targetService := environmentRestoreComponentComposeService(components[targetComponentID], targetComponentID)
+	content, contentErr := environmentRestoreEdgeAssetContent(asset, workspace)
+	item := environmentRestoreAppliedAsset{
+		AssetID:              strings.TrimSpace(asset.AssetID),
+		OwnerComponentID:     strings.TrimSpace(asset.OwnerComponentID),
+		TargetComponentID:    targetComponentID,
+		TargetComposeService: targetService,
+		DependencyConsumer:   strings.TrimSpace(dep.ConsumerComponentID),
+		DependencyProvider:   strings.TrimSpace(dep.ProviderComponentID),
+		TargetPath:           strings.TrimSpace(asset.TargetPath),
+		Bytes:                len(content),
+		ApplyOrder:           asset.ApplyOrder,
+		Action:               "plan-apply-edge-asset",
+		OK:                   true,
+	}
+	if targetComponentID == "" {
+		item.OK = false
+		item.Error = "edge asset target component is required"
+		return item
+	}
+	kind := strings.ToLower(strings.TrimSpace(asset.AssetKind))
+	if strings.Contains(kind, "mysql") || strings.EqualFold(targetComponentID, "mysql") {
+		item.Action = "plan-apply-mysql-sql"
+		item.Command = environmentRestoreMySQLApplyCommand(composeBaseArgs, targetService)
+		if len(composeBaseArgs) == 0 || targetService == "" {
+			item.OK = false
+			item.Error = "mysql edge asset requires a Docker Compose target service"
+			return item
+		}
+		if contentErr != nil {
+			item.OK = false
+			item.Error = contentErr.Error()
+			return item
+		}
+		if strings.TrimSpace(content) == "" {
+			item.OK = false
+			item.Error = "mysql edge asset requires SQL content"
+			return item
+		}
+		if execute {
+			item.Action = "apply-mysql-sql"
+			_, attempts, errText := runRestoreMySQLCommandWithInputRetry(ctx, workspace, item.Command, content)
+			item.Attempts = attempts
+			if errText != "" {
+				item.OK = false
+				item.Error = errText
+			}
+		}
+		return item
+	}
+	targetPath := filepath.Clean(strings.TrimSpace(asset.TargetPath))
+	if targetPath == "." || targetPath == "" {
+		item.OK = false
+		item.Error = "edge asset target path is required"
+		return item
+	}
+	if _, ok := generated[targetPath]; ok {
+		item.Action = "project-generated-file"
+		if execute {
+			item.Action = "verify-generated-file"
+			if _, err := os.Stat(restoreWorkspacePath(workspace, targetPath)); err != nil {
+				item.OK = false
+				item.Error = err.Error()
+			}
+		}
+		return item
+	}
+	item.OK = false
+	item.Error = "edge asset must be generated from Store before target startup: " + targetPath
+	return item
+}
+
+func environmentRestoreEdgeAssetContent(asset store.ComponentConfigAsset, workspace string) (string, error) {
+	if strings.TrimSpace(asset.ContentInline) != "" {
+		return asset.ContentInline, nil
+	}
+	targetPath := filepath.Clean(strings.TrimSpace(asset.TargetPath))
+	if targetPath == "." || targetPath == "" || filepath.IsAbs(targetPath) || strings.HasPrefix(targetPath, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("edge asset target path is required")
+	}
+	raw, err := os.ReadFile(restoreWorkspacePath(workspace, targetPath))
+	if err != nil {
+		return "", fmt.Errorf("read edge asset content from %s: %w", targetPath, err)
+	}
+	return string(raw), nil
+}
+
+func environmentRestoreDependencyAssetIDs(dep store.ComponentDependency) []string {
+	profile := jsonObjectString(dep.ProfileJSON)
+	ids := []string{}
+	for _, key := range []string{"assetIds", "configAssetIds", "startupAssetIds", "applyAssetIds"} {
+		ids = append(ids, stringSliceFromAny(profile[key])...)
+	}
+	if value := strings.TrimSpace(valueString(profile["assetId"])); value != "" {
+		ids = append(ids, value)
+	}
+	return dedupeStrings(ids)
+}
+
+func environmentRestoreComponentComposeService(component store.EnvironmentComponent, defaultID string) string {
+	if service := strings.TrimSpace(component.ComposeService); service != "" {
+		return service
+	}
+	return strings.TrimSpace(defaultID)
+}
+
+func environmentRestoreMySQLApplyCommand(composeBaseArgs []string, service string) []string {
+	command := append([]string{"docker", "compose"}, composeBaseArgs...)
+	command = append(command, "exec", "-T", service, "mysql", "-uroot", "-proot")
+	return command
+}
+
+func runRestoreMySQLCommandWithInputRetry(ctx context.Context, workdir string, command []string, input string) (string, int, string) {
+	const maxAttempts = 60
+	const delay = time.Second
+	var lastOutput string
+	var lastErr string
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		output, errText := runRestoreCommandWithInput(ctx, workdir, command, input)
+		if errText == "" {
+			return output, attempt, ""
+		}
+		lastOutput = output
+		lastErr = errText
+		if !environmentRestoreMySQLApplyErrCanRetry(errText) {
+			return output, attempt, errText
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return lastOutput, attempt, ctx.Err().Error()
+		case <-timer.C:
+		}
+	}
+	return lastOutput, maxAttempts, lastErr
+}
+
+func environmentRestoreMySQLApplyErrCanRetry(errText string) bool {
+	lower := strings.ToLower(errText)
+	retryable := []string{
+		"access denied for user 'root'@'localhost'",
+		"can't connect to local mysql server",
+		"can't connect to mysql server",
+		"lost connection to mysql server",
+		"server has gone away",
+		"error 1045",
+		"error 2002",
+		"error 2003",
+		"error 2013",
+	}
+	for _, item := range retryable {
+		if strings.Contains(lower, item) {
+			return true
+		}
+	}
+	return false
 }
 
 func environmentRestoreIsRemoteGitURL(rawURL string) bool {
@@ -3466,13 +3766,17 @@ func environmentRestoreCheckoutDetachedAtRef(ctx context.Context, spec environme
 	return strings.TrimSpace(head) == strings.TrimSpace(target) && strings.TrimSpace(branch) == "HEAD", ""
 }
 
-func environmentRestoreUseExistingContainers(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
+func environmentRestoreUseExistingContainers(ctx context.Context, envID string, graph store.EnvironmentComponentGraph, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
 	report := environmentRestoreDockerReport{
 		OK:          true,
 		Action:      "plan-use-existing-containers",
 		Workdir:     workspace,
 		ComposeFile: strings.Join(environmentRestoreResolvedComposeFiles(workspace, environmentRestoreComposeFiles(compose)), ","),
 		Generated:   prepareEnvironmentRestoreGeneratedFiles(compose, workspace, execute),
+	}
+	composeBaseArgs := []string{}
+	if report.ComposeFile != "" {
+		composeBaseArgs = environmentRestoreComposeBaseArgs(compose, workspace, environmentRestoreResolvedComposeFiles(workspace, environmentRestoreComposeFiles(compose)))
 	}
 	for _, item := range report.Generated {
 		if !item.OK {
@@ -3500,6 +3804,14 @@ func environmentRestoreUseExistingContainers(ctx context.Context, compose map[st
 		report.Output = append(report.Output, "generated compose env file: "+envFile)
 	}
 	report.Action = "use-existing-containers"
+	report.AppliedAssets = environmentRestoreApplyEdgeAssets(ctx, envID, graph, compose, workspace, execute, composeBaseArgs)
+	for _, asset := range report.AppliedAssets {
+		if !asset.OK {
+			report.OK = false
+			report.Error = asset.Error
+			return report
+		}
+	}
 	report.HealthChecks = waitEnvironmentRestoreHealthChecks(ctx, environmentRestoreAdoptedContainerHealthChecks(healthChecks, compose, workspace), healthTimeout, workspace, nil)
 	for _, check := range report.HealthChecks {
 		if !check.OK {
@@ -3535,7 +3847,7 @@ func environmentRestoreAdoptedContainerHealthChecks(checks []any, compose map[st
 	return out
 }
 
-func environmentRestoreDocker(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
+func environmentRestoreDocker(ctx context.Context, envID string, graph store.EnvironmentComponentGraph, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
 	report := environmentRestoreDockerReport{
 		OK:      true,
 		Workdir: workspace,
@@ -3675,6 +3987,14 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 		if errText != "" {
 			report.OK = false
 			report.Error = errText
+			return report
+		}
+	}
+	report.AppliedAssets = environmentRestoreApplyEdgeAssets(ctx, envID, graph, compose, workspace, execute, composeBaseArgs)
+	for _, asset := range report.AppliedAssets {
+		if !asset.OK {
+			report.OK = false
+			report.Error = asset.Error
 			return report
 		}
 	}
@@ -4179,6 +4499,24 @@ func runRestoreCommand(ctx context.Context, workdir string, command []string) (s
 	}
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = workdir
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		if output != "" {
+			return output, err.Error() + ": " + output
+		}
+		return output, err.Error()
+	}
+	return output, ""
+}
+
+func runRestoreCommandWithInput(ctx context.Context, workdir string, command []string, input string) (string, string) {
+	if len(command) == 0 {
+		return "", "empty restore command"
+	}
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Dir = workdir
+	cmd.Stdin = bytes.NewBufferString(input)
 	out, err := cmd.CombinedOutput()
 	output := strings.TrimSpace(string(out))
 	if err != nil {
@@ -5061,6 +5399,89 @@ func printStoreStatus(status sqlite.SchemaStatusResult) {
 	fmt.Printf("Pending: %d\n", pending)
 }
 
+type storeStatusReport struct {
+	OK             bool   `json:"ok"`
+	Backend        string `json:"backend"`
+	URL            string `json:"url,omitempty"`
+	Path           string `json:"path,omitempty"`
+	CurrentVersion int    `json:"currentVersion"`
+	TargetVersion  int    `json:"targetVersion"`
+	Pending        int    `json:"pending"`
+	Error          string `json:"error,omitempty"`
+}
+
+func sqliteStoreStatusReport(status sqlite.SchemaStatusResult) storeStatusReport {
+	return storeStatusReport{
+		OK:             true,
+		Backend:        "sqlite",
+		Path:           status.Path,
+		CurrentVersion: status.CurrentVersion,
+		TargetVersion:  status.TargetVersion,
+		Pending:        pendingStoreSchemaVersions(status.CurrentVersion, status.TargetVersion),
+	}
+}
+
+func sqliteStoreStatusErrorReport(cfg sqlite.Config, statusErr error) storeStatusReport {
+	return storeStatusReport{
+		OK:      false,
+		Backend: "sqlite",
+		Path:    cfg.Resolve().Path,
+		Error:   statusErr.Error(),
+	}
+}
+
+func postgresStoreStatusReport(status postgres.SchemaStatusResult) storeStatusReport {
+	return storeStatusReport{
+		OK:             true,
+		Backend:        "postgres",
+		URL:            maskStoreURL(status.URL),
+		CurrentVersion: status.CurrentVersion,
+		TargetVersion:  status.TargetVersion,
+		Pending:        pendingStoreSchemaVersions(status.CurrentVersion, status.TargetVersion),
+	}
+}
+
+func postgresStoreStatusErrorReport(storeURL string, statusErr error) storeStatusReport {
+	return storeStatusReport{
+		OK:            false,
+		Backend:       "postgres",
+		URL:           maskStoreURL(storeURL),
+		TargetVersion: sqlstore.CurrentSchemaVersion,
+		Pending:       sqlstore.CurrentSchemaVersion,
+		Error:         statusErr.Error(),
+	}
+}
+
+func mysqlStoreStatusReport(status mysql.SchemaStatusResult) storeStatusReport {
+	return storeStatusReport{
+		OK:             true,
+		Backend:        "mysql",
+		URL:            maskStoreURL(status.URL),
+		CurrentVersion: status.CurrentVersion,
+		TargetVersion:  status.TargetVersion,
+		Pending:        pendingStoreSchemaVersions(status.CurrentVersion, status.TargetVersion),
+	}
+}
+
+func mysqlStoreStatusErrorReport(storeURL string, statusErr error) storeStatusReport {
+	return storeStatusReport{
+		OK:            false,
+		Backend:       "mysql",
+		URL:           maskStoreURL(storeURL),
+		TargetVersion: sqlstore.CurrentSchemaVersion,
+		Pending:       sqlstore.CurrentSchemaVersion,
+		Error:         statusErr.Error(),
+	}
+}
+
+func pendingStoreSchemaVersions(current int, target int) int {
+	pending := target - current
+	if pending < 0 {
+		return 0
+	}
+	return pending
+}
+
 func printPostgresStoreStatus(status postgres.SchemaStatusResult) {
 	pending := status.TargetVersion - status.CurrentVersion
 	if pending < 0 {
@@ -5423,6 +5844,8 @@ func runProfile(args []string) error {
 		return runProfileList(args[1:])
 	case "inspect":
 		return runProfileInspect(args[1:])
+	case "export":
+		return runProfileExport(context.Background(), args[1:])
 	case "audit":
 		return runProfileAudit(context.Background(), args[1:])
 	case "audit-plan":
@@ -6110,6 +6533,25 @@ type profileInitReport struct {
 	Path string
 }
 
+type profileExportReport struct {
+	OK        bool                `json:"ok"`
+	ProfileID string              `json:"profileId"`
+	Output    string              `json:"output"`
+	Counts    profileExportCounts `json:"counts"`
+}
+
+type profileExportCounts struct {
+	Services         int `json:"services"`
+	Workflows        int `json:"workflows"`
+	InterfaceNodes   int `json:"interfaceNodes"`
+	APICases         int `json:"apiCases"`
+	RequestTemplates int `json:"requestTemplates"`
+	CaseDependencies int `json:"caseDependencies"`
+	WorkflowBindings int `json:"workflowBindings"`
+	Fixtures         int `json:"fixtures"`
+	TemplateConfigs  int `json:"templateConfigs"`
+}
+
 type profileInstallReport = profilehome.InstallReport
 
 type profilePackReport = profilehome.PackReport
@@ -6201,6 +6643,98 @@ func initProfileBundle(outputPath string, profileID string, displayName string, 
 		return profileInitReport{}, err
 	}
 	return profileInitReport{ID: profileID, Path: absPath}, nil
+}
+
+func runProfileExport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("profile export", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	outputPath := flags.String("output", "", "Profile bundle output path")
+	force := flags.Bool("force", false, "Overwrite generated profile manifest when it already exists")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	s, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	report, err := exportProfileCatalogFromStore(ctx, s, *outputPath, *force)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Exported profile: %s\n", report.ProfileID)
+	fmt.Printf("Path: %s\n", report.Output)
+	fmt.Printf("Services: %d\n", report.Counts.Services)
+	fmt.Printf("API Cases: %d\n", report.Counts.APICases)
+	fmt.Printf("Template Configs: %d\n", report.Counts.TemplateConfigs)
+	return nil
+}
+
+func exportProfileCatalogFromStore(ctx context.Context, s store.Store, outputPath string, force bool) (profileExportReport, error) {
+	outputPath = strings.TrimSpace(outputPath)
+	if outputPath == "" {
+		return profileExportReport{}, errors.New("--output is required")
+	}
+	if isCoreProfilesPath(outputPath) {
+		return profileExportReport{}, errors.New("profile bundles must be exported outside this core repository")
+	}
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		return profileExportReport{}, err
+	}
+	bundle := profilecatalog.ToBundle(catalog)
+	if strings.TrimSpace(bundle.DisplayName) == "" {
+		bundle.DisplayName = bundle.ID
+	}
+	if err := os.MkdirAll(outputPath, 0o755); err != nil {
+		return profileExportReport{}, err
+	}
+	manifestPath := filepath.Join(outputPath, "profile.json")
+	if _, err := os.Stat(manifestPath); err == nil && !force {
+		return profileExportReport{}, fmt.Errorf("%s already exists; pass --force to overwrite generated files", manifestPath)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return profileExportReport{}, err
+	}
+	raw, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return profileExportReport{}, err
+	}
+	if err := os.WriteFile(manifestPath, append(raw, '\n'), 0o644); err != nil {
+		return profileExportReport{}, fmt.Errorf("write profile manifest %s: %w", manifestPath, err)
+	}
+	if _, err := profile.Load(outputPath); err != nil {
+		return profileExportReport{}, fmt.Errorf("exported profile is invalid: %w", err)
+	}
+	return profileExportReport{
+		OK:        true,
+		ProfileID: bundle.ID,
+		Output:    outputPath,
+		Counts:    profileExportAssetCounts(bundle),
+	}, nil
+}
+
+func profileExportAssetCounts(bundle profile.Bundle) profileExportCounts {
+	return profileExportCounts{
+		Services:         len(bundle.Services),
+		Workflows:        len(bundle.Workflows),
+		InterfaceNodes:   len(bundle.InterfaceNodes),
+		APICases:         len(bundle.APICases),
+		RequestTemplates: len(bundle.RequestTemplates),
+		CaseDependencies: len(bundle.CaseDependencies),
+		WorkflowBindings: len(bundle.WorkflowBindings),
+		Fixtures:         len(bundle.Fixtures),
+		TemplateConfigs:  len(bundle.TemplateConfigs),
+	}
 }
 
 func runProfileInstall(args []string) error {

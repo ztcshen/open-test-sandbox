@@ -314,6 +314,28 @@ func TestTestKitTraceTopologyCollectPayloadUsesSandboxCallbackPath(t *testing.T)
 	}
 }
 
+func TestTestKitTraceTopologyCollectPayloadUsesConfiguredTraceEndpoint(t *testing.T) {
+	payload, ok := testKitTraceTopologyCollectPayload("run.gateway", map[string]any{
+		"stepId":        "trial",
+		"traceEndpoint": "POST:/api/v1/acc/scf/financing/trial",
+	}, map[string]any{
+		"ok":     true,
+		"caseId": "case.trial",
+		"result": map[string]any{
+			"request": map[string]any{
+				"path": "/v1/supplychain/financing/trial",
+			},
+			"response": map[string]any{},
+		},
+	})
+	if !ok {
+		t.Fatalf("collect payload was not built")
+	}
+	if payload["endpoint"] != "POST:/api/v1/acc/scf/financing/trial" {
+		t.Fatalf("endpoint = %#v", payload["endpoint"])
+	}
+}
+
 func TestReadJSONPayloadPreservesLargeNumericOverrides(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/test-kit/run", strings.NewReader(`{
 		"overrides": {

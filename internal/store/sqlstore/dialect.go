@@ -101,7 +101,7 @@ func (d PostgresDialect) CreateIndexSQL(indexName string, tableName string, colu
 func (MySQLDialect) Name() string       { return "mysql" }
 func (MySQLDialect) DriverName() string { return "mysql" }
 func (MySQLDialect) BindVar(int) string { return "?" }
-func (MySQLDialect) TextType() string   { return "text" }
+func (MySQLDialect) TextType() string   { return "mediumtext" }
 func (MySQLDialect) KeyTextType() string {
 	return "varchar(128)"
 }

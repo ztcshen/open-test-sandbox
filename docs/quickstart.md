@@ -64,9 +64,35 @@ automatically.
 ./bin/otsandbox.sh store config set team-mysql \
   --url "mysql://user:pass@host:3306/otsandbox_local?tls=false"
 ./bin/otsandbox.sh store use team-mysql
+tools/smoke/mysql-store-preflight.sh --store team-mysql \
+  --output-prefix .runtime/team-mysql-preflight
+python3 tools/smoke/mysql-handshake-probe.py \
+  --url "mysql://user:xxxxx@host:3306/otsandbox_local?tls=false" \
+  --json
+./bin/otsandbox.sh store provision --store team-mysql --json
 ./bin/otsandbox.sh store status --store team-mysql
+./bin/otsandbox.sh store status --store team-mysql --json
 ./bin/otsandbox.sh store upgrade --store team-mysql
 ./bin/otsandbox.sh store ddl --store team-mysql > otsandbox-mysql-schema.sql
+
+# Promote verified restore metadata from a local Store into the team MySQL Store.
+npm run store:publish:mysql -- \
+  --from local-personal \
+  --to team-mysql \
+  --environment local-sample \
+  --workflow workflow.local-sample \
+  --min-components 1 \
+  --min-assets 1 \
+  --verify-control-plane-url http://127.0.0.1:58663
+
+# The underlying copy command is also available when you need a custom script.
+./bin/otsandbox.sh store copy --from local-personal --to team-mysql \
+  --require-environment local-sample \
+  --require-verification-workflow workflow.local-sample \
+  --require-verified-environment \
+  --require-min-components 1 \
+  --require-min-assets 1 \
+  --json
 
 ./bin/otsandbox.sh store config set local-sqlite \
   --url "sqlite://$PWD/.runtime/otsandbox-local.sqlite"
@@ -74,6 +100,63 @@ automatically.
 ./bin/otsandbox.sh store status --store local-sqlite
 ./bin/otsandbox.sh store upgrade --store local-sqlite
 ```
+
+Run `store provision`, `store upgrade`, and `store copy` only after the MySQL
+handshake probe returns `ok: true`. A TCP or SOCKS connect check is not enough;
+if the probe cannot read the initial MySQL packet header, fix the VPN route or
+proxy rule before promoting a verified environment into a shared Store.
+`npm run store:publish:mysql -- ...` applies the same gate automatically before
+it provisions, upgrades, copies, reads back, switches the active Store, or
+optionally runs `environment restore`. The script also writes machine-readable
+proof that the source Store contains the verified environment and component
+graph, the upgraded target Store has no pending schema migrations, and
+`store current --json` now points at the MySQL Store. The copy report must also
+include the profile catalog, profile index, active config version, and read
+models used by the acceptance workflow.
+When a control plane is already running, pass `--verify-control-plane-url` to
+also prove `/api/store/current` is serving from the same MySQL Store; restart
+`otsandbox serve` with the target Store if that check fails.
+
+After a team Store has been published, a colleague can restore from that shared
+MySQL Store without copying local Store data:
+
+```sh
+npm run store:restore:mysql -- \
+  --store team-mysql \
+  --store-url "mysql://user:pass@host:3306/otsandbox_team?tls=false" \
+  --environment local-sample \
+  --workspace "$HOME/open-test-runtime" \
+  --server-url http://127.0.0.1:58663 \
+  --min-components 1 \
+  --min-assets 1 \
+  --min-acceptance-steps 1
+```
+
+This colleague command verifies the MySQL handshake, schema readiness, active
+Store selection, control-plane `/api/store/current`, verified environment
+catalog entry, component graph, Docker restore, and SkyWalking-backed
+acceptance workflow report.
+
+To get a read-only status report for the whole shared MySQL Store objective,
+run:
+
+```sh
+npm run store:audit:mysql-goal -- \
+  --from local-personal \
+  --to team-mysql \
+  --environment local-sample \
+  --workflow workflow.local-sample \
+  --control-plane-url http://127.0.0.1:58663 \
+  --min-components 1 \
+  --min-assets 1
+```
+
+The audit does not provision, upgrade, copy, restore Docker, or run workflows.
+It reports the first blocker across source Store readiness, target MySQL
+handshake, target schema readiness, target environment copy, active Store
+selection, and control-plane Store selection. The report also includes a
+`nextAction` string, `nextCommand` array, and `nextCommandShell` string with the
+next operator or colleague command to run.
 
 Use a private SQLite, PostgreSQL, or MySQL Store for unverified local work and a
 separate shared PostgreSQL or MySQL database for verified team environments.
@@ -144,7 +227,7 @@ publishing it to the verified discovery list:
 ./bin/otsandbox.sh environment inspect --store local-personal local-sample
 ./bin/otsandbox.sh environment bootstrap --store local-personal local-sample
 ./bin/otsandbox.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --json
-./bin/otsandbox.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --execute --run-workflow --base-url http://127.0.0.1:8080 --json
+./bin/otsandbox.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --execute --run-workflow --server-url http://127.0.0.1:58663 --base-url http://127.0.0.1:8080 --json
 ./bin/otsandbox.sh environment verify --store local-personal local-sample --run RUN_ID --status passed --evidence-complete --topology-complete
 ./bin/otsandbox.sh environment publish-verified --store local-personal local-sample
 ```
@@ -168,9 +251,13 @@ remote Git URLs, including private GitLab and public GitHub repositories. Local
 paths are reserved for compatibility tests and ad-hoc development, not
 published one-click environments. Component repositories contain the code
 mounted or built by Compose; component-owned Store assets contain only bounded
-startup/config material such as generated Compose files, small cert/key
-material, DDL, seed SQL, or launch scripts. Large source/runtime artifacts stay
-outside the Store. By default restore is a dry run: it resolves component
+startup/config material such as generated Compose files, deterministic cert/key
+material, DDL, seed SQL, or launch scripts. Those text assets have no
+per-kind size limit, but any inline asset, environment definition/summary, or
+combined component graph over 1 MB is blocked with the exact size and reason.
+Large
+source/runtime artifacts stay outside the Store. By default restore is a dry
+run: it resolves component
 checkouts under `--workspace`, shows Git clone commands when sources are
 recorded, writes Store-generated startup files/assets, and prints preflight
 tool checks, Docker Compose pull/build/up commands, and recorded health checks.
@@ -199,8 +286,10 @@ Environment Catalog verification run status are written to the selected Store.
 Restore records Evidence completeness from the workflow result but does not
 mark SkyWalking topology complete or publish the environment as verified; real
 topology collection and `publish-verified` remain separate gates. Use
-`--base-url` for the restored target endpoint and `--workflow-output-dir` when
-you want a fixed local report directory. When `composeFile` is recorded, the
+`--server-url` points at the Open Test Sandbox control plane that will run the
+acceptance workflow; `--base-url` is optional target-service context for the
+workflow. Use `--workflow-output-dir` when you want a fixed local report
+directory. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
 

@@ -31,6 +31,12 @@ type SchemaStatusResult struct {
 	AppliedCount   int
 }
 
+type ProvisionDatabaseResult struct {
+	URL      string
+	Database string
+	Created  bool
+}
+
 func (r SchemaStatusResult) HasPending() bool {
 	return r.CurrentVersion < r.TargetVersion
 }
@@ -92,23 +98,54 @@ func UpgradeSchema(ctx context.Context, cfg Config) (SchemaStatusResult, error) 
 	return SchemaStatusResult{URL: cfg.URL, CurrentVersion: status.CurrentVersion, TargetVersion: status.TargetVersion, AppliedCount: status.AppliedCount}, nil
 }
 
+func ProvisionDatabase(ctx context.Context, cfg Config) (ProvisionDatabaseResult, error) {
+	resolved, err := ensureDriverConfig(cfg)
+	if err != nil {
+		return ProvisionDatabaseResult{}, err
+	}
+	driverCfg, err := mysqlDriver.ParseDSN(resolved.DSN)
+	if err != nil {
+		return ProvisionDatabaseResult{}, fmt.Errorf("parse mysql store DSN: %w", err)
+	}
+	dbName := strings.TrimSpace(driverCfg.DBName)
+	if dbName == "" {
+		return ProvisionDatabaseResult{}, errors.New("mysql store url requires database name")
+	}
+	driverCfg.DBName = ""
+	serverDSN := driverCfg.FormatDSN()
+	driverName := strings.TrimSpace(resolved.DriverName)
+	if driverName == "" {
+		driverName = sqlstore.MySQLDialect{}.DriverName()
+	}
+	db, err := sql.Open(driverName, serverDSN)
+	if err != nil {
+		return ProvisionDatabaseResult{}, fmt.Errorf("open mysql server: %w", err)
+	}
+	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		return ProvisionDatabaseResult{}, fmt.Errorf("ping mysql server: %w", err)
+	}
+	exists, err := mysqlDatabaseExists(ctx, db, dbName)
+	if err != nil {
+		return ProvisionDatabaseResult{}, err
+	}
+	if _, err := db.ExecContext(ctx, "CREATE DATABASE IF NOT EXISTS "+quoteMySQLIdentifier(dbName)+" CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
+		return ProvisionDatabaseResult{}, fmt.Errorf("create mysql store database %q: %w", dbName, err)
+	}
+	created := !exists
+	return ProvisionDatabaseResult{URL: resolved.URL, Database: dbName, Created: created}, nil
+}
+
 func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
+	resolved, err := ensureDriverConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	driverName := strings.TrimSpace(cfg.DriverName)
 	if driverName == "" {
 		driverName = sqlstore.MySQLDialect{}.DriverName()
 	}
-	dsn := strings.TrimSpace(cfg.DSN)
-	if dsn == "" {
-		parsed, err := url.Parse(strings.TrimSpace(cfg.URL))
-		if err != nil {
-			return nil, err
-		}
-		dsn, err = driverDSNFromURL(parsed)
-		if err != nil {
-			return nil, err
-		}
-	}
-	db, err := sql.Open(driverName, dsn)
+	db, err := sql.Open(driverName, resolved.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("open mysql store: %w", err)
 	}
@@ -117,6 +154,44 @@ func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping mysql store: %w", err)
 	}
 	return db, nil
+}
+
+func ensureDriverConfig(cfg Config) (Config, error) {
+	if strings.TrimSpace(cfg.DSN) != "" {
+		if strings.TrimSpace(cfg.DriverName) == "" {
+			cfg.DriverName = sqlstore.MySQLDialect{}.DriverName()
+		}
+		return cfg, nil
+	}
+	parsed, err := url.Parse(strings.TrimSpace(cfg.URL))
+	if err != nil {
+		return Config{}, err
+	}
+	dsn, err := driverDSNFromURL(parsed)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.DSN = dsn
+	if strings.TrimSpace(cfg.DriverName) == "" {
+		cfg.DriverName = sqlstore.MySQLDialect{}.DriverName()
+	}
+	return cfg, nil
+}
+
+func mysqlDatabaseExists(ctx context.Context, db *sql.DB, dbName string) (bool, error) {
+	var existing string
+	err := db.QueryRowContext(ctx, "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?", dbName).Scan(&existing)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check mysql store database %q: %w", dbName, err)
+}
+
+func quoteMySQLIdentifier(name string) string {
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
 func driverDSNFromURL(parsed *url.URL) (string, error) {
