@@ -35,6 +35,7 @@ func (s *Store) CreateRun(ctx context.Context, r store.Run) (store.Run, error) {
 	if r.UpdatedAt.IsZero() {
 		r.UpdatedAt = r.CreatedAt
 	}
+	r.SummaryJSON = stringDefault(r.SummaryJSON, "{}")
 	query := fmt.Sprintf(`
 insert into runs (id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at)
 values (%s);`, s.bindVars(11))
@@ -83,6 +84,8 @@ func (s *Store) RecordAPICaseRun(ctx context.Context, r store.APICaseRun) (store
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = utcNow()
 	}
+	r.RequestSummaryJSON = stringDefault(r.RequestSummaryJSON, "{}")
+	r.AssertionSummaryJSON = stringDefault(r.AssertionSummaryJSON, "{}")
 	query := fmt.Sprintf(`
 insert into api_case_runs (id, run_id, case_id, status, request_summary_json, assertion_summary_json, started_at, finished_at, created_at)
 values (%s);`, s.bindVars(9))
@@ -191,6 +194,7 @@ func (s *Store) SaveTraceTopology(ctx context.Context, r store.TraceTopology) (s
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = utcNow()
 	}
+	r.TopologyJSON = stringDefault(r.TopologyJSON, "{}")
 	query := fmt.Sprintf(`
 insert into trace_topologies (id, workflow_run_id, workflow_id, step_id, case_id, request_id, trace_id, status, topology_json, text_topology, created_at)
 values (%s)
@@ -241,6 +245,7 @@ func (s *Store) RecordPostProcessTask(ctx context.Context, r store.PostProcessTa
 	if r.DurationMs == 0 && !r.StartedAt.IsZero() && !r.FinishedAt.IsZero() {
 		r.DurationMs = r.FinishedAt.Sub(r.StartedAt).Milliseconds()
 	}
+	r.SummaryJSON = stringDefault(r.SummaryJSON, "{}")
 	query := fmt.Sprintf(`
 insert into post_process_tasks (id, run_id, workflow_id, step_id, case_id, kind, status, started_at, finished_at, duration_ms, error, summary_json, created_at)
 values (%s)
@@ -282,6 +287,7 @@ func (s *Store) UpsertBaselineGate(ctx context.Context, r store.BaselineGate) (s
 	if r.UpdatedAt.IsZero() {
 		r.UpdatedAt = utcNow()
 	}
+	r.SummaryJSON = stringDefault(r.SummaryJSON, "{}")
 	query := fmt.Sprintf(`
 insert into baseline_gates (profile_id, subject_id, status, required, summary_json, checked_at, updated_at)
 values (%s)
@@ -308,6 +314,7 @@ func (s *Store) UpsertProfileIndex(ctx context.Context, r store.ProfileIndex) (s
 	if r.UpdatedAt.IsZero() {
 		r.UpdatedAt = utcNow()
 	}
+	r.SummaryJSON = stringDefault(r.SummaryJSON, "{}")
 	query := fmt.Sprintf(`
 insert into profile_indexes (profile_id, bundle_path, bundle_digest, summary_json, imported_at, updated_at)
 values (%s)
@@ -337,6 +344,7 @@ func (s *Store) UpsertConfigVersion(ctx context.Context, r store.ConfigVersion) 
 	if r.PublishedAt.IsZero() {
 		r.PublishedAt = r.CreatedAt
 	}
+	r.SummaryJSON = stringDefault(r.SummaryJSON, "{}")
 	if r.Active {
 		query := fmt.Sprintf(`update config_versions set active = %s;`, s.dialect.BindVar(1))
 		if _, err := s.db.ExecContext(ctx, query, false); err != nil {
@@ -375,6 +383,7 @@ func (s *Store) UpsertReadModel(ctx context.Context, r store.ReadModel) (store.R
 	if r.GeneratedAt.IsZero() {
 		r.GeneratedAt = r.UpdatedAt
 	}
+	r.PayloadJSON = stringDefault(r.PayloadJSON, "{}")
 	query := fmt.Sprintf(`
 insert into config_read_model (profile_id, model_key, config_version_id, payload_json, generated_at, updated_at)
 values (%s)

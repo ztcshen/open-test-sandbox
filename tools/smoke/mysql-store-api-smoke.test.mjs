@@ -105,18 +105,20 @@ test("MySQL API smoke validates workflow case Evidence payloads", () => {
 
 test("MySQL API smoke validates registered interface catalog data", () => {
   assertRegisteredInterfaceCatalog({
-    interfaceNodes: [
-      { id: "interface.mysql-api-smoke", serviceId: "service.mysql-api-smoke" },
-    ],
-    apiCases: [
-      { id: "case.mysql-api-smoke.default", nodeId: "interface.mysql-api-smoke", requiredForAdmission: true },
-    ],
-    requestTemplates: [
-      { id: "template.mysql-api-smoke", nodeId: "interface.mysql-api-smoke" },
-    ],
-    templateConfigs: [
-      { id: "cfg.case.mysql-api-smoke.default.execution", scopeType: "case", scopeId: "case.mysql-api-smoke.default" },
-    ],
+    catalog: {
+      apiCases: [
+        { id: "case.mysql-api-smoke.default", nodeId: "interface.mysql-api-smoke" },
+      ],
+    },
+    detail: {
+      node: { id: "interface.mysql-api-smoke", serviceId: "service.mysql-api-smoke" },
+      cases: [
+        { id: "case.mysql-api-smoke.default", nodeId: "interface.mysql-api-smoke", requiredForAdmission: true },
+      ],
+      requestTemplates: [
+        { id: "template.mysql-api-smoke", method: "GET", path: "/v1/mysql-api-smoke" },
+      ],
+    },
   });
 });
 

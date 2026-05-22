@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 7
+	CurrentSchemaVersion = 9
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -87,7 +87,9 @@ func currentSchemaVersion(ctx context.Context, db *sql.DB, d Dialect) (int, erro
 func CoreSchemaSQL(d Dialect) []string {
 	text := d.TextType()
 	keyText := d.KeyTextType()
+	profileIDText := profileIdentifierTextType(d)
 	runIDText := runIdentifierTextType(d)
+	configVersionIDText := configVersionIdentifierTextType(d)
 	intType := "integer"
 	timeType := d.TimeType()
 	jsonType := d.JSONType()
@@ -186,7 +188,7 @@ create table if not exists baseline_gates (
   checked_at %s,
   updated_at %s not null,
   primary key (profile_id, subject_id)
-);`, keyText, keyText, keyText, boolType, jsonType, timeType, timeType),
+);`, profileIDText, keyText, keyText, boolType, jsonType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists profile_indexes (
   profile_id %s primary key,
@@ -195,7 +197,7 @@ create table if not exists profile_indexes (
   summary_json %s not null,
   imported_at %s,
   updated_at %s not null
-);`, keyText, text, text, jsonType, timeType, timeType),
+);`, profileIDText, text, text, jsonType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists config_versions (
   id %s primary key,
@@ -206,7 +208,7 @@ create table if not exists config_versions (
   active %s not null,
   published_at %s not null,
   created_at %s not null
-);`, keyText, keyText, text, text, jsonType, boolType, timeType, timeType),
+);`, configVersionIDText, profileIDText, text, text, jsonType, boolType, timeType, timeType),
 		d.CreateIndexSQL("idx_config_versions_active_published", "config_versions", []string{"active", "published_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists config_read_model (
@@ -217,7 +219,7 @@ create table if not exists config_read_model (
   generated_at %s not null,
   updated_at %s not null,
   primary key (profile_id, model_key)
-);`, keyText, keyText, keyText, jsonType, timeType, timeType),
+);`, profileIDText, configVersionIDText, configVersionIDText, jsonType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists profile_catalogs (
   profile_id %s primary key,
@@ -233,7 +235,7 @@ create table if not exists profile_catalogs (
   fixtures %s not null,
   templates %s not null,
   template_configs %s not null
-);`, keyText, timeType, jsonType, intType, intType, intType, intType, intType, intType, intType, intType, intType, intType),
+);`, profileIDText, timeType, jsonType, intType, intType, intType, intType, intType, intType, intType, intType, intType, intType),
 		fmt.Sprintf(`
 create table if not exists environments (
   id %s primary key,
@@ -351,7 +353,36 @@ func incrementalSchemaSQL(d Dialect, current int) []string {
 	if d.Name() == "mysql" && current < 7 {
 		statements = append(statements, mysqlMediumTextMigrationSQL()...)
 	}
+	if d.Name() == "mysql" && current < 8 {
+		statements = append(statements,
+			"alter table `config_versions` modify column `id` varchar(255) not null;",
+			"alter table `config_read_model` modify column `config_version_id` varchar(255) not null;",
+		)
+	}
+	if d.Name() == "mysql" && current < 9 {
+		statements = append(statements,
+			"alter table `baseline_gates` modify column `profile_id` varchar(255) not null;",
+			"alter table `profile_indexes` modify column `profile_id` varchar(255) not null;",
+			"alter table `config_versions` modify column `profile_id` varchar(255) not null;",
+			"alter table `config_read_model` modify column `profile_id` varchar(255) not null, modify column `model_key` varchar(255) not null;",
+			"alter table `profile_catalogs` modify column `profile_id` varchar(255) not null;",
+		)
+	}
 	return statements
+}
+
+func profileIdentifierTextType(d Dialect) string {
+	if d.Name() == "mysql" {
+		return "varchar(255)"
+	}
+	return d.KeyTextType()
+}
+
+func configVersionIdentifierTextType(d Dialect) string {
+	if d.Name() == "mysql" {
+		return "varchar(255)"
+	}
+	return d.KeyTextType()
 }
 
 func mysqlMediumTextMigrationSQL() []string {

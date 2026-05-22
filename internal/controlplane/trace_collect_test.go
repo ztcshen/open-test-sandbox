@@ -298,7 +298,7 @@ func TestTestKitTraceTopologyCollectPayloadUsesSandboxCallbackPath(t *testing.T)
 			"request": map[string]any{
 				"path": "/__sandbox/llt/callback",
 				"headers": map[string]any{
-					"X-Sandbox-Callback-Path": "/account-app/v1/llt/notice",
+					"X-Sandbox-Callback-Path": "/sample-app/v1/llt/notice",
 				},
 			},
 			"response": map[string]any{
@@ -309,21 +309,21 @@ func TestTestKitTraceTopologyCollectPayloadUsesSandboxCallbackPath(t *testing.T)
 	if !ok {
 		t.Fatalf("collect payload was not built")
 	}
-	if payload["endpoint"] != "/account-app/v1/llt/notice" {
+	if payload["endpoint"] != "/sample-app/v1/llt/notice" {
 		t.Fatalf("endpoint = %#v", payload["endpoint"])
 	}
 }
 
 func TestTestKitTraceTopologyCollectPayloadUsesConfiguredTraceEndpoint(t *testing.T) {
 	payload, ok := testKitTraceTopologyCollectPayload("run.gateway", map[string]any{
-		"stepId":        "trial",
-		"traceEndpoint": "POST:/api/v1/acc/scf/financing/trial",
+		"stepId":        "submit",
+		"traceEndpoint": "POST:/api/v1/sample/orders/submit",
 	}, map[string]any{
 		"ok":     true,
-		"caseId": "case.trial",
+		"caseId": "case.submit",
 		"result": map[string]any{
 			"request": map[string]any{
-				"path": "/v1/supplychain/financing/trial",
+				"path": "/v1/orders/submit",
 			},
 			"response": map[string]any{},
 		},
@@ -331,7 +331,7 @@ func TestTestKitTraceTopologyCollectPayloadUsesConfiguredTraceEndpoint(t *testin
 	if !ok {
 		t.Fatalf("collect payload was not built")
 	}
-	if payload["endpoint"] != "POST:/api/v1/acc/scf/financing/trial" {
+	if payload["endpoint"] != "POST:/api/v1/sample/orders/submit" {
 		t.Fatalf("endpoint = %#v", payload["endpoint"])
 	}
 }

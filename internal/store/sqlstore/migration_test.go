@@ -515,6 +515,51 @@ func TestUpgradeSchemaWidensMySQLTextColumnsFromVersionSix(t *testing.T) {
 	}
 }
 
+func TestUpgradeSchemaWidensMySQLConfigVersionIdentifiersFromVersionSeven(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	dialect := sqlstore.MySQLDialect{}
+
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(7)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+	})
+
+	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
+	if err != nil {
+		t.Fatalf("upgrade mysql v7 schema: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+		t.Fatalf("upgraded mysql v7 schema status = %#v", status)
+	}
+	joinedExecs := strings.Builder{}
+	for _, exec := range state.execsSnapshot() {
+		joinedExecs.WriteString(exec.query)
+		joinedExecs.WriteByte('\n')
+	}
+	for _, want := range []string{
+		"alter table `config_versions` modify column `id` varchar(255) not null",
+		"alter table `config_read_model` modify column `config_version_id` varchar(255) not null",
+	} {
+		if !strings.Contains(joinedExecs.String(), want) {
+			t.Fatalf("mysql v7 upgrade missing %q:\n%s", want, joinedExecs.String())
+		}
+	}
+}
+
 func TestUpgradeSchemaTreatsDuplicateMySQLIndexAsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db, state := openFakeSQLDB(t)

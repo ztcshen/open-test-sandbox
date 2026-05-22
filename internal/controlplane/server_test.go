@@ -8370,6 +8370,17 @@ func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 		t.Fatalf("stored workflow batch run = %#v", batchRun)
 	}
 	var storedSummary struct {
+		Summary struct {
+			ExpectedStepCount int `json:"expectedStepCount"`
+			StepCount         int `json:"stepCount"`
+			Passed            int `json:"passed"`
+			Failed            int `json:"failed"`
+		} `json:"summary"`
+		Steps []struct {
+			StepID string `json:"stepId"`
+			CaseID string `json:"caseId"`
+			Status string `json:"status"`
+		} `json:"steps"`
 		Acceptance struct {
 			OK               bool   `json:"ok"`
 			TemplateID       string `json:"templateId"`
@@ -8378,6 +8389,12 @@ func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(batchRun.SummaryJSON), &storedSummary); err != nil {
 		t.Fatalf("decode stored workflow batch summary: %v", err)
+	}
+	if storedSummary.Summary.ExpectedStepCount != 10 || storedSummary.Summary.StepCount != 10 || storedSummary.Summary.Passed != 10 || storedSummary.Summary.Failed != 0 || len(storedSummary.Steps) != 10 {
+		t.Fatalf("stored workflow run summary counts = %#v", storedSummary)
+	}
+	if storedSummary.Steps[0].StepID != "step-01" || storedSummary.Steps[0].CaseID == "" || storedSummary.Steps[0].Status != store.StatusPassed {
+		t.Fatalf("stored workflow run steps = %#v", storedSummary.Steps)
 	}
 	if storedSummary.Acceptance.OK || storedSummary.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || storedSummary.Acceptance.TopologyProvider != "skywalking" {
 		t.Fatalf("stored workflow acceptance summary = %#v", storedSummary.Acceptance)

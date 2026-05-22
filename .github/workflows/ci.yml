@@ -23,11 +23,11 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_DATABASE: otsandbox_ci_smoke
-          MYSQL_ROOT_PASSWORD: otsandbox
+          MYSQL_ROOT_PASSWORD: ci-store-pass
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -potsandbox"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-store-pass"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
@@ -47,6 +47,9 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Install release gate tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Install npm dependencies
         run: npm ci
 
@@ -56,7 +59,7 @@ jobs:
       - name: Run release gate
         run: npm run release-check
         env:
-          OTSANDBOX_SMOKE_STORE_DSN: mysql://root:otsandbox@127.0.0.1:3306/otsandbox_ci_smoke?tls=false
+          OTSANDBOX_SMOKE_STORE_DSN: mysql://root:ci-store-pass@127.0.0.1:3306/otsandbox_ci_smoke?tls=false
 
   mysql-real-signoff:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mysql_real_signoff == 'true' }}
@@ -76,6 +79,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Install release gate tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Install npm dependencies
         run: npm ci

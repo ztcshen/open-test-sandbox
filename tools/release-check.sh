@@ -102,7 +102,11 @@ step "checking Store-first contract guardrail"
 tools/guardrails/check_store_first_contracts.sh
 
 step "running Go tests"
-go test ./... -count=1
+if is_mysql_store_dsn "$smoke_store_dsn"; then
+  go test -p 1 ./... -count=1
+else
+  go test ./... -count=1
+fi
 
 step "running generic API case demo"
 if is_sqlite_store_dsn "$smoke_store_dsn"; then
