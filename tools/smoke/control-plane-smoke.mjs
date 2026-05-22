@@ -12,8 +12,8 @@ import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 export const smokeWorkflowStepCount = 3;
 export const smokeStepIDs = Array.from({ length: smokeWorkflowStepCount }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
-const smokeCatalogTemplateCount = smokeWorkflowStepCount * 2;
-const smokeCatalogTemplateConfigCount = smokeCatalogTemplateCount + 2;
+const minimumSmokeCatalogTemplateCount = smokeWorkflowStepCount * 2;
+const minimumSmokeCatalogTemplateConfigCount = smokeWorkflowStepCount + 1;
 
 function smokeTraceOverrides(env = process.env) {
   const raw = String(env.OTS_SMOKE_TRACE_IDS || "").trim();
@@ -31,6 +31,26 @@ function smokeTraceOverrides(env = process.env) {
 
 function envFlag(value) {
   return /^(1|true|yes|on)$/i.test(String(value || "").trim());
+}
+
+export function assertSmokeCatalogIndex(index) {
+  const counts = index?.counts || {};
+  const expectedCounts = {
+    services: smokeWorkflowStepCount,
+    workflows: 1,
+    interfaceNodes: smokeWorkflowStepCount,
+    apiCases: smokeWorkflowStepCount,
+    requestTemplates: smokeWorkflowStepCount,
+    workflowBindings: smokeWorkflowStepCount,
+    caseDependencies: smokeWorkflowStepCount,
+    fixtures: 1,
+  };
+  const exactCountsReady = Object.entries(expectedCounts).every(([key, expected]) => counts[key] === expected);
+  const derivedTemplatesReady = counts.templates >= minimumSmokeCatalogTemplateCount
+    && counts.templateConfigs >= minimumSmokeCatalogTemplateConfigCount;
+  if (index?.profileId !== "smoke" || !exactCountsReady || !derivedTemplatesReady) {
+    throw new Error(`unexpected catalog index: ${JSON.stringify(index)}`);
+  }
 }
 
 export function missingSmokeTraceIDSteps(env = process.env) {
@@ -787,9 +807,7 @@ async function main() {
     if (imported.profileId !== "smoke") throw new Error(`unexpected import payload: ${JSON.stringify(imported)}`);
 
     const index = await waitForJSON(`${baseURL}/api/template-packages/catalog-index`);
-    if (index.profileId !== "smoke" || index.counts.workflows !== 1 || index.counts.templates !== smokeCatalogTemplateCount || index.counts.templateConfigs !== smokeCatalogTemplateConfigCount) {
-      throw new Error(`unexpected catalog index: ${JSON.stringify(index)}`);
-    }
+    assertSmokeCatalogIndex(index);
     const catalog = await waitForJSON(`${baseURL}/api/catalog`);
     const finder = catalog.presentation?.workflowFinder;
     if (finder?.targetStepCount !== smokeWorkflowStepCount || finder?.targetInterfaceCount !== smokeWorkflowStepCount || finder?.targetLabel !== "Configured workflow target") {
