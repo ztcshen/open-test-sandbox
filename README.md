@@ -143,12 +143,13 @@ Sandbox APIs and UI
 Core packages stay generic:
 
 - `cmd/otsandbox/`: CLI entrypoint and command orchestration.
+- `internal/server/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.
+- `internal/runner/`: runnable automation helpers such as API cases, request templates, JUnit output, executor planning, and Evidence import.
+- `internal/domain/`: generic profile, case-suite, redaction, and audit domain logic.
 - `internal/store/`: Store contract and runtime records.
 - `internal/store/postgres/`: PostgreSQL product Store backend.
 - `internal/store/mysql/`: MySQL product Store backend.
 - `internal/store/sqlite/`: SQLite product Store backend for local and personal Stores.
-- `internal/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.
-- `internal/apicase/`: HTTP case runner and Evidence writer.
 - `control-plane/frontend/`: React workbench source.
 - `control-plane/static/`: built static workbench assets served by `otsandbox serve`.
 

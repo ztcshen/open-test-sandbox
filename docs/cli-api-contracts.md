@@ -4,7 +4,7 @@ This document summarizes the current Open Test Sandbox command-line and
 control-plane HTTP surfaces, then calls out where the two are not yet one-to-one.
 
 Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
-`internal/controlplane/server.go`, and `go test ./...`.
+`internal/server/controlplane/server.go`, and `go test ./...`.
 
 ## Scope
 

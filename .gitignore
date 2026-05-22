@@ -5,6 +5,7 @@
 .runtime/
 node_modules/
 test-results/
+test-private/
 coverage/
 *.log
 *.db

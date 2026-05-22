@@ -148,7 +148,7 @@ function assertCount(payload, key, expected, label) {
 async function main() {
   const dsn = requiredSQLStoreDSN();
 	const backend = storeBackend(dsn);
-	const storeName = backend === "mysql" ? "active-mysql" : "active-pg";
+	const storeName = backend === "mysql" ? "active-mysql" : backend === "sqlite" ? "active-sqlite" : "active-pg";
 	const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-cli-sql-smoke-"));
   const targetPort = await freePort();
   let targetServer;
@@ -162,9 +162,11 @@ async function main() {
 		const env = {
 			OTSANDBOX_CONFIG_HOME: path.join(tempDir, "config"),
 			OTSANDBOX_CLI_BIN: cliBin,
-			OTSANDBOX_DISABLE_SQLITE_STORE: "1",
 			OTS_TRACE_GRAPHQL_URL: traceProvider.graphQLURL,
 		};
+		if (backend !== "sqlite") {
+			env.OTSANDBOX_DISABLE_SQLITE_STORE = "1";
+		}
     await mkdir(env.OTSANDBOX_CONFIG_HOME, { recursive: true });
 
     await runOTS(["store", "config", "set", storeName, "--url", dsn], env);

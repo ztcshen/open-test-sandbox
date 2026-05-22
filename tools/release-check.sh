@@ -80,9 +80,10 @@ fi
 tracked_generated=$(git ls-files \
   '.runtime' \
   'cmd/otsandbox/.runtime' \
-  'internal/controlplane/.runtime' \
+  'internal/server/controlplane/.runtime' \
   'node_modules' \
   'team-configs' \
+  'test-private' \
   'test-results' \
   'coverage' \
   '*.db' \
@@ -125,7 +126,11 @@ step "running smoke harness tests"
 node --test tools/examples/*.test.mjs tools/smoke/*.test.mjs
 
 step "running active SQL Store CLI smoke tests"
-npm run smoke:cli:sql-active
+if is_sqlite_store_dsn "$smoke_store_dsn"; then
+  node tools/smoke/cli-active-store-smoke.mjs
+else
+  npm run smoke:cli:sql-active
+fi
 
 if is_mysql_store_dsn "$smoke_store_dsn"; then
   step "running MySQL Store API smoke tests"
@@ -133,6 +138,10 @@ if is_mysql_store_dsn "$smoke_store_dsn"; then
 fi
 
 step "running active SQL Store browser smoke tests"
-npm run smoke:frontend:sql-active
+if is_sqlite_store_dsn "$smoke_store_dsn"; then
+  node tools/smoke/control-plane-smoke.mjs
+else
+  npm run smoke:frontend:sql-active
+fi
 
 step "release check passed"
