@@ -183,6 +183,19 @@ func TestCopyStoreCurrentStateCopiesCatalogAndEnvironmentGraph(t *testing.T) {
 	if err := validateStoreCopyRequirements(report, storeCopyRequirements{EnvironmentID: "env.alpha", MinComponents: 2}); err == nil || !strings.Contains(err.Error(), "component count") {
 		t.Fatalf("expected min component requirement failure, got %v", err)
 	}
+	graphlessReport := storeCopyStateReport{
+		OK: true,
+		EnvironmentRefs: []storeCopyEnvironmentReport{{
+			ID:     "env.graphless",
+			Status: "draft",
+		}},
+	}
+	if err := validateStoreCopyRequirements(graphlessReport, storeCopyRequirements{EnvironmentID: "env.graphless"}); err != nil {
+		t.Fatalf("presence-only environment requirement should not require a component graph: %v", err)
+	}
+	if err := validateStoreCopyRequirements(graphlessReport, storeCopyRequirements{EnvironmentID: "env.graphless", MinComponents: 1}); err == nil || !strings.Contains(err.Error(), "component graph") {
+		t.Fatalf("component minimum should require a component graph, got %v", err)
+	}
 	catalog, err := target.GetProfileCatalog(ctx)
 	if err != nil {
 		t.Fatalf("target profile catalog: %v", err)
@@ -213,6 +226,37 @@ func TestCopyStoreCurrentStateCopiesCatalogAndEnvironmentGraph(t *testing.T) {
 	}
 	if len(graph.Components) != 1 || len(graph.Assets) != 1 {
 		t.Fatalf("target component graph = %#v", graph)
+	}
+}
+
+func TestStoreCopyRequirementFailureJSONReportsNotOK(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
+	targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+	sourceRef := "sqlite://" + sourcePath
+	targetRef := "sqlite://" + targetPath
+	ctx := context.Background()
+	source, err := sqlite.Open(ctx, sqlite.Config{Path: sourcePath})
+	if err != nil {
+		t.Fatalf("open source Store: %v", err)
+	}
+	defer source.Close()
+	now := time.Now().UTC()
+	if _, err := source.UpsertEnvironment(ctx, store.Environment{
+		ID:        "env.graphless",
+		Status:    "draft",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed graphless environment: %v", err)
+	}
+
+	out := runCLIFails(t, "store", "copy", "--from", sourceRef, "--to", targetRef, "--require-environment", "env.graphless", "--require-min-components", "1", "--json")
+	var report storeCopyStateReport
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode store copy failure json: %v\n%s", err, out)
+	}
+	if report.OK || !strings.Contains(report.Error, "component graph") {
+		t.Fatalf("store copy failure report = %#v raw=%s", report, out)
 	}
 }
 
@@ -2686,8 +2730,65 @@ func TestEnvironmentRestoreAppliesAssetsBoundToDependencyEdges(t *testing.T) {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
 	if !strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" up -d mysql apollo app") ||
-		!strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" exec -T mysql mysql -uroot -proot") {
+		!strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" exec -T mysql sh -lc") ||
+		strings.Contains(string(dockerCalls), "-proot") {
 		t.Fatalf("edge asset docker calls:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentRestoreEdgeAssetsAvoidNonSQLMySQLAndDuplicateApply(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	writeFile(t, filepath.Join(workspace, "compose", "mysql", "config.cnf"), "[mysqld]\n")
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "config", ProfileJSON: `{"assetIds":["mysql.config"]}`},
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["shared.schema"]}`},
+			{ConsumerComponentID: "worker", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["shared.schema"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "mysql", AssetID: "mysql.config", AssetKind: "mysql-config", TargetComponentID: "mysql", TargetPath: "compose/mysql/config.cnf"},
+			{OwnerComponentID: "app", AssetID: "shared.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/shared.sql", ContentInline: "create database if not exists app;\n"},
+		},
+	}
+	items := environmentRestoreApplyEdgeAssets(context.Background(), "env.edge.dedupe", graph, map[string]any{
+		"generatedFiles": map[string]any{
+			"compose/mysql/config.cnf": "[mysqld]\n",
+		},
+	}, workspace, false, []string{"-f", "compose.yml"})
+	if len(items) != 2 {
+		t.Fatalf("edge assets should dedupe repeated asset ids, got %#v", items)
+	}
+	actions := map[string]string{}
+	commands := map[string]string{}
+	for _, item := range items {
+		actions[item.AssetID] = item.Action
+		commands[item.AssetID] = strings.Join(item.Command, " ")
+	}
+	if actions["mysql.config"] != "project-generated-file" || commands["mysql.config"] != "" {
+		t.Fatalf("non-SQL MySQL asset should not run through mysql client: actions=%#v commands=%#v", actions, commands)
+	}
+	if actions["shared.schema"] != "plan-apply-mysql-sql" || strings.Contains(commands["shared.schema"], "-proot") || !strings.Contains(commands["shared.schema"], "MYSQL_ROOT_PASSWORD") {
+		t.Fatalf("SQL MySQL asset command should use container env credentials: actions=%#v commands=%#v", actions, commands)
+	}
+}
+
+func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
+	item := environmentRestoreApplyEdgeAsset(context.Background(),
+		store.ComponentDependency{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["bad.schema"]}`},
+		store.ComponentConfigAsset{OwnerComponentID: "app", AssetID: "bad.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: ".."},
+		map[string]store.EnvironmentComponent{"mysql": {ComponentID: "mysql", ComposeService: "mysql"}},
+		nil,
+		t.TempDir(),
+		false,
+		[]string{"-f", "compose.yml"},
+	)
+	if item.OK || !strings.Contains(item.Error, "target path is required") {
+		t.Fatalf("parent path edge asset should be rejected: %#v", item)
 	}
 }
 
@@ -11044,6 +11145,16 @@ func mustJSON(t *testing.T, value any) string {
 		t.Fatalf("marshal json: %v", err)
 	}
 	return string(raw)
+}
+
+func extractJSONObject(t *testing.T, output string) string {
+	t.Helper()
+	start := strings.Index(output, "{")
+	end := strings.LastIndex(output, "}")
+	if start < 0 || end < start {
+		t.Fatalf("output does not contain a JSON object:\n%s", output)
+	}
+	return output[start : end+1]
 }
 
 func writeTestJSON(t *testing.T, w http.ResponseWriter, status int, value any) {

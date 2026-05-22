@@ -2743,8 +2743,13 @@ func environmentRestoreApplyEdgeAssets(ctx context.Context, envID string, graph 
 	}
 	generated := stringMapFromAny(compose["generatedFiles"])
 	out := []environmentRestoreAppliedAsset{}
+	appliedAssetIDs := map[string]bool{}
 	for _, dep := range graph.Dependencies {
 		for _, assetID := range environmentRestoreDependencyAssetIDs(dep) {
+			if appliedAssetIDs[assetID] {
+				continue
+			}
+			appliedAssetIDs[assetID] = true
 			asset, ok := assetsByID[assetID]
 			if !ok {
 				out = append(out, environmentRestoreAppliedAsset{
@@ -2798,8 +2803,7 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 		item.Error = "edge asset target component is required"
 		return item
 	}
-	kind := strings.ToLower(strings.TrimSpace(asset.AssetKind))
-	if strings.Contains(kind, "mysql") || strings.EqualFold(targetComponentID, "mysql") {
+	if environmentRestoreIsMySQLSQLAsset(asset, dep) {
 		item.Action = "plan-apply-mysql-sql"
 		item.Command = environmentRestoreMySQLApplyCommand(composeBaseArgs, targetService)
 		if len(composeBaseArgs) == 0 || targetService == "" {
@@ -2855,7 +2859,7 @@ func environmentRestoreEdgeAssetContent(asset store.ComponentConfigAsset, worksp
 		return asset.ContentInline, nil
 	}
 	targetPath := filepath.Clean(strings.TrimSpace(asset.TargetPath))
-	if targetPath == "." || targetPath == "" || filepath.IsAbs(targetPath) || strings.HasPrefix(targetPath, ".."+string(os.PathSeparator)) {
+	if targetPath == "." || targetPath == "" || targetPath == ".." || filepath.IsAbs(targetPath) || strings.HasPrefix(targetPath, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("edge asset target path is required")
 	}
 	raw, err := os.ReadFile(restoreWorkspacePath(workspace, targetPath))
@@ -2877,6 +2881,31 @@ func environmentRestoreDependencyAssetIDs(dep store.ComponentDependency) []strin
 	return dedupeStrings(ids)
 }
 
+func environmentRestoreIsMySQLSQLAsset(asset store.ComponentConfigAsset, dep store.ComponentDependency) bool {
+	kind := strings.ToLower(strings.TrimSpace(asset.AssetKind))
+	capability := strings.ToLower(strings.TrimSpace(dep.Capability))
+	if kind == "" {
+		return false
+	}
+	tokens := strings.FieldsFunc(kind, func(r rune) bool {
+		return r < 'a' || r > 'z'
+	})
+	hasSQLToken := false
+	hasMySQLToken := false
+	for _, token := range tokens {
+		switch token {
+		case "ddl", "schema", "seed", "sql":
+			hasSQLToken = true
+		case "mysql":
+			hasMySQLToken = true
+		}
+	}
+	if !hasSQLToken {
+		return false
+	}
+	return hasMySQLToken || capability == "sql"
+}
+
 func environmentRestoreComponentComposeService(component store.EnvironmentComponent, defaultID string) string {
 	if service := strings.TrimSpace(component.ComposeService); service != "" {
 		return service
@@ -2886,8 +2915,25 @@ func environmentRestoreComponentComposeService(component store.EnvironmentCompon
 
 func environmentRestoreMySQLApplyCommand(composeBaseArgs []string, service string) []string {
 	command := append([]string{"docker", "compose"}, composeBaseArgs...)
-	command = append(command, "exec", "-T", service, "mysql", "-uroot", "-proot")
+	command = append(command, "exec", "-T", service, "sh", "-lc", environmentRestoreMySQLClientScript())
 	return command
+}
+
+func environmentRestoreMySQLClientScript() string {
+	return `user="${MYSQL_USER:-root}"
+password="${MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"
+database="${MYSQL_DATABASE:-}"
+set --
+if [ -n "$user" ]; then
+  set -- "$@" "-u${user}"
+fi
+if [ -n "$password" ]; then
+  set -- "$@" "-p${password}"
+fi
+if [ -n "$database" ]; then
+  set -- "$@" "${database}"
+fi
+exec mysql "$@"`
 }
 
 func runRestoreMySQLCommandWithInputRetry(ctx context.Context, workdir string, command []string, input string) (string, int, string) {

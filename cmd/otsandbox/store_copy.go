@@ -17,6 +17,7 @@ type storeCopyStateReport struct {
 	OK              bool                         `json:"ok"`
 	Source          string                       `json:"source,omitempty"`
 	Target          string                       `json:"target,omitempty"`
+	Error           string                       `json:"error,omitempty"`
 	ProfileCatalogs int                          `json:"profileCatalogs"`
 	ProfileIndexes  int                          `json:"profileIndexes"`
 	ConfigVersions  int                          `json:"configVersions"`
@@ -101,6 +102,8 @@ func runStoreCopy(ctx context.Context, args []string) error {
 		MinInlineAssetBytes:    *requireInlineAssetBytes,
 	}
 	if err := validateStoreCopyRequirements(report, requirements); err != nil {
+		report.OK = false
+		report.Error = err.Error()
 		if *jsonOutput {
 			if jsonErr := writeIndentedJSON(report); jsonErr != nil {
 				return jsonErr
@@ -255,16 +258,21 @@ func validateStoreCopyRequirements(report storeCopyStateReport, requirements sto
 	if !ok {
 		return fmt.Errorf("required environment %q was not copied", requiredEnvironmentID)
 	}
-	graph, ok := storeCopyFindComponentGraph(report, requiredEnvironmentID)
-	if !ok || graph.Components == 0 {
-		return fmt.Errorf("required environment %q has no copied component graph", requiredEnvironmentID)
-	}
 	requiredWorkflowID := strings.TrimSpace(requirements.VerificationWorkflowID)
 	if requiredWorkflowID != "" && env.VerificationWorkflowID != requiredWorkflowID {
 		return fmt.Errorf("required environment %q verification workflow is %q, want %q", requiredEnvironmentID, env.VerificationWorkflowID, requiredWorkflowID)
 	}
 	if requirements.VerifiedEnvironment && (!env.Verified || env.Status != "verified" || !env.EvidenceComplete || !env.TopologyComplete) {
 		return fmt.Errorf("required environment %q is not verified with complete Evidence and topology flags", requiredEnvironmentID)
+	}
+	requiresGraph := requirements.MinComponents > 0 || requirements.MinDependencies > 0 || requirements.MinAssets > 0 || requirements.MinInlineAssetBytes > 0
+	graph := storeCopyComponentReport{}
+	if requiresGraph {
+		var ok bool
+		graph, ok = storeCopyFindComponentGraph(report, requiredEnvironmentID)
+		if !ok || graph.Components == 0 {
+			return fmt.Errorf("required environment %q has no copied component graph", requiredEnvironmentID)
+		}
 	}
 	if requirements.MinComponents > 0 && graph.Components < requirements.MinComponents {
 		return fmt.Errorf("required environment %q copied component count is %d, below required minimum %d", requiredEnvironmentID, graph.Components, requirements.MinComponents)
