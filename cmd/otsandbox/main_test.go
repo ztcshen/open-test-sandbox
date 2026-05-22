@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/apicase"
-	"open-test-sandbox/internal/profile"
-	"open-test-sandbox/internal/profilecatalog"
+	"open-test-sandbox/internal/domain/profile"
+	"open-test-sandbox/internal/domain/profilecatalog"
+	"open-test-sandbox/internal/runner/apicase"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/mysql"
 	"open-test-sandbox/internal/store/postgres"

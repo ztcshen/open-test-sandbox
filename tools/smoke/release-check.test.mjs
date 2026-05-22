@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
 import path from "node:path";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -35,9 +37,13 @@ function runReleaseCheck(env) {
 }
 
 function runRealMySQLWrapper(env) {
+  const wrapperEnv = { ...process.env };
+  delete wrapperEnv.OTSANDBOX_REAL_MYSQL_STORE_DSN;
+  delete wrapperEnv.OTSANDBOX_SMOKE_STORE_DSN;
+  delete wrapperEnv.OTSANDBOX_SMOKE_STORE;
   return spawnSync("bash", ["tools/smoke/mysql-real-store-release-check.sh"], {
     cwd: rootDir,
-    env: { ...process.env, ...env },
+    env: { ...wrapperEnv, ...env },
     encoding: "utf8",
     stdio: "pipe",
   });
@@ -51,6 +57,49 @@ function runNPM(args, env) {
     stdio: "pipe",
   });
 }
+
+test("release-check blocks tracked private test assets before expensive gates", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-release-index-"));
+  try {
+    const indexFile = path.join(tempDir, "index");
+    const gitEnv = { ...process.env, GIT_INDEX_FILE: indexFile };
+    const emptyBlob = spawnSync("git", ["hash-object", "-w", "--stdin"], {
+      cwd: rootDir,
+      input: "",
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    assert.equal(emptyBlob.status, 0, emptyBlob.stderr);
+    const readTree = spawnSync("git", ["read-tree", "HEAD"], {
+      cwd: rootDir,
+      env: gitEnv,
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+    assert.equal(readTree.status, 0, readTree.stderr);
+    const addPrivatePath = spawnSync("git", [
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `100644,${emptyBlob.stdout.trim()},test-private/secret-profile.json`,
+    ], {
+      cwd: rootDir,
+      env: gitEnv,
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+    assert.equal(addPrivatePath.status, 0, addPrivatePath.stderr);
+
+    const result = runReleaseCheck(releaseCheckEnv({ GIT_INDEX_FILE: indexFile }));
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /generated or local-only paths are tracked/);
+    assert.match(result.stderr, /test-private\/secret-profile\.json/);
+    assert.doesNotMatch(result.stdout, /running Go tests/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
 
 test("release-check missing Store guidance lists every supported smoke Store env", () => {
   const result = runReleaseCheck(releaseCheckEnv({

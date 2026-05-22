@@ -121,12 +121,13 @@ SkyWalking endpoint 时，拓扑采集必须
 核心模块保持通用：
 
 - `cmd/otsandbox/`：CLI 入口和命令编排。
+- `internal/server/controlplane/`：HTTP API、工作台数据、报告和 Evidence 视图。
+- `internal/runner/`：API 用例、请求模板、JUnit 输出、执行器规划和 Evidence 导入等可运行自动化辅助能力。
+- `internal/domain/`：通用 profile、用例集、脱敏和审计领域逻辑。
 - `internal/store/`：Store 契约和运行记录。
 - `internal/store/postgres/`：PostgreSQL 产品 Store 后端。
 - `internal/store/mysql/`：MySQL 产品 Store 后端。
 - `internal/store/sqlite/`：SQLite Store 后端，用于本地/个人 Store，并保留旧数据导入兼容能力。
-- `internal/controlplane/`：HTTP API、工作台数据、报告和 Evidence 视图。
-- `internal/apicase/`：HTTP 用例 runner 和 Evidence 写入。
 - `control-plane/frontend/`：React 工作台源码。
 - `control-plane/static/`：`otsandbox serve` 提供的静态工作台资源。
 

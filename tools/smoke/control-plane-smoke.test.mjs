@@ -6,7 +6,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { prepareSmokeTraceProvider, requireCompleteSmokeTraceIDs, smokeStepIDs, smokeTraceID, smokeWorkflowStepCount, writeSmokeProfile } from "./control-plane-smoke.mjs";
+import {
+  assertSmokeCatalogIndex,
+  prepareSmokeTraceProvider,
+  requireCompleteSmokeTraceIDs,
+  smokeStepIDs,
+  smokeTraceID,
+  smokeWorkflowStepCount,
+  writeSmokeProfile,
+} from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -235,6 +243,27 @@ describe("control-plane smoke Evidence assertions", () => {
 });
 
 describe("control-plane smoke workflow shape", () => {
+  it("accepts backend-specific catalog template counts with the same core assets", () => {
+    const baseCounts = {
+      services: smokeWorkflowStepCount,
+      workflows: 1,
+      interfaceNodes: smokeWorkflowStepCount,
+      apiCases: smokeWorkflowStepCount,
+      requestTemplates: smokeWorkflowStepCount,
+      workflowBindings: smokeWorkflowStepCount,
+      caseDependencies: smokeWorkflowStepCount,
+      fixtures: 1,
+    };
+    assertSmokeCatalogIndex({
+      profileId: "smoke",
+      counts: { ...baseCounts, templates: 6, templateConfigs: 8 },
+    });
+    assertSmokeCatalogIndex({
+      profileId: "smoke",
+      counts: { ...baseCounts, templates: 8, templateConfigs: 8 },
+    });
+  });
+
   it("models the core button workflow as configured Store-backed steps", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-smoke-profile-"));
     try {

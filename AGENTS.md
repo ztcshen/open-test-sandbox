@@ -48,7 +48,10 @@ API-operated, Store-first, and local-first.
 ## Project Shape
 
 - `cmd/otsandbox/`: CLI entrypoint.
-- `internal/`: future core packages.
+- `internal/server/controlplane/`: generic control-plane API and workbench server.
+- `internal/runner/`: automation runners, request rendering, report output, and Evidence import helpers.
+- `internal/domain/`: generic profile, case-suite, redaction, and audit domain logic.
+- `internal/store/`: SQL Store contract, openers, migrations, and backend adapters.
 - `docs/`: public docs.
 - `tools/guardrails/`: local quality gates and repository checks.
 

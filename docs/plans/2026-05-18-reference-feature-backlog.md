@@ -54,16 +54,16 @@ read-model assertions. No runtime network calls should be required.
 
 Implementation progress:
 OpenAPI 3.x JSON import planning now exists in
-`internal/profileimport/openapi`. The CLI exposes it as
+`internal/domain/profileimport/openapi`. The CLI exposes it as
 `otsandbox template-package import-plan openapi` through the Store-first command
 alias, with optional `--output-dir` export for reviewable split template package
 assets and runnable `api-cases/*.json` case files. The control-plane API also
 exposes the same planner as `POST /api/template-packages/import-plan/openapi`
 for API-operated review flows. Static HTTP capture import planning follows the
-same review-only pattern through `internal/profileimport/httpcapture`,
+same review-only pattern through `internal/domain/profileimport/httpcapture`,
 `otsandbox template-package import-plan http-capture`, and
 `POST /api/template-packages/import-plan/http-capture`. OpenAPI negative-case
-generation is likewise exposed through `internal/profilegenerate/openapi`,
+generation is likewise exposed through `internal/domain/profilegenerate/openapi`,
 `otsandbox template-package generation-plan openapi`, and
 `POST /api/template-packages/generation-plan/openapi`. This keeps generated
 assets draft-only and outside any existing template package until a reviewer
@@ -98,7 +98,7 @@ real local executor behind an explicit import bundle setting.
 
 Implementation progress:
 Import Bundle bundles now support `executors` manifest entries and split
-`executors/*.json` assets. `internal/executor` provides a dry-run plan that
+`executors/*.json` assets. `internal/runner/executor` provides a dry-run plan that
 validates supported external tool/script descriptors (`http-case`,
 `playwright`, `postman`, `k6`, `pytest`, `karate`, and `custom-command`) and
 reports ready versus blocked descriptors without executing external binaries.
@@ -138,7 +138,7 @@ and owner, and docs that distinguish automated execution from manual TCMS
 features not yet implemented.
 
 Implementation progress:
-`internal/casesuite` now normalizes API case lifecycle status to `draft`,
+`internal/domain/casesuite` now normalizes API case lifecycle status to `draft`,
 `review`, `active`, `quarantined`, `deprecated`, or `invalid`. Suite quality
 and quality-plan reports flag non-executable lifecycle states and invalid
 statuses, while keeping execution readiness limited to `active`. This adapts the
