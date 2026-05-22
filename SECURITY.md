@@ -1,6 +1,6 @@
 # Security Policy
 
-Open Test Sandbox is a local-first workbench that can store requests,
+AgentTestBench is a local-first workbench that can store requests,
 responses, logs, and runtime Evidence. Treat those files as sensitive unless a
 synthetic fixture explicitly proves otherwise.
 
@@ -33,7 +33,7 @@ private maintainer channel rather than a public issue. Include:
 Before a public release, run the release gate and review third-party licenses:
 
 ```sh
-OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
 go list -m all
 npm ls --all
 ```

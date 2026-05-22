@@ -1,9 +1,9 @@
 # Documentation / 文档入口
 
-Open Test Sandbox keeps the core generic and local-first. Start with the
+AgentTestBench keeps the core generic and local-first. Start with the
 shortest path for your role.
 
-Open Test Sandbox 保持核心通用、本地优先。你可以按自己的角色从下面的最短路径进入。
+AgentTestBench 保持核心通用、本地优先。你可以按自己的角色从下面的最短路径进入。
 
 ## New Users / 新用户
 

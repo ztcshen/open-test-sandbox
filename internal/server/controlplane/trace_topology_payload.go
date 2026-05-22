@@ -3,7 +3,7 @@ package controlplane
 import (
 	"strings"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 type topologyEvidenceViewInput struct {

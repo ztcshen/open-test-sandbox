@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 const environmentWorkflowSkyWalkingTemplateID = "environment.workflow.skywalking.v1"

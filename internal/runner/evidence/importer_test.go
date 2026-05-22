@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"open-test-sandbox/internal/runner/evidence"
-	"open-test-sandbox/internal/store/sqlite"
+	"agent-testbench/internal/runner/evidence"
+	"agent-testbench/internal/store/sqlite"
 )
 
 func TestImportLegacyRuntimeIndexesRunsCasesAndEvidence(t *testing.T) {

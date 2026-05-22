@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/domain/profileaudit"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profileaudit"
 )
 
 func TestAuditReportsBrokenProfileReferences(t *testing.T) {

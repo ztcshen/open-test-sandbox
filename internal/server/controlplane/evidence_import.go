@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/runner/evidence"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/runner/evidence"
+	"agent-testbench/internal/store"
 )
 
 type EvidenceImportRequest struct {

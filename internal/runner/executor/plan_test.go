@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/runner/executor"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/runner/executor"
+	"agent-testbench/internal/store"
 )
 
 func TestPlanValidatesExternalToolDescriptors(t *testing.T) {

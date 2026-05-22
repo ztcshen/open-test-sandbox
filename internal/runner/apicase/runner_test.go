@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"open-test-sandbox/internal/runner/apicase"
+	"agent-testbench/internal/runner/apicase"
 )
 
 func TestRunWritesEvidenceBundle(t *testing.T) {

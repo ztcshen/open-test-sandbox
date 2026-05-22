@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/store"
 )
 
 func handleWorkflowDiscovery(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {

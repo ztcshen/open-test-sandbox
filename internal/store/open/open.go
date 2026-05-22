@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"strings"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/mysql"
-	"open-test-sandbox/internal/store/postgres"
-	"open-test-sandbox/internal/store/sqlite"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/mysql"
+	"agent-testbench/internal/store/postgres"
+	"agent-testbench/internal/store/sqlite"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 type Backend string

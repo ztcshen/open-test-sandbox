@@ -8,7 +8,7 @@ do not promote a frontend idea unless the source project evidence and adaptation
 scope are explicit.
 
 Current frontend shape:
-Open Test Sandbox serves small React entrypoints from
+AgentTestBench serves small React entrypoints from
 `control-plane/frontend/src` through static HTML shells under
 `control-plane/static`. The main frontend surfaces are dashboard, workflows,
 interface nodes, API cases, case runs, evidence viewer, replay evidence, trace
@@ -17,7 +17,7 @@ topology, and workflow details.
 ## Evidence Rules
 
 - Prefer downloaded reference repositories under
-  `/Users/zlh/Documents/Codex/open-test-sandbox-reference-projects/2026-05-18`.
+  `/Users/zlh/Documents/Codex/agent-testbench-reference-projects/2026-05-18`.
 - Use official project docs or source repository pages only when the local
   shallow clone does not contain the frontend surface.
 - Keep adaptations local-first and generic. Do not introduce product-specific
@@ -52,7 +52,7 @@ Evidence:
 `https://sorry-cypress.dev/`, `https://github.com/sorry-cypress/sorry-cypress`
 
 Current fit:
-Open Test Sandbox already has `case-runs.html`, `/api/case/runs`,
+AgentTestBench already has `case-runs.html`, `/api/case/runs`,
 `/api/case/timing`, `/api/case/incomplete-batches`, failure categories, and
 Evidence links.
 
@@ -94,7 +94,7 @@ Evidence:
 `allure3/packages/web-commons/src/data.ts`
 
 Current fit:
-Open Test Sandbox already exposes `evidence-viewer.html` and Evidence records
+AgentTestBench already exposes `evidence-viewer.html` and Evidence records
 for request, response, assertions, summaries, runtime logs, and topology.
 
 Adaptation scope:
@@ -142,7 +142,7 @@ Evidence:
 ReportPortal GitHub organization overview and `reportportal/README.md:34-55`.
 
 Current fit:
-Open Test Sandbox batch failure summaries already expose `failureCategory`, and
+AgentTestBench batch failure summaries already expose `failureCategory`, and
 import bundle bundles can define ordered `failureCategories` rules.
 
 Adaptation scope:
@@ -175,7 +175,7 @@ Evidence:
 `monocart-reporter/packages/app/src/modules/grid-rows.js`
 
 Current fit:
-Open Test Sandbox has large case run and batch report lists but currently uses
+AgentTestBench has large case run and batch report lists but currently uses
 simple card grids.
 
 Adaptation scope:
@@ -204,13 +204,13 @@ Evidence:
 `sorry-cypress/packages/dashboard/src/run/runDetails/runDetailsView.tsx`
 
 Current fit:
-Open Test Sandbox already has case run summaries, latest run metadata, timing
+AgentTestBench already has case run summaries, latest run metadata, timing
 evidence, and direct Evidence detail URLs.
 
 Adaptation scope:
 Use a dashboard/report-workbench composition with separate summary, grouping,
 controls, and dense result rows. Do not add screenshots, videos, cloud storage,
-or Cypress-specific spec mechanics until Open Test Sandbox produces those local
+or Cypress-specific spec mechanics until AgentTestBench produces those local
 artifacts.
 
 ### 5. Case Management Search
@@ -230,7 +230,7 @@ Evidence:
 `testlink/README.md:41-80`
 
 Current fit:
-Open Test Sandbox already has case lifecycle, owner, priority, quality-plan,
+AgentTestBench already has case lifecycle, owner, priority, quality-plan,
 coverage, and suite inspection APIs.
 
 Adaptation scope:
@@ -262,7 +262,7 @@ interface id is also a direct handoff to the Interface Node detail page. This
 handoff keeps the selected Workflow and case context, and Interface Node pages
 render a Workflow case-set back-link when opened with that context. This
 adapts TestLink's execution/result tracking questions and Kiwi's case/run search
-surfaces to Open Test Sandbox's local catalog data.
+surfaces to AgentTestBench's local catalog data.
 Interface Node directory links now preserve the same context when opened from a
 Workflow case sequence with only a service id available. The filtered directory
 keeps the Workflow case-set back-link and passes the selected Workflow/case into
@@ -303,7 +303,7 @@ Evidence:
 `monocart-reporter/README.md:158-168`
 
 Current fit:
-Open Test Sandbox already exposes workflow steps, interface identifiers, case
+AgentTestBench already exposes workflow steps, interface identifiers, case
 identifiers, and API-operated `presentation.workflowFinder` configuration
 through `/api/catalog`.
 

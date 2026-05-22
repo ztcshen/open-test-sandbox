@@ -30,15 +30,15 @@ function storeBackend(dsn) {
 }
 
 export function requiredSQLStoreDSN(env = process.env) {
-  const dsn = env.OTSANDBOX_CLI_STORE_DSN || env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
+  const dsn = env.AGENT_TESTBENCH_CLI_STORE_DSN || env.AGENT_TESTBENCH_SMOKE_STORE_DSN || env.AGENT_TESTBENCH_SMOKE_STORE || "";
   if (!dsn.trim()) {
-    throw new Error("Set OTSANDBOX_CLI_STORE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to run the active SQL Store CLI smoke");
+    throw new Error("Set AGENT_TESTBENCH_CLI_STORE_DSN, AGENT_TESTBENCH_SMOKE_STORE_DSN, or AGENT_TESTBENCH_SMOKE_STORE to run the active SQL Store CLI smoke");
   }
   if (!storeBackend(dsn)) {
     throw new Error("The active Store CLI smoke requires a PostgreSQL, MySQL, or SQLite DSN");
   }
-  if (storeBackend(dsn) === "sqlite" && /^(1|true|yes|on)$/i.test(String(env.OTSANDBOX_DISABLE_SQLITE_STORE || ""))) {
-    throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite active Store CLI smoke DSN");
+  if (storeBackend(dsn) === "sqlite" && /^(1|true|yes|on)$/i.test(String(env.AGENT_TESTBENCH_DISABLE_SQLITE_STORE || ""))) {
+    throw new Error("AGENT_TESTBENCH_DISABLE_SQLITE_STORE cannot be combined with a SQLite active Store CLI smoke DSN");
   }
   if (/^mysql:\/\//i.test(dsn)) {
     requireSafeMySQLStoreDSN(dsn, { label: "The active Store CLI smoke" });
@@ -84,9 +84,9 @@ async function closeServer(server) {
   await new Promise((resolve) => server.close(resolve));
 }
 
-function runOTS(args, env) {
+function runAgentTestBench(args, env) {
 	return new Promise((resolve, reject) => {
-		const command = env.OTSANDBOX_CLI_BIN || "./bin/otsandbox.sh";
+		const command = env.AGENT_TESTBENCH_CLI_BIN || "./bin/agent-testbench.sh";
 		const child = spawn(command, args, {
 			cwd: rootDir,
 			env: { ...process.env, ...env },
@@ -102,14 +102,14 @@ function runOTS(args, env) {
         resolve({ stdout, stderr });
         return;
       }
-      reject(new Error(`otsandbox ${args.join(" ")} failed with ${code}\n${stdout}\n${stderr}`));
+      reject(new Error(`agent-testbench ${args.join(" ")} failed with ${code}\n${stdout}\n${stderr}`));
     });
 	});
 }
 
 function buildCLI(outputPath) {
 	return new Promise((resolve, reject) => {
-		const child = spawn("go", ["build", "-o", outputPath, "./cmd/otsandbox"], {
+		const child = spawn("go", ["build", "-o", outputPath, "./cmd/agent-testbench"], {
 			cwd: rootDir,
 			env: process.env,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -124,17 +124,17 @@ function buildCLI(outputPath) {
 				resolve();
 				return;
 			}
-			reject(new Error(`go build ./cmd/otsandbox failed with ${code}\n${stdout}\n${stderr}`));
+			reject(new Error(`go build ./cmd/agent-testbench failed with ${code}\n${stdout}\n${stderr}`));
 		});
 	});
 }
 
 async function runJSON(args, env) {
-  const result = await runOTS(args, env);
+  const result = await runAgentTestBench(args, env);
   try {
     return JSON.parse(result.stdout);
   } catch (error) {
-    throw new Error(`otsandbox ${args.join(" ")} did not emit JSON\n${result.stdout}\n${result.stderr}\n${error.message}`);
+    throw new Error(`agent-testbench ${args.join(" ")} did not emit JSON\n${result.stdout}\n${result.stderr}\n${error.message}`);
   }
 }
 
@@ -149,7 +149,7 @@ async function main() {
   const dsn = requiredSQLStoreDSN();
 	const backend = storeBackend(dsn);
 	const storeName = backend === "mysql" ? "active-mysql" : backend === "sqlite" ? "active-sqlite" : "active-pg";
-	const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-cli-sql-smoke-"));
+	const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-cli-sql-smoke-"));
   const targetPort = await freePort();
   let targetServer;
   let traceProvider;
@@ -157,27 +157,27 @@ async function main() {
     targetServer = await startTargetServer(targetPort);
 		traceProvider = await prepareSmokeTraceProvider();
 		const profileDir = await writeSmokeProfile(tempDir, targetPort);
-		const cliBin = path.join(tempDir, "otsandbox");
+		const cliBin = path.join(tempDir, "agent-testbench");
 		await buildCLI(cliBin);
 		const env = {
-			OTSANDBOX_CONFIG_HOME: path.join(tempDir, "config"),
-			OTSANDBOX_CLI_BIN: cliBin,
-			OTS_TRACE_GRAPHQL_URL: traceProvider.graphQLURL,
+			AGENT_TESTBENCH_CONFIG_HOME: path.join(tempDir, "config"),
+			AGENT_TESTBENCH_CLI_BIN: cliBin,
+			AGENT_TESTBENCH_TRACE_GRAPHQL_URL: traceProvider.graphQLURL,
 		};
 		if (backend !== "sqlite") {
-			env.OTSANDBOX_DISABLE_SQLITE_STORE = "1";
+			env.AGENT_TESTBENCH_DISABLE_SQLITE_STORE = "1";
 		}
-    await mkdir(env.OTSANDBOX_CONFIG_HOME, { recursive: true });
+    await mkdir(env.AGENT_TESTBENCH_CONFIG_HOME, { recursive: true });
 
-    await runOTS(["store", "config", "set", storeName, "--url", dsn], env);
-    await runOTS(["store", "use", storeName], env);
+    await runAgentTestBench(["store", "config", "set", storeName, "--url", dsn], env);
+    await runAgentTestBench(["store", "use", storeName], env);
     const current = await runJSON(["store", "current", "--json"], env);
     if (current?.name !== storeName || current?.backend !== backend) {
       throw new Error(`active Store is not ${backend}: ${JSON.stringify(current)}`);
     }
 
-    await runOTS(["store", "upgrade"], env);
-    const status = await runOTS(["store", "status"], env);
+    await runAgentTestBench(["store", "upgrade"], env);
+    const status = await runAgentTestBench(["store", "status"], env);
     if (!status.stdout.includes(`Store: ${backend}`)) {
       throw new Error(`store status did not use ${backend}:\n${status.stdout}`);
     }

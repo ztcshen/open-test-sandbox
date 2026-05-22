@@ -1,79 +1,77 @@
 # Share Kit / 项目传播素材
 
-Use this page when introducing Open Test Sandbox in a README link, internal
+Use this page when introducing AgentTestBench in a README link, internal
 newsletter, social post, conference proposal, or demo. Keep wording generic:
 team-specific examples belong in external template packages.
 
-这份页面用于在 README、内部分享、社交媒体、技术演讲或 demo 中介绍 Open Test
-Sandbox。文案保持通用，具体团队案例应放在外部 template package 中。
+这份页面用于在 README、内部分享、社交媒体、技术演讲或 demo 中介绍
+AgentTestBench。文案保持通用，具体团队案例应放在外部 template package 中。
 
 ## One-Liner / 一句话介绍
 
-**Open Test Sandbox is a local-first, API-operated test sandbox workbench for
-agent-friendly integration testing, reproducible Evidence, and compact
-HTML/JSON reports.**
+**AgentTestBench is an agent-native test environment for API workflows,
+auditable Evidence, and quality gates.**
 
-**Open Test Sandbox 是一个本地优先、配置驱动的测试沙箱工作台，面向 agent 友好的
-集成测试、可复现 Evidence 和紧凑 HTML/JSON 报告。**
+**AgentTestBench 是一个面向 Agent 的 API 工作流测试环境，围绕可审计 Evidence
+和质量门禁构建。**
 
 ## Short Description / 短介绍
 
-Open Test Sandbox lets teams keep test assets in external template packages,
-publish them into a selected SQL Store, run API cases or workflows, and inspect
-failed cases through Evidence-rich reports. PostgreSQL and MySQL are supported
-product SQL Store engines, and teams choose the engine that matches their
-operational environment.
-Agents can discover runnable targets before executing reports, so prompts do
-not need hardcoded ids.
+AgentTestBench gives agents and test engineers a discover-then-run control
+plane for API workflow testing. Teams publish generic test assets into a
+selected SQL Store, run API cases or workflows, and inspect failed cases
+through Evidence-rich reports. SQLite, PostgreSQL, and MySQL are supported SQL
+Store engines, so local and team workflows use the same command shape.
 
-Open Test Sandbox 让团队把测试资产维护在外部 template package 中，发布到本地
-或团队选择的 SQL Store 后执行 API 用例或工作流，并通过包含 Evidence 的报告
-审阅失败用例。PostgreSQL 与 MySQL 都是产品 SQL Store 引擎，团队按自己的运维环境
-选择。agent 可以先发现可测目标，再执行报告，因此提示词不需要写死 ID。
+AgentTestBench 给 agent 和测试工程师提供“先发现、再执行”的 API 工作流测试控制平面。
+团队把通用测试资产发布到选择的 SQL Store 后执行 API 用例或工作流，并通过包含
+Evidence 的报告审阅失败用例。SQLite、PostgreSQL 与 MySQL 都是 SQL Store 引擎，
+因此本地和团队工作流保持同一套命令形态。
 
 ## Longer Pitch / 较完整介绍
 
-Open Test Sandbox is a generic control plane for local integration testing. It
-keeps the open-source core free of team-specific data while still supporting
-real workflows through external template packages. The same Store facts power CLI
-commands, Control plane APIs, the React workbench, JSON reports, and HTML
-reports. This makes it useful for QA teams, backend teams, platform teams, and
-agent builders that need repeatable regression reports with request, response,
-assertion, timing, log, and topology context.
+AgentTestBench is a generic control plane for agent-native integration testing.
+It keeps the open-source core free of team-specific data while still supporting
+real workflows through Store-backed catalogs and optional template packages.
+The same Store facts power CLI commands, Control plane APIs, the React
+workbench, JSON reports, and HTML reports. This makes it useful for QA teams,
+backend teams, platform teams, and agent builders that need repeatable
+regression reports with request, response, assertion, timing, log, and topology
+context.
 
-Open Test Sandbox 是一套通用的本地集成测试控制平面。它让开源核心不包含团队私有
-数据，同时通过外部 template package 支持真实工作流。同一份 Store 事实被 CLI、Control
-plane API、React 工作台、JSON 报告和 HTML 报告共同使用。它适合需要可复现回归
-报告的 QA 团队、后端团队、平台团队和 agent 构建者，报告中可以包含请求、响应、
-断言、耗时、日志和拓扑上下文。
+AgentTestBench 是一套通用的 agent-native 集成测试控制平面。它让开源核心不包含
+团队私有数据，同时通过 Store-backed catalog 和可选 template package 支持真实工作流。
+同一份 Store 事实被 CLI、Control plane API、React 工作台、JSON 报告和 HTML 报告共同使用。
+它适合需要可复现回归报告的 QA 团队、后端团队、平台团队和 agent 构建者，报告中可以
+包含请求、响应、断言、耗时、日志和拓扑上下文。
 
 ## Demo Script / 演示脚本
 
 ```sh
-git clone https://github.com/ztcshen/open-test-sandbox.git
-cd open-test-sandbox
+git clone https://github.com/ztcshen/agent-testbench.git
+cd agent-testbench
 npm ci
-OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
 # MySQL:
-OTSANDBOX_DEMO_STORE="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check
 ```
 
 What to point out:
 
 - `demo:api-case` starts a temporary local HTTP service and writes Evidence
   indexes to the active SQLite/PostgreSQL/MySQL Store or an explicit
-  `OTSANDBOX_DEMO_STORE=postgres://...` /
-  `OTSANDBOX_DEMO_STORE=mysql://...` /
-  `OTSANDBOX_DEMO_STORE=sqlite://...`. MySQL demo Stores must use dedicated
+  `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
+  `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
+  `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`. MySQL demo Stores must use dedicated
   sandbox/smoke/test/CI-looking database names, not application schemas.
 - `release-check` requires a SQLite, PostgreSQL, or MySQL smoke Store DSN, then runs
   guardrails, Go tests, the demo, the React build, active SQL Store CLI smoke,
   and SQL Store headless browser smoke tests.
 - Live SkyWalking validation is a stricter sign-off mode: set
-  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
-  `OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` with mappings for every
+  `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`, `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`,
+  `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` with mappings for every
   configured workflow step;
   otherwise the demo uses deterministic synthetic topology wiring for
   repeatable local smoke.
@@ -82,14 +80,14 @@ What to point out:
 讲解重点：
 
 - `demo:api-case` 会启动临时本地 HTTP 服务，并把 Evidence 索引写入 active
-  SQLite/PostgreSQL/MySQL Store 或显式 `OTSANDBOX_DEMO_STORE=postgres://...` /
-  `OTSANDBOX_DEMO_STORE=mysql://...` /
-  `OTSANDBOX_DEMO_STORE=sqlite://...`。
+  SQLite/PostgreSQL/MySQL Store 或显式 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
+  `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
+  `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`。
 - `release-check` 要求提供 SQLite、PostgreSQL 或 MySQL smoke Store DSN，然后运行守卫、
   Go 测试、demo、React build、active SQL Store CLI smoke 和 SQL Store 无头浏览器冒烟。
 - 真实 SkyWalking 验证是更严格的 sign-off 模式：设置
-  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`、`OTS_TRACE_GRAPHQL_URL`、
-  `OTS_SMOKE_EXPECTED_STEPS` 和 `OTS_SMOKE_TRACE_IDS`，并覆盖配置工作流的
+  `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`、`AGENT_TESTBENCH_TRACE_GRAPHQL_URL`、
+  `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS` 和 `AGENT_TESTBENCH_SMOKE_TRACE_IDS`，并覆盖配置工作流的
   每一个必需 step；否则 demo
   使用确定性的 synthetic topology wiring 做可重复本地冒烟。
 - template package 默认在核心仓库外维护，核心保持通用。
@@ -98,13 +96,13 @@ What to point out:
 
 ### English
 
-Open Test Sandbox is a local-first test sandbox workbench for API-operated
-integration testing. It gives agents a clean discover-then-run workflow and
-returns Evidence-rich HTML/JSON reports for API cases and workflows.
+AgentTestBench is an agent-native test environment for API workflows,
+auditable Evidence, and quality gates. It gives agents a clean
+discover-then-run workflow and returns Evidence-rich HTML/JSON reports.
 
 ### 简体中文
 
-Open Test Sandbox 是一个本地优先、配置驱动的测试沙箱工作台。它让 agent 先发现目标、
+AgentTestBench 是一个面向 Agent 的 API 工作流测试环境。它让 agent 先发现目标、
 再执行报告，并为 API 用例和工作流生成包含 Evidence 的 HTML/JSON 报告。
 
 ## Suggested Tags / 推荐标签

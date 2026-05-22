@@ -91,12 +91,12 @@ payloads for normal report surfaces.
 
 ## Store Indexing
 
-`otsandbox case run` can execute a case file with `--case PATH` or a Store
+`agent-testbench case run` can execute a case file with `--case PATH` or a Store
 catalog case with `--case-id ID`. The `--case-id` form requires the active
 Store or `--store NAME_OR_DSN`, reads the case execution adapter from that
 Store catalog, and uses the same local test-kit runner as `/api/test-kit/run`.
 
-When `otsandbox case run` receives an active Store or `--store NAME_OR_DSN`, it
+When `agent-testbench case run` receives an active Store or `--store NAME_OR_DSN`, it
 records:
 
 - one `runs` row keyed by the run id;

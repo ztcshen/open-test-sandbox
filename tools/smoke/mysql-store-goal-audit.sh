@@ -14,7 +14,7 @@ MIN_DEPENDENCIES=0
 MIN_ASSETS=1
 MIN_INLINE_ASSET_BYTES=1
 CONTROL_PLANE_URL=""
-OTSANDBOX_BIN="${OTSANDBOX_BIN:-}"
+AGENT_TESTBENCH_BIN="${AGENT_TESTBENCH_BIN:-}"
 
 usage() {
   cat <<'EOF'
@@ -122,15 +122,15 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
-run_otsandbox() {
-  if [[ -n "$OTSANDBOX_BIN" ]]; then
-    "$OTSANDBOX_BIN" "$@"
-  elif [[ -x ".runtime/otsandbox-dev" ]]; then
-    .runtime/otsandbox-dev "$@"
-  elif [[ -x "./bin/otsandbox.sh" ]]; then
-    ./bin/otsandbox.sh "$@"
+run_agent-testbench() {
+  if [[ -n "$AGENT_TESTBENCH_BIN" ]]; then
+    "$AGENT_TESTBENCH_BIN" "$@"
+  elif [[ -x ".runtime/agent-testbench-dev" ]]; then
+    .runtime/agent-testbench-dev "$@"
+  elif [[ -x "./bin/agent-testbench.sh" ]]; then
+    ./bin/agent-testbench.sh "$@"
   else
-    go run ./cmd/otsandbox "$@"
+    go run ./cmd/agent-testbench "$@"
   fi
 }
 
@@ -161,7 +161,7 @@ TARGET_ENV_READY=false
 ACTIVE_TARGET=false
 CONTROL_PLANE_READY=false
 
-if run_otsandbox environment inspect "$ENVIRONMENT_ID" --store "$SOURCE_STORE" --json > "$SOURCE_INSPECT"; then
+if run_agent-testbench environment inspect "$ENVIRONMENT_ID" --store "$SOURCE_STORE" --json > "$SOURCE_INSPECT"; then
   if jq -e '
     .ok == true
     and .environment.id == $environmentID
@@ -202,12 +202,12 @@ MYSQL_HOST="$(jq -r '.host // ""' "$HANDSHAKE_REPORT" 2>/dev/null || true)"
 MYSQL_PORT="$(jq -r '(.port // "") | tostring' "$HANDSHAKE_REPORT" 2>/dev/null || true)"
 
 if [[ "$TARGET_REACHABLE" == "true" ]]; then
-  if run_otsandbox store status --store "$TARGET_STORE" --json > "$TARGET_STATUS"; then
+  if run_agent-testbench store status --store "$TARGET_STORE" --json > "$TARGET_STATUS"; then
     if jq -e '.ok == true and .backend == "mysql" and ((.pending // 0) == 0)' "$TARGET_STATUS" >/dev/null; then
       TARGET_SCHEMA_READY=true
     fi
   fi
-  if run_otsandbox environment inspect "$ENVIRONMENT_ID" --store "$TARGET_STORE" --json > "$TARGET_INSPECT"; then
+  if run_agent-testbench environment inspect "$ENVIRONMENT_ID" --store "$TARGET_STORE" --json > "$TARGET_INSPECT"; then
     if jq -e '
       .ok == true
       and .environment.id == $environmentID
@@ -235,7 +235,7 @@ if [[ "$TARGET_REACHABLE" == "true" ]]; then
   fi
 fi
 
-if run_otsandbox store current --json > "$ACTIVE_CURRENT"; then
+if run_agent-testbench store current --json > "$ACTIVE_CURRENT"; then
   if jq -e '.ok == true and .name == $targetStore and .backend == "mysql"' --arg targetStore "$TARGET_STORE" "$ACTIVE_CURRENT" >/dev/null; then
     ACTIVE_TARGET=true
   fi
@@ -287,12 +287,12 @@ elif [[ "$TARGET_ENV_READY" != "true" ]]; then
   NEXT_COMMAND=(".runtime/team-mysql-pending-publish-commands.sh")
 elif [[ "$ACTIVE_TARGET" != "true" ]]; then
   BLOCKER="active-store-not-target"
-  NEXT_ACTION="run otsandbox store use for the target MySQL Store, then rerun this audit"
-  NEXT_COMMAND=("otsandbox" "store" "use" "$TARGET_STORE")
+  NEXT_ACTION="run agent-testbench store use for the target MySQL Store, then rerun this audit"
+  NEXT_COMMAND=("agent-testbench" "store" "use" "$TARGET_STORE")
 elif [[ "$CONTROL_PLANE_READY" != "true" ]]; then
   BLOCKER="control-plane-not-target"
-  NEXT_ACTION="restart otsandbox serve with the target MySQL Store, then rerun this audit"
-  NEXT_COMMAND=("otsandbox" "serve" "--store" "$TARGET_STORE")
+  NEXT_ACTION="restart agent-testbench serve with the target MySQL Store, then rerun this audit"
+  NEXT_COMMAND=("agent-testbench" "serve" "--store" "$TARGET_STORE")
 elif [[ "$COMPLETE" == "true" ]]; then
   NEXT_ACTION="run .runtime/team-mysql-colleague-restore-commands.sh for a colleague/new-machine restore proof"
   NEXT_COMMAND=(".runtime/team-mysql-colleague-restore-commands.sh")

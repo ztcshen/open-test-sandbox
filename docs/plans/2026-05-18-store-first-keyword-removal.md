@@ -2,7 +2,7 @@
 
 ## Decision
 
-Open Test Sandbox is an API-operated testing workbench. Test engineers consume
+AgentTestBench is an API-operated testing workbench. Test engineers consume
 the running sandbox through APIs and UI; they do not maintain a second local
 project or repeatedly edit external files.
 

@@ -66,7 +66,7 @@ function timingPath(kind, freshness) {
 }
 
 function timingCommand(kind, freshness) {
-  const parts = ["otsandbox", "case", "timing", "--kind", kind || "all"];
+  const parts = ["agent-testbench", "case", "timing", "--kind", kind || "all"];
   if (freshness) {
     parts.push("--max-age-minutes", freshness);
   }
@@ -196,7 +196,7 @@ function IncompleteBatches({ report }) {
     <>
       <div className="case-incomplete-batch-summary" aria-live="polite">
         <span>{report ? `incomplete batches: ${items.length}` : "incomplete batches: loading"}</span>
-        <code>otsandbox case incomplete-batches</code>
+        <code>agent-testbench case incomplete-batches</code>
       </div>
       <div className="case-incomplete-batch-list">
         {items.length

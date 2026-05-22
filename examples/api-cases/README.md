@@ -8,9 +8,9 @@ PostgreSQL or MySQL SQL Store.
 Use it through the demo entrypoint:
 
 ```sh
-OTSANDBOX_DEMO_STORE='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run demo:api-case
+AGENT_TESTBENCH_DEMO_STORE='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run demo:api-case
 # or
-OTSANDBOX_DEMO_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run demo:api-case
+AGENT_TESTBENCH_DEMO_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run demo:api-case
 ```
 
 MySQL demo Stores must use a dedicated sandbox/smoke/test/CI-looking database

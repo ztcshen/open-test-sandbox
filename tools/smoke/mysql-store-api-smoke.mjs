@@ -13,9 +13,9 @@ const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const workflowStepCount = smokeWorkflowStepCount;
 
 export function requiredMySQLDSN(env = process.env) {
-  const dsn = env.OTSANDBOX_MYSQL_API_SMOKE_DSN || env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
+  const dsn = env.AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN || env.AGENT_TESTBENCH_SMOKE_STORE_DSN || env.AGENT_TESTBENCH_SMOKE_STORE || "";
   if (!dsn.trim()) {
-    throw new Error("Set OTSANDBOX_MYSQL_API_SMOKE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to run the MySQL Store API smoke");
+    throw new Error("Set AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN, AGENT_TESTBENCH_SMOKE_STORE_DSN, or AGENT_TESTBENCH_SMOKE_STORE to run the MySQL Store API smoke");
   }
   requireSafeMySQLStoreDSN(dsn, { label: "The MySQL Store API smoke" });
   return dsn;
@@ -91,7 +91,7 @@ async function runJSON(command, args, options = {}) {
 }
 
 function buildCLI(outputPath) {
-  return runCommand("go", ["build", "-o", outputPath, "./cmd/otsandbox"]);
+  return runCommand("go", ["build", "-o", outputPath, "./cmd/agent-testbench"]);
 }
 
 async function waitForJSON(url, timeoutMs = 30000) {
@@ -372,19 +372,19 @@ function assertNoRawSecret(payload, rawDSN) {
 
 async function main() {
   const dsn = requiredMySQLDSN();
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-mysql-api-smoke-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-mysql-api-smoke-"));
   const storeName = "api-mysql";
   let server;
   let targetServer;
   let traceProvider;
   try {
-    const cliBin = path.join(tempDir, "otsandbox");
+    const cliBin = path.join(tempDir, "agent-testbench");
     await buildCLI(cliBin);
     const env = {
-      OTSANDBOX_CONFIG_HOME: path.join(tempDir, "config"),
-      OTSANDBOX_DISABLE_SQLITE_STORE: "1",
+      AGENT_TESTBENCH_CONFIG_HOME: path.join(tempDir, "config"),
+      AGENT_TESTBENCH_DISABLE_SQLITE_STORE: "1",
     };
-    await mkdir(env.OTSANDBOX_CONFIG_HOME, { recursive: true });
+    await mkdir(env.AGENT_TESTBENCH_CONFIG_HOME, { recursive: true });
 
     await runCommand(cliBin, ["store", "config", "set", storeName, "--url", dsn], { env });
     await runCommand(cliBin, ["store", "use", storeName], { env });
@@ -415,7 +415,7 @@ async function main() {
       String(port),
     ], {
       cwd: rootDir,
-      env: { ...process.env, ...env, OTS_TRACE_GRAPHQL_URL: traceProvider.graphQLURL },
+      env: { ...process.env, ...env, AGENT_TESTBENCH_TRACE_GRAPHQL_URL: traceProvider.graphQLURL },
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });

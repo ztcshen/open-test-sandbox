@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 type profileCatalogIndexResponse struct {

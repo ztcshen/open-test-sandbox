@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/domain/profilecatalog"
-	"open-test-sandbox/internal/runner/executor"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
+	"agent-testbench/internal/runner/executor"
+	"agent-testbench/internal/store"
 )
 
 func New(bundle profile.Bundle) http.Handler {

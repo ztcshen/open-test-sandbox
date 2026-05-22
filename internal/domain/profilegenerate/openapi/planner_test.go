@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"open-test-sandbox/internal/domain/profilegenerate/openapi"
+	"agent-testbench/internal/domain/profilegenerate/openapi"
 )
 
 func TestPlanGeneratesDraftNegativeCasesFromRequiredSchemaFields(t *testing.T) {

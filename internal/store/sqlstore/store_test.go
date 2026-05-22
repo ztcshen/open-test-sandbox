@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {
@@ -1109,7 +1109,7 @@ func TestStoreEnvironmentCatalogUsesMySQLDialect(t *testing.T) {
 	}
 }
 
-const fakeDriverName = "otsandbox_sqlstore_fake"
+const fakeDriverName = "agent_testbench_sqlstore_fake"
 
 var registerFakeDriverOnce sync.Once
 

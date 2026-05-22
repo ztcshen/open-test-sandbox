@@ -1,9 +1,9 @@
 # Roadmap / 路线图
 
-Open Test Sandbox is pre-1.0. The roadmap focuses on making the project easier
+AgentTestBench is pre-1.0. The roadmap focuses on making the project easier
 to try, easier to extend, and safer for real team adoption.
 
-Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、提升扩展性，并让
+AgentTestBench 目前仍是 pre-1.0。路线图重点是降低试用门槛、提升扩展性，并让
 真实团队接入更安全。
 
 ## Now / 当前

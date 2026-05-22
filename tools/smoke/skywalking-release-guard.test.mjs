@@ -26,40 +26,40 @@ test("SkyWalking release guard parses JSON and shell trace id mappings", () => {
 test("SkyWalking release guard requires an http or https URL", () => {
   assert.throws(
     () => requireSkyWalkingReleaseInputs({
-      OTS_TRACE_GRAPHQL_URL: "ftp://skywalking.example/graphql",
-      OTS_SMOKE_TRACE_IDS: JSON.stringify(allStepTraceIDs),
-      OTS_SMOKE_EXPECTED_STEPS: "3",
+      AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "ftp://skywalking.example/graphql",
+      AGENT_TESTBENCH_SMOKE_TRACE_IDS: JSON.stringify(allStepTraceIDs),
+      AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
     }, { label: "test gate" }),
-    /test gate requires OTS_TRACE_GRAPHQL_URL to be an http\/https URL/,
+    /test gate requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL to be an http\/https URL/,
   );
 });
 
 test("SkyWalking release guard requires an explicit configured workflow step count", () => {
   assert.throws(
     () => requireSkyWalkingReleaseInputs({
-      OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-      OTS_SMOKE_TRACE_IDS: JSON.stringify(allStepTraceIDs),
+      AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+      AGENT_TESTBENCH_SMOKE_TRACE_IDS: JSON.stringify(allStepTraceIDs),
     }, { label: "test gate" }),
-    /OTS_SMOKE_EXPECTED_STEPS must be set/,
+    /AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS must be set/,
   );
 });
 
 test("SkyWalking release guard requires trace ids for every configured workflow step", () => {
   assert.throws(
     () => requireSkyWalkingReleaseInputs({
-      OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-      OTS_SMOKE_EXPECTED_STEPS: "3",
-      OTS_SMOKE_TRACE_IDS: "step-01=trace-1",
+      AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+      AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+      AGENT_TESTBENCH_SMOKE_TRACE_IDS: "step-01=trace-1",
     }, { label: "test gate" }),
-    /test gate requires OTS_SMOKE_TRACE_IDS for every configured workflow step; missing: step-02/,
+    /test gate requires AGENT_TESTBENCH_SMOKE_TRACE_IDS for every configured workflow step; missing: step-02/,
   );
 });
 
 test("SkyWalking release guard accepts complete configured trace ids", () => {
   const result = requireSkyWalkingReleaseInputs({
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "3",
-    OTS_SMOKE_TRACE_IDS: JSON.stringify(allStepTraceIDs),
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+    AGENT_TESTBENCH_SMOKE_TRACE_IDS: JSON.stringify(allStepTraceIDs),
   }, { label: "test gate" });
 
   assert.equal(result.expectedSteps, 3);
@@ -68,9 +68,9 @@ test("SkyWalking release guard accepts complete configured trace ids", () => {
 
 test("SkyWalking release guard accepts a configured workflow step count", () => {
   const result = requireSkyWalkingReleaseInputs({
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "2",
-    OTS_SMOKE_TRACE_IDS: "step-01=trace-1,step-02=trace-2",
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "2",
+    AGENT_TESTBENCH_SMOKE_TRACE_IDS: "step-01=trace-1,step-02=trace-2",
   }, { label: "test gate" });
 
   assert.equal(result.expectedSteps, 2);

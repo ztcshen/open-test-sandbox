@@ -11,17 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/postgres"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/postgres"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestParseConfigFromURLAcceptsPostgresDSN(t *testing.T) {
-	cfg, err := postgres.ParseConfigFromURL("postgres://user:secret@example.com:5432/otsandbox?sslmode=disable")
+	cfg, err := postgres.ParseConfigFromURL("postgres://user:secret@example.com:5432/agent_testbench?sslmode=disable")
 	if err != nil {
 		t.Fatalf("parse postgres dsn: %v", err)
 	}
-	if cfg.URL != "postgres://user:secret@example.com:5432/otsandbox?sslmode=disable" {
+	if cfg.URL != "postgres://user:secret@example.com:5432/agent_testbench?sslmode=disable" {
 		t.Fatalf("postgres config url = %q", cfg.URL)
 	}
 }
@@ -142,7 +142,7 @@ func TestSchemaStatusAndUpgradeUseConfiguredSQLDriver(t *testing.T) {
 	}
 }
 
-const fakePostgresDriverName = "otsandbox_postgres_open_fake"
+const fakePostgresDriverName = "agent_testbench_postgres_open_fake"
 
 var registerFakePostgresDriverOnce sync.Once
 

@@ -22,7 +22,7 @@ jobs:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_DATABASE: otsandbox_ci_smoke
+          MYSQL_DATABASE: agent_testbench_ci_smoke
           MYSQL_ROOT_PASSWORD: ci-store-pass
         ports:
           - 3306:3306
@@ -48,7 +48,7 @@ jobs:
           cache: npm
 
       - name: Install release gate tools
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep sqlite3
 
       - name: Install npm dependencies
         run: npm ci
@@ -59,7 +59,7 @@ jobs:
       - name: Run release gate
         run: npm run release-check
         env:
-          OTSANDBOX_SMOKE_STORE_DSN: mysql://root:ci-store-pass@127.0.0.1:3306/otsandbox_ci_smoke?tls=false
+          AGENT_TESTBENCH_SMOKE_STORE_DSN: mysql://root:ci-store-pass@127.0.0.1:3306/agent_testbench_ci_smoke?tls=false
 
   mysql-real-signoff:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mysql_real_signoff == 'true' }}
@@ -92,15 +92,15 @@ jobs:
       - name: Run guarded company MySQL real sign-off preflight
         run: npm run release-check:mysql-real:preflight
         env:
-          OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1"
-          OTSANDBOX_REAL_MYSQL_STORE_DSN: ${{ secrets.OTSANDBOX_REAL_MYSQL_STORE_DSN }}
-          OTS_TRACE_GRAPHQL_URL: ${{ secrets.OTS_TRACE_GRAPHQL_URL }}
-          OTS_SMOKE_TRACE_IDS: ${{ secrets.OTS_SMOKE_TRACE_IDS }}
+          AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1"
+          AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: ${{ secrets.AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN }}
+          AGENT_TESTBENCH_TRACE_GRAPHQL_URL: ${{ secrets.AGENT_TESTBENCH_TRACE_GRAPHQL_URL }}
+          AGENT_TESTBENCH_SMOKE_TRACE_IDS: ${{ secrets.AGENT_TESTBENCH_SMOKE_TRACE_IDS }}
 
       - name: Run guarded company MySQL real sign-off
         run: npm run release-check:mysql-real
         env:
-          OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1"
-          OTSANDBOX_REAL_MYSQL_STORE_DSN: ${{ secrets.OTSANDBOX_REAL_MYSQL_STORE_DSN }}
-          OTS_TRACE_GRAPHQL_URL: ${{ secrets.OTS_TRACE_GRAPHQL_URL }}
-          OTS_SMOKE_TRACE_IDS: ${{ secrets.OTS_SMOKE_TRACE_IDS }}
+          AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1"
+          AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: ${{ secrets.AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN }}
+          AGENT_TESTBENCH_TRACE_GRAPHQL_URL: ${{ secrets.AGENT_TESTBENCH_TRACE_GRAPHQL_URL }}
+          AGENT_TESTBENCH_SMOKE_TRACE_IDS: ${{ secrets.AGENT_TESTBENCH_SMOKE_TRACE_IDS }}

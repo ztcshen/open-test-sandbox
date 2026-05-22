@@ -50,7 +50,7 @@ async function closeServer(server) {
 
 function run(args) {
   return new Promise((resolve, reject) => {
-    const child = spawn("./bin/otsandbox.sh", args, {
+    const child = spawn("./bin/agent-testbench.sh", args, {
       cwd: rootDir,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -88,14 +88,14 @@ function flagEnabled(value) {
 }
 
 export function demoStore(tempDir, env = process.env) {
-  const explicitStore = env.OTSANDBOX_DEMO_STORE || env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
-  const sqliteCompat = flagEnabled(env.OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO);
+  const explicitStore = env.AGENT_TESTBENCH_DEMO_STORE || env.AGENT_TESTBENCH_SMOKE_STORE_DSN || env.AGENT_TESTBENCH_SMOKE_STORE || "";
+  const sqliteCompat = flagEnabled(env.AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_DEMO);
   if (explicitStore.trim()) {
-    if (isSQLiteStore(explicitStore) && flagEnabled(env.OTSANDBOX_DISABLE_SQLITE_STORE)) {
-      throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite demo Store");
+    if (isSQLiteStore(explicitStore) && flagEnabled(env.AGENT_TESTBENCH_DISABLE_SQLITE_STORE)) {
+      throw new Error("AGENT_TESTBENCH_DISABLE_SQLITE_STORE cannot be combined with a SQLite demo Store");
     }
     if (explicitStore.includes("://") && !isProductSQLStore(explicitStore)) {
-      throw new Error("Demo Store must be OTSANDBOX_DEMO_STORE=postgres://..., OTSANDBOX_DEMO_STORE=mysql://..., or OTSANDBOX_DEMO_STORE=sqlite://PATH");
+      throw new Error("Demo Store must be AGENT_TESTBENCH_DEMO_STORE=postgres://..., AGENT_TESTBENCH_DEMO_STORE=mysql://..., or AGENT_TESTBENCH_DEMO_STORE=sqlite://PATH");
     }
     if (/^mysql:\/\//i.test(explicitStore)) {
       requireSafeMySQLStoreDSN(explicitStore, { label: "The API case demo" });
@@ -103,8 +103,8 @@ export function demoStore(tempDir, env = process.env) {
     return { label: explicitStore, storeArgs: ["--store", explicitStore], upgradeArgs: ["--store", explicitStore] };
   }
   if (sqliteCompat) {
-    if (flagEnabled(env.OTSANDBOX_DISABLE_SQLITE_STORE)) {
-      throw new Error("OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO cannot be combined with OTSANDBOX_DISABLE_SQLITE_STORE");
+    if (flagEnabled(env.AGENT_TESTBENCH_DISABLE_SQLITE_STORE)) {
+      throw new Error("AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_DEMO cannot be combined with AGENT_TESTBENCH_DISABLE_SQLITE_STORE");
     }
     const storeRef = `sqlite://${path.join(tempDir, "store.sqlite")}`;
     return { label: storeRef, storeArgs: ["--store", storeRef], upgradeArgs: ["--store", storeRef] };
@@ -113,7 +113,7 @@ export function demoStore(tempDir, env = process.env) {
 }
 
 async function main() {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "otsandbox-api-case-demo-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-api-case-demo-"));
   const { server, baseURL } = await freeServer();
 
   try {
@@ -140,11 +140,11 @@ async function main() {
     console.log(`Store: ${store.label}`);
   } finally {
     await closeServer(server);
-    if (process.env.OTSANDBOX_CLEAN_DEMO_OUTPUT === "1") {
+    if (process.env.AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT === "1") {
       await rm(tempDir, { recursive: true, force: true });
     } else {
       console.log(`Demo output root: ${tempDir}`);
-      console.log("Set OTSANDBOX_CLEAN_DEMO_OUTPUT=1 to remove demo output automatically.");
+      console.log("Set AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1 to remove demo output automatically.");
     }
   }
 }

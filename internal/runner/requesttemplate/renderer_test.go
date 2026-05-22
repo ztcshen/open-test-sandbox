@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/runner/requesttemplate"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/runner/requesttemplate"
 )
 
 func TestRenderUsesFixtureData(t *testing.T) {

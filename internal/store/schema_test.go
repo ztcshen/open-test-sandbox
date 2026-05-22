@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"open-test-sandbox/internal/store/schema"
-	"open-test-sandbox/internal/store/sqlite"
+	"agent-testbench/internal/store/schema"
+	"agent-testbench/internal/store/sqlite"
 )
 
 func TestSQLiteSchemaUpgradesAreIdempotent(t *testing.T) {

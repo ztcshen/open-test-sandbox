@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
+	"agent-testbench/internal/domain/profile"
 )
 
 type BriefOptions struct {

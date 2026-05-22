@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 // ValidateEnvironmentPublishable verifies that the recorded environment gate

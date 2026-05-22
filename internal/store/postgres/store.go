@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/sqlstore"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )

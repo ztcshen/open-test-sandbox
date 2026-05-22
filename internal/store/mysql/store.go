@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store/sqlstore"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )

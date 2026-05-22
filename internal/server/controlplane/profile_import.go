@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/domain/profileaudit"
-	"open-test-sandbox/internal/domain/profilecatalog"
-	"open-test-sandbox/internal/domain/profilehome"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profileaudit"
+	"agent-testbench/internal/domain/profilecatalog"
+	"agent-testbench/internal/domain/profilehome"
+	"agent-testbench/internal/store"
 )
 
 type profileImportRequest struct {

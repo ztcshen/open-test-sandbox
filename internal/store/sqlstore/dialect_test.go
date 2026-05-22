@@ -3,7 +3,7 @@ package sqlstore_test
 import (
 	"testing"
 
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestDialectRegistryRecognizesOpenSourceDatabaseFamilies(t *testing.T) {
@@ -13,12 +13,12 @@ func TestDialectRegistryRecognizesOpenSourceDatabaseFamilies(t *testing.T) {
 		wantName   string
 		wantDriver string
 	}{
-		{name: "postgres", reference: "postgres://user:pass@localhost:5432/otsandbox", wantName: "postgres", wantDriver: "pgx"},
-		{name: "postgresql", reference: "postgresql://user:pass@localhost:5432/otsandbox", wantName: "postgres", wantDriver: "pgx"},
-		{name: "mysql", reference: "mysql://user:pass@localhost:3306/otsandbox", wantName: "mysql", wantDriver: "mysql"},
-		{name: "sqlite", reference: "sqlite:///tmp/otsandbox.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
-		{name: "file", reference: "file:/tmp/otsandbox.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
-		{name: "path", reference: "/tmp/otsandbox.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
+		{name: "postgres", reference: "postgres://user:pass@localhost:5432/agent-testbench", wantName: "postgres", wantDriver: "pgx"},
+		{name: "postgresql", reference: "postgresql://user:pass@localhost:5432/agent-testbench", wantName: "postgres", wantDriver: "pgx"},
+		{name: "mysql", reference: "mysql://user:pass@localhost:3306/agent-testbench", wantName: "mysql", wantDriver: "mysql"},
+		{name: "sqlite", reference: "sqlite:///tmp/agent-testbench.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
+		{name: "file", reference: "file:/tmp/agent-testbench.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
+		{name: "path", reference: "/tmp/agent-testbench.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -77,27 +77,27 @@ func TestDialectCapturesSQLDifferences(t *testing.T) {
 }
 
 func TestConfigFromReferenceCarriesDialectAndDSN(t *testing.T) {
-	cfg, err := sqlstore.ConfigFromReference("postgres://user:pass@localhost:5432/otsandbox?sslmode=disable")
+	cfg, err := sqlstore.ConfigFromReference("postgres://user:pass@localhost:5432/agent_testbench?sslmode=disable")
 	if err != nil {
 		t.Fatalf("config from reference: %v", err)
 	}
-	if cfg.Backend != "postgres" || cfg.DriverName != "pgx" || cfg.DSN != "postgres://user:pass@localhost:5432/otsandbox?sslmode=disable" {
+	if cfg.Backend != "postgres" || cfg.DriverName != "pgx" || cfg.DSN != "postgres://user:pass@localhost:5432/agent_testbench?sslmode=disable" {
 		t.Fatalf("postgres config = %#v", cfg)
 	}
 
-	sqliteCfg, err := sqlstore.ConfigFromReference("/tmp/otsandbox.sqlite")
+	sqliteCfg, err := sqlstore.ConfigFromReference("/tmp/agent-testbench.sqlite")
 	if err != nil {
 		t.Fatalf("sqlite config from path: %v", err)
 	}
-	if sqliteCfg.Backend != "sqlite" || sqliteCfg.DriverName != "sqlite" || sqliteCfg.DSN != "/tmp/otsandbox.sqlite" {
+	if sqliteCfg.Backend != "sqlite" || sqliteCfg.DriverName != "sqlite" || sqliteCfg.DSN != "/tmp/agent-testbench.sqlite" {
 		t.Fatalf("sqlite path config = %#v", sqliteCfg)
 	}
 
-	mysqlCfg, err := sqlstore.ConfigFromReference("mysql://user:pass@localhost:3306/otsandbox")
+	mysqlCfg, err := sqlstore.ConfigFromReference("mysql://user:pass@localhost:3306/agent-testbench")
 	if err != nil {
 		t.Fatalf("mysql config from reference: %v", err)
 	}
-	if mysqlCfg.Backend != "mysql" || mysqlCfg.DriverName != "mysql" || mysqlCfg.DSN != "mysql://user:pass@localhost:3306/otsandbox" {
+	if mysqlCfg.Backend != "mysql" || mysqlCfg.DriverName != "mysql" || mysqlCfg.DSN != "mysql://user:pass@localhost:3306/agent-testbench" {
 		t.Fatalf("mysql config = %#v", mysqlCfg)
 	}
 }

@@ -1,6 +1,6 @@
 # Store Backends
 
-Open Test Sandbox treats the Store as a pluggable database backend. Users pick
+AgentTestBench treats the Store as a pluggable database backend. Users pick
 one backend for a workspace or team, and daily CLI/API/UI commands operate
 against the selected Store without changing command shape. The active product
 path is SQL Store-first: SQLite, PostgreSQL, and MySQL are supported Store
@@ -83,12 +83,12 @@ Use one SQL Store per isolation boundary:
 Configure named Stores with:
 
 ```sh
-otsandbox store config set local-personal --url postgres://user:pass@host:5432/otsandbox_local?sslmode=disable
-otsandbox store config set team-verified --url postgres://user:pass@host:5432/otsandbox_team?sslmode=disable
-otsandbox store config set team-mysql --url mysql://user:pass@host:3306/otsandbox_team?tls=false
-otsandbox store config set local-sqlite --url sqlite://$PWD/.runtime/otsandbox-local.sqlite
-otsandbox store use local-personal
-otsandbox store current
+agent-testbench store config set local-personal --url postgres://user:pass@host:5432/agent_testbench_local?sslmode=disable
+agent-testbench store config set team-verified --url postgres://user:pass@host:5432/agent_testbench_team?sslmode=disable
+agent-testbench store config set team-mysql --url mysql://user:pass@host:3306/agent_testbench_team?tls=false
+agent-testbench store config set local-sqlite --url sqlite://$PWD/.runtime/agent-testbench-local.sqlite
+agent-testbench store use local-personal
+agent-testbench store current
 ```
 
 Display commands, including JSON output, mask passwords in PostgreSQL and MySQL
@@ -109,16 +109,16 @@ npm run store:publish:mysql -- \
   --min-assets 1 \
   --verify-control-plane-url http://127.0.0.1:58663
 
-otsandbox store status --store team-mysql
-otsandbox store status --store team-mysql --json
+agent-testbench store status --store team-mysql
+agent-testbench store status --store team-mysql --json
 tools/smoke/mysql-store-preflight.sh --store team-mysql \
   --output-prefix .runtime/team-mysql-preflight
 python3 tools/smoke/mysql-handshake-probe.py \
-  --url "mysql://user:xxxxx@host:3306/otsandbox_local?tls=false" \
+  --url "mysql://user:xxxxx@host:3306/agent_testbench_local?tls=false" \
   --json
-otsandbox store provision --store team-mysql --json
-otsandbox store upgrade --store team-mysql
-otsandbox store copy --from local-personal --to team-mysql \
+agent-testbench store provision --store team-mysql --json
+agent-testbench store upgrade --store team-mysql
+agent-testbench store copy --from local-personal --to team-mysql \
   --require-environment local-sample \
   --require-verification-workflow workflow.local-sample \
   --require-verified-environment \
@@ -156,7 +156,7 @@ and do not copy local Store data:
 ```sh
 npm run store:restore:mysql -- \
   --store team-mysql \
-  --store-url "mysql://user:pass@host:3306/otsandbox_team?tls=false" \
+  --store-url "mysql://user:pass@host:3306/agent_testbench_team?tls=false" \
   --environment local-sample \
   --workspace "$HOME/open-test-runtime" \
   --server-url http://127.0.0.1:58663 \
@@ -225,16 +225,16 @@ local PostgreSQL database, a remote team PostgreSQL database, and a remote team 
 use the same daily commands; only the selected Store changes:
 
 ```sh
-otsandbox store use local-personal
-otsandbox case discover --filter refund
+agent-testbench store use local-personal
+agent-testbench case discover --filter refund
 
-otsandbox store use team-verified
-otsandbox case discover --filter refund
+agent-testbench store use team-verified
+agent-testbench case discover --filter refund
 
-otsandbox case discover --store team-verified --filter refund
-otsandbox workflow discover --store postgres://user:pass@host:5432/team_verified --filter checkout
-otsandbox workflow discover --store mysql://user:pass@host:3306/team_verified --filter checkout
-otsandbox workflow discover --store sqlite://$PWD/.runtime/otsandbox-local.sqlite --filter checkout
+agent-testbench case discover --store team-verified --filter refund
+agent-testbench workflow discover --store postgres://user:pass@host:5432/team_verified --filter checkout
+agent-testbench workflow discover --store mysql://user:pass@host:3306/team_verified --filter checkout
+agent-testbench workflow discover --store sqlite://$PWD/.runtime/agent-testbench-local.sqlite --filter checkout
 ```
 
 ## Environment Catalog
@@ -283,12 +283,12 @@ commands; daily commands should use `--store NAME_OR_DSN` or a named Store.
 Release and environment verification can hard-disable SQLite Store usage:
 
 ```sh
-OTSANDBOX_DISABLE_SQLITE_STORE=1 \
-OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" \
+AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 \
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" \
 npm run smoke:frontend
 
-OTSANDBOX_DISABLE_SQLITE_STORE=1 \
-OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 \
+AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" \
 npm run smoke:frontend
 ```
 
@@ -296,18 +296,18 @@ For an optional organization-owned MySQL validation pass, use a dedicated
 sandbox Store database and run the guarded MySQL release wrapper:
 
 ```sh
-OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
-OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
-OTS_SMOKE_EXPECTED_STEPS=2 \
-OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
-OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 \
+AGENT_TESTBENCH_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
+AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS=2 \
+AGENT_TESTBENCH_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
+AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" \
 npm run release-check:mysql-real:preflight
 
-OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
-OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
-OTS_SMOKE_EXPECTED_STEPS=2 \
-OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
-OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 \
+AGENT_TESTBENCH_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
+AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS=2 \
+AGENT_TESTBENCH_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
+AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" \
 npm run release-check:mysql-real
 ```
 
@@ -324,36 +324,36 @@ writes begin.
 It also runs the MySQL Store contract in existing-database mode, so the
 operator account needs normal DDL/DML permissions on that dedicated database
 but does not need permission to create or drop databases. This wrapper is signoff
-oriented: it also requires `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
-an `http` or `https` `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
-`OTS_SMOKE_TRACE_IDS` for all configured workflow steps. It rejects
-`OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop` overrides.
-Direct Go contract tests require an explicit `OTSANDBOX_MYSQL_TEST_DSN_MODE`.
+oriented: it also requires `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`,
+an `http` or `https` `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`, `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and
+`AGENT_TESTBENCH_SMOKE_TRACE_IDS` for all configured workflow steps. It rejects
+`AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE=create-drop` overrides.
+Direct Go contract tests require an explicit `AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE`.
 Use `existing` for shared smoke databases. Use `create-drop` only for local
 admin-only contract tests where the account is allowed to create and drop
 temporary databases.
 
 When this flag is set, any accidental SQLite Store open fails immediately.
 This is the repeatable equivalent of taking the local SQLite path offline before
-running the core workflow. When `OTSANDBOX_SMOKE_STORE_DSN` is present, the smoke
+running the core workflow. When `AGENT_TESTBENCH_SMOKE_STORE_DSN` is present, the smoke
 harness configures a temporary named Store, selects it as active, upgrades the
 schema, and serves the workbench through that named Store. The smoke must still
 complete through the selected SQLite, PostgreSQL, or MySQL Store.
 
 Smoke topology collection uses a deterministic synthetic SkyWalking GraphQL
-provider unless `OTS_TRACE_GRAPHQL_URL` is set. That provider is only a local
+provider unless `AGENT_TESTBENCH_TRACE_GRAPHQL_URL` is set. That provider is only a local
 wiring check: it proves SQL Store writes, Evidence lookup, and topology
 rendering semantics, but it is not release evidence for a real SkyWalking
-deployment. Set `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
-`OTS_SMOKE_TRACE_IDS` step-to-trace mappings when pointing smoke at an external
+deployment. Set `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`, `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and
+`AGENT_TESTBENCH_SMOKE_TRACE_IDS` step-to-trace mappings when pointing smoke at an external
 SkyWalking endpoint. For final live topology sign-off, set
-`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` and provide `OTS_SMOKE_TRACE_IDS`
+`AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1` and provide `AGENT_TESTBENCH_SMOKE_TRACE_IDS`
 mappings for every configured workflow step. When no SkyWalking endpoint is
 configured, product paths must report topology as unavailable, failed, or
 skipped rather than generating an invented topology.
 
 SQLite smoke and demo execution can use an explicit `sqlite://` or `file:` DSN.
-The `OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE=1` and
-`OTSANDBOX_ALLOW_SQLITE_COMPAT_DEMO=1` switches remain as convenience shortcuts
+The `AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_SMOKE=1` and
+`AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_DEMO=1` switches remain as convenience shortcuts
 for temporary local SQLite Stores. Do not combine SQLite smoke or demo inputs
-with `OTSANDBOX_DISABLE_SQLITE_STORE=1`.
+with `AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1`.

@@ -1,4 +1,4 @@
-module open-test-sandbox
+module agent-testbench
 
 go 1.26
 

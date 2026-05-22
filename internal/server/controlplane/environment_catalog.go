@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/store"
 )
 
 func handleEnvironmentCollection(w http.ResponseWriter, r *http.Request, runtime store.Store) {
@@ -392,7 +392,7 @@ func environmentAPIPayload(env store.Environment) map[string]any {
 }
 
 func EnvironmentBootstrapPlan(env store.Environment) map[string]any {
-	workspace := "$OTS_WORKSPACE"
+	workspace := "$AGENT_TESTBENCH_WORKSPACE"
 	repos := environmentBootstrapRepoPlan(env, workspace)
 	compose := jsonObject(env.ComposeJSON)
 	healthChecks := jsonArray(env.HealthChecksJSON)
@@ -561,7 +561,7 @@ func environmentBootstrapComposeCommands(compose map[string]any, workspace strin
 		baseArgs = append(baseArgs, "-f", composeFile)
 	}
 	if len(stringMapValue(compose["env"])) > 0 {
-		baseArgs = append(baseArgs, "--env-file", filepath.Join(workspace, ".otsandbox", "restore.env"))
+		baseArgs = append(baseArgs, "--env-file", filepath.Join(workspace, ".agent-testbench", "restore.env"))
 	}
 	if projectName := strings.TrimSpace(valueString(compose["projectName"])); projectName != "" {
 		baseArgs = append(baseArgs, "-p", projectName)

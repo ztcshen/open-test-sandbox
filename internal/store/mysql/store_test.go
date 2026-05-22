@@ -11,22 +11,22 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/mysql"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/mysql"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
 func TestParseConfigFromURLAcceptsMySQLURL(t *testing.T) {
-	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?tls=false")
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench?tls=false")
 	if err != nil {
 		t.Fatalf("parse mysql url: %v", err)
 	}
-	if cfg.URL != "mysql://user:secret@example.com:3306/otsandbox?tls=false" {
+	if cfg.URL != "mysql://user:secret@example.com:3306/agent_testbench?tls=false" {
 		t.Fatalf("mysql config url = %q", cfg.URL)
 	}
 	for _, want := range []string{
-		"user:secret@tcp(example.com:3306)/otsandbox",
+		"user:secret@tcp(example.com:3306)/agent_testbench",
 		"parseTime=true",
 		"loc=UTC",
 		"tls=false",
@@ -38,7 +38,7 @@ func TestParseConfigFromURLAcceptsMySQLURL(t *testing.T) {
 }
 
 func TestParseConfigFromURLKeepsStoreTimeParsingAuthoritative(t *testing.T) {
-	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?parseTime=false&loc=Local&tls=false")
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench?parseTime=false&loc=Local&tls=false")
 	if err != nil {
 		t.Fatalf("parse mysql url: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestParseConfigFromURLKeepsStoreTimeParsingAuthoritative(t *testing.T) {
 }
 
 func TestParseConfigFromURLAddsBoundedNetworkTimeouts(t *testing.T) {
-	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?tls=false")
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench?tls=false")
 	if err != nil {
 		t.Fatalf("parse mysql url: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestParseConfigFromURLAddsBoundedNetworkTimeouts(t *testing.T) {
 }
 
 func TestParseConfigFromURLKeepsExplicitNetworkTimeouts(t *testing.T) {
-	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?timeout=2s&readTimeout=3s&writeTimeout=4s")
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench?timeout=2s&readTimeout=3s&writeTimeout=4s")
 	if err != nil {
 		t.Fatalf("parse mysql url: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestParseConfigFromURLKeepsExplicitNetworkTimeouts(t *testing.T) {
 }
 
 func TestParseConfigFromURLCanonicalizesExplicitNetworkTimeoutKeys(t *testing.T) {
-	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?Timeout=2s&READTIMEOUT=3s&writetimeout=4s")
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench?Timeout=2s&READTIMEOUT=3s&writetimeout=4s")
 	if err != nil {
 		t.Fatalf("parse mysql url: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestParseConfigFromURLCanonicalizesExplicitNetworkTimeoutKeys(t *testing.T)
 }
 
 func TestParseConfigFromURLCanonicalizesCommonDriverParamKeys(t *testing.T) {
-	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?TLS=false&CHARSET=utf8mb4&COLLATION=utf8mb4_unicode_ci&MAXALLOWEDPACKET=1048576")
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench?TLS=false&CHARSET=utf8mb4&COLLATION=utf8mb4_unicode_ci&MAXALLOWEDPACKET=1048576")
 	if err != nil {
 		t.Fatalf("parse mysql url: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestParseConfigFromURLCanonicalizesCommonDriverParamKeys(t *testing.T) {
 }
 
 func TestParseConfigFromURLCanonicalizesCommonDriverBoolParamKeys(t *testing.T) {
-	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?ALLOWNATIVEPASSWORDS=false&CHECKCONNLIVENESS=false&CLIENTFOUNDROWS=true&COLUMNSWITHALIAS=true&INTERPOLATEPARAMS=true&MULTISTATEMENTS=true&REJECTREADONLY=true")
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench?ALLOWNATIVEPASSWORDS=false&CHECKCONNLIVENESS=false&CLIENTFOUNDROWS=true&COLUMNSWITHALIAS=true&INTERPOLATEPARAMS=true&MULTISTATEMENTS=true&REJECTREADONLY=true")
 	if err != nil {
 		t.Fatalf("parse mysql url: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestParseConfigFromURLCanonicalizesCommonDriverBoolParamKeys(t *testing.T) 
 }
 
 func TestParseConfigFromURLRejectsNonMySQLDSN(t *testing.T) {
-	_, err := mysql.ParseConfigFromURL("postgres://localhost/otsandbox")
+	_, err := mysql.ParseConfigFromURL("postgres://localhost/agent-testbench")
 	if err == nil {
 		t.Fatal("expected non-mysql dsn to be rejected")
 	}
@@ -165,7 +165,7 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 	})
 
 	s, err := mysql.Open(ctx, mysql.Config{
-		URL:        "mysql://user:secret@example.com:3306/otsandbox_test?tls=false",
+		URL:        "mysql://user:secret@example.com:3306/agent_testbench_test?tls=false",
 		DSN:        state.name,
 		DriverName: fakeMySQLDriverName,
 	})
@@ -225,7 +225,7 @@ func TestSchemaStatusAndUpgradeUseConfiguredSQLDriver(t *testing.T) {
 	ctx := context.Background()
 	state := openFakeMySQLDriver(t)
 	cfg := mysql.Config{
-		URL:        "mysql://user:secret@example.com:3306/otsandbox_test?tls=false",
+		URL:        "mysql://user:secret@example.com:3306/agent_testbench_test?tls=false",
 		DSN:        state.name,
 		DriverName: fakeMySQLDriverName,
 	}
@@ -269,7 +269,7 @@ func TestSchemaStatusAndUpgradeUseConfiguredSQLDriver(t *testing.T) {
 
 func TestProvisionDatabaseCreatesMissingDatabase(t *testing.T) {
 	ctx := context.Background()
-	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox_test?tls=false")
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench_test?tls=false")
 	if err != nil {
 		t.Fatalf("parse mysql url: %v", err)
 	}
@@ -297,16 +297,16 @@ func TestProvisionDatabaseCreatesMissingDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provision database: %v", err)
 	}
-	if result.Database != "otsandbox_test" || !result.Created {
+	if result.Database != "agent_testbench_test" || !result.Created {
 		t.Fatalf("provision result = %#v", result)
 	}
 	exec := state.lastExec(t)
-	if !strings.Contains(exec.query, "CREATE DATABASE IF NOT EXISTS `otsandbox_test`") || !strings.Contains(exec.query, "CHARACTER SET utf8mb4") {
+	if !strings.Contains(exec.query, "CREATE DATABASE IF NOT EXISTS `agent_testbench_test`") || !strings.Contains(exec.query, "CHARACTER SET utf8mb4") {
 		t.Fatalf("provision exec = %#v", exec)
 	}
 }
 
-const fakeMySQLDriverName = "otsandbox_mysql_open_fake"
+const fakeMySQLDriverName = "agent_testbench_mysql_open_fake"
 
 var registerFakeMySQLDriverOnce sync.Once
 

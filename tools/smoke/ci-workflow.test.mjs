@@ -19,8 +19,8 @@ test("manual MySQL real sign-off runs preflight before full release gate", () =>
   assert.notEqual(preflightIndex, -1);
   assert.notEqual(fullIndex, -1);
   assert.ok(preflightIndex < fullIndex);
-  assert.match(job, /OTSANDBOX_REQUIRE_REAL_SKYWALKING:\s*"1"/);
-  assert.match(job, /OTSANDBOX_REAL_MYSQL_STORE_DSN:\s*\$\{\{\s*secrets\.OTSANDBOX_REAL_MYSQL_STORE_DSN\s*\}\}/);
-  assert.match(job, /OTS_TRACE_GRAPHQL_URL:\s*\$\{\{\s*secrets\.OTS_TRACE_GRAPHQL_URL\s*\}\}/);
-  assert.match(job, /OTS_SMOKE_TRACE_IDS:\s*\$\{\{\s*secrets\.OTS_SMOKE_TRACE_IDS\s*\}\}/);
+  assert.match(job, /AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING:\s*"1"/);
+  assert.match(job, /AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN:\s*\$\{\{\s*secrets\.AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN\s*\}\}/);
+  assert.match(job, /AGENT_TESTBENCH_TRACE_GRAPHQL_URL:\s*\$\{\{\s*secrets\.AGENT_TESTBENCH_TRACE_GRAPHQL_URL\s*\}\}/);
+  assert.match(job, /AGENT_TESTBENCH_SMOKE_TRACE_IDS:\s*\$\{\{\s*secrets\.AGENT_TESTBENCH_SMOKE_TRACE_IDS\s*\}\}/);
 });

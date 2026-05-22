@@ -5,8 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/store"
 )
 
 type StabilityOptions struct {

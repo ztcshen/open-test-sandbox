@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/store"
 )
 
 type runnableAPICase struct {
@@ -1315,7 +1315,7 @@ func writeTestKitEvidenceFiles(result map[string]any, status string, evidenceDir
 			return "", fmt.Errorf("create test-kit evidence directory: %w", err)
 		}
 	} else {
-		root, err = os.MkdirTemp("", "otsandbox-test-kit-evidence-*")
+		root, err = os.MkdirTemp("", "agent-testbench-test-kit-evidence-*")
 		if err != nil {
 			return "", fmt.Errorf("create test-kit evidence dir: %w", err)
 		}

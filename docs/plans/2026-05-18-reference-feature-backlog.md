@@ -2,14 +2,14 @@
 
 Date: 2026-05-18
 
-This backlog is the evidence gate for optimizing Open Test Sandbox. Every item
+This backlog is the evidence gate for optimizing AgentTestBench. Every item
 below is derived from a downloaded open-source reference repository under:
 
-`/Users/zlh/Documents/Codex/open-test-sandbox-reference-projects/2026-05-18`
+`/Users/zlh/Documents/Codex/agent-testbench-reference-projects/2026-05-18`
 
 Do not promote an idea from this backlog into implementation unless the source
 feature, local evidence path, adaptation scope, and verification plan remain
-explicit. Open Test Sandbox is currently a local-first control plane with a
+explicit. AgentTestBench is currently a local-first control plane with a
 PostgreSQL Store-first product path, CLI, HTTP APIs, API-operated catalog,
 execution reports, and Evidence lookup APIs (`docs/backend-capabilities.md:3-28`).
 SQLite references in older backlog notes describe the historical baseline only;
@@ -38,7 +38,7 @@ Evidence:
 `microcks/README.md:11-15`
 
 Current fit:
-Open Test Sandbox already keeps import bundle bundles outside core, publishes them
+AgentTestBench already keeps import bundle bundles outside core, publishes them
 into Store/read-models, and exposes catalog APIs (`docs/backend-capabilities.md:17-18`,
 `docs/backend-capabilities.md:32-50`, `docs/backend-capabilities.md:56-70`).
 
@@ -55,16 +55,16 @@ read-model assertions. No runtime network calls should be required.
 Implementation progress:
 OpenAPI 3.x JSON import planning now exists in
 `internal/domain/profileimport/openapi`. The CLI exposes it as
-`otsandbox template-package import-plan openapi` through the Store-first command
+`agent-testbench template-package import-plan openapi` through the Store-first command
 alias, with optional `--output-dir` export for reviewable split template package
 assets and runnable `api-cases/*.json` case files. The control-plane API also
 exposes the same planner as `POST /api/template-packages/import-plan/openapi`
 for API-operated review flows. Static HTTP capture import planning follows the
 same review-only pattern through `internal/domain/profileimport/httpcapture`,
-`otsandbox template-package import-plan http-capture`, and
+`agent-testbench template-package import-plan http-capture`, and
 `POST /api/template-packages/import-plan/http-capture`. OpenAPI negative-case
 generation is likewise exposed through `internal/domain/profilegenerate/openapi`,
-`otsandbox template-package generation-plan openapi`, and
+`agent-testbench template-package generation-plan openapi`, and
 `POST /api/template-packages/generation-plan/openapi`. This keeps generated
 assets draft-only and outside any existing template package until a reviewer
 applies them.
@@ -82,7 +82,7 @@ Evidence:
 `testkube/README.md:7-10`, `testkube/README.md:27-34`
 
 Current fit:
-Open Test Sandbox already has single case execution, workflow reports,
+AgentTestBench already has single case execution, workflow reports,
 asynchronous batch runs, artifact manifests, failure summaries, and Evidence
 detail APIs (`docs/backend-capabilities.md:21-24`, `docs/backend-capabilities.md:96-115`).
 
@@ -102,7 +102,7 @@ Import Bundle bundles now support `executors` manifest entries and split
 validates supported external tool/script descriptors (`http-case`,
 `playwright`, `postman`, `k6`, `pytest`, `karate`, and `custom-command`) and
 reports ready versus blocked descriptors without executing external binaries.
-The CLI exposes this as `otsandbox executor plan`.
+The CLI exposes this as `agent-testbench executor plan`.
 
 ### 3. Test Case Lifecycle and Assignment Fields
 
@@ -123,7 +123,7 @@ Evidence:
 `testlink/README.md:41-80`
 
 Current fit:
-Open Test Sandbox already indexes case description, tags, priority, owner,
+AgentTestBench already indexes case description, tags, priority, owner,
 status, runnable source, execution config, readiness issues, latest run state,
 stability, impact, quality, and executable plans (`docs/backend-capabilities.md:20`).
 
@@ -165,7 +165,7 @@ Evidence:
 `reportportal/README.md:34-55`, `reportportal/README.md:107-115`
 
 Current fit:
-Open Test Sandbox already emits JSON, temporary HTML, JUnit XML, artifact
+AgentTestBench already emits JSON, temporary HTML, JUnit XML, artifact
 manifests, failure summaries, request/response/assertion details, logs, and
 topology (`docs/backend-capabilities.md:22-25`, `docs/backend-capabilities.md:101-115`).
 
@@ -210,7 +210,7 @@ Evidence:
 `keploy/README.md:70-100`, `keploy/README.md:112-132`
 
 Current fit:
-Open Test Sandbox already stores replay/log-style Evidence and exposes replay
+AgentTestBench already stores replay/log-style Evidence and exposes replay
 lookup APIs, but it does not yet record traffic into maintained import bundle cases
 (`docs/backend-capabilities.md:25`).
 
@@ -227,7 +227,7 @@ Implementation progress:
 `internal/import bundleimport/httpcapture` now converts static HTTP capture JSON into
 reviewable draft services, interface nodes, request templates, API case
 metadata, and runnable `api-cases/*.json` files. The CLI exposes this as
-`otsandbox import bundle import-plan http-capture`, sharing the same review-only
+`agent-testbench import bundle import-plan http-capture`, sharing the same review-only
 `--output-dir` pattern as OpenAPI import planning. The implementation is
 intentionally limited to HTTP request/response pairs; eBPF capture,
 database/queue virtualization, mock registry, and time freezing remain deferred
@@ -254,7 +254,7 @@ Evidence:
 `evomaster/README.md:23-29`, `evomaster/README.md:93-156`
 
 Current fit:
-Open Test Sandbox already has suite impact planning, priority ranking,
+AgentTestBench already has suite impact planning, priority ranking,
 coverage views, and executable case plans (`docs/backend-capabilities.md:119-128`).
 
 Adaptation scope:
@@ -272,7 +272,7 @@ Implementation progress:
 candidate cases from OpenAPI JSON request schemas. The first implemented
 generation rule is intentionally narrow: one missing-required-field case per
 required JSON request property, tagged `generated`, `schema`, and `negative`.
-The CLI exposes this as `otsandbox import bundle generation-plan openapi`, with the
+The CLI exposes this as `agent-testbench import bundle generation-plan openapi`, with the
 same review-only `--output-dir` pattern used by import planning. Fuzzing,
 stateful operation chaining, live response schema-violation discovery,
 white-box analysis, auth-aware generation, and database-aware setup remain
@@ -288,12 +288,12 @@ Evidence:
 `karate/README.md:1-3`
 
 Current fit:
-Open Test Sandbox already has request templates, fixtures, API cases, workflow
+AgentTestBench already has request templates, fixtures, API cases, workflow
 bindings, and workbench pages for API-operated execution (`docs/backend-capabilities.md:18-23`).
 
 Adaptation scope:
 Do not copy Karate's DSL. Instead, add import bundle compatibility hooks so a import bundle
-can reference external DSL files as executable sources while Open Test Sandbox
+can reference external DSL files as executable sources while AgentTestBench
 continues to own discovery, Store indexing, Evidence, and reports.
 
 Verification plan:
@@ -306,7 +306,7 @@ metadata for external executable sources such as Karate feature files. Suite
 quality treats an external source as runnable only when it references an active
 import bundle executor, and the fields are preserved through import bundle catalog, Store,
 and control-plane capability payloads. This intentionally remains a
-compatibility hook; Open Test Sandbox does not implement or copy Karate's DSL.
+compatibility hook; AgentTestBench does not implement or copy Karate's DSL.
 
 ## Priority Order
 
@@ -324,7 +324,7 @@ compatibility hook; Open Test Sandbox does not implement or copy Karate's DSL.
 ## First Implementation Candidate
 
 Implement the Evidence Attachment and Report Categories slice first. It has the
-smallest conceptual gap because Open Test Sandbox already writes Evidence,
+smallest conceptual gap because AgentTestBench already writes Evidence,
 artifact manifests, failure summaries, and JUnit/HTML reports. Allure and
 ReportPortal provide direct source evidence for labels, categories, attachments,
 client/agent/logger separation, and report generation.

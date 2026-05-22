@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 type ImportOptions struct {

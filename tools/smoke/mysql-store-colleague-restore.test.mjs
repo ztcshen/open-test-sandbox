@@ -9,10 +9,10 @@ const rootDir = path.resolve(new URL("../..", import.meta.url).pathname);
 const scriptPath = path.join(rootDir, "tools/smoke/mysql-store-colleague-restore.sh");
 
 test("MySQL Store colleague restore verifies remote Store, control plane, and acceptance", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-mysql-colleague-"));
-  const fakeOtsandbox = path.join(tempDir, "otsandbox");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-mysql-colleague-"));
+  const fakeOtsandbox = path.join(tempDir, "agent-testbench");
   const fakeProbe = path.join(tempDir, "fake-mysql-probe.sh");
-  const logFile = path.join(tempDir, "otsandbox.log");
+  const logFile = path.join(tempDir, "agent-testbench.log");
   const outputPrefix = path.join(tempDir, "restore");
   const controlPlaneDir = path.join(tempDir, "control-plane", "api", "store");
 
@@ -29,18 +29,18 @@ JSON
     configured: true,
     name: "team-mysql",
     backend: "mysql",
-    url: "mysql://tester:xxxxx@127.0.0.1:3306/ots?tls=false",
+    url: "mysql://tester:xxxxx@127.0.0.1:3306/agent_testbench?tls=false",
   }));
 
   await writeFile(fakeOtsandbox, `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$OTS_TEST_LOG"
+printf '%s\\n' "$*" >> "$AGENT_TESTBENCH_TEST_LOG"
 case "$1 $2" in
   "store config")
     if [[ "$3" == "set" ]]; then
       echo 'Store configured'
     else
       cat <<'JSON'
-{"stores":[{"name":"team-mysql","url":"mysql://tester:secret@127.0.0.1:3306/ots?tls=false"}]}
+{"stores":[{"name":"team-mysql","url":"mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"}]}
 JSON
     fi
     ;;
@@ -51,7 +51,7 @@ JSON
     echo 'Active Store: team-mysql'
     ;;
   "store current")
-    echo '{"ok":true,"name":"team-mysql","backend":"mysql","url":"mysql://tester:xxxxx@127.0.0.1:3306/ots?tls=false"}'
+    echo '{"ok":true,"name":"team-mysql","backend":"mysql","url":"mysql://tester:xxxxx@127.0.0.1:3306/agent_testbench?tls=false"}'
     ;;
   "environment inspect")
     cat <<'JSON'
@@ -81,7 +81,7 @@ esac
     "--store",
     "team-mysql",
     "--store-url",
-    "mysql://tester:secret@127.0.0.1:3306/ots?tls=false",
+    "mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false",
     "--environment",
     "env.verified",
     "--workspace",
@@ -109,9 +109,9 @@ esac
     cwd: rootDir,
     env: {
       ...process.env,
-      OTSANDBOX_BIN: fakeOtsandbox,
-      OTSANDBOX_MYSQL_HANDSHAKE_PROBE: fakeProbe,
-      OTS_TEST_LOG: logFile,
+      AGENT_TESTBENCH_BIN: fakeOtsandbox,
+      AGENT_TESTBENCH_MYSQL_HANDSHAKE_PROBE: fakeProbe,
+      AGENT_TESTBENCH_TEST_LOG: logFile,
     },
     encoding: "utf8",
   });
@@ -122,7 +122,7 @@ esac
   assert.match(result.stdout, /colleague restore complete/);
 
   const log = await readFile(logFile, "utf8");
-  assert.match(log, /store config set team-mysql --url mysql:\/\/tester:secret@127\.0\.0\.1:3306\/ots\?tls=false/);
+  assert.match(log, /store config set team-mysql --url mysql:\/\/tester:secret@127\.0\.0\.1:3306\/agent_testbench\?tls=false/);
   assert.match(log, /store status --store team-mysql --json/);
   assert.match(log, /store use team-mysql/);
   assert.match(log, /store current --json/);

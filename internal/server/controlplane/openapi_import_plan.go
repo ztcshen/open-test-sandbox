@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	profilegenerateopenapi "open-test-sandbox/internal/domain/profilegenerate/openapi"
-	profileimporthttpcapture "open-test-sandbox/internal/domain/profileimport/httpcapture"
-	profileimportopenapi "open-test-sandbox/internal/domain/profileimport/openapi"
+	profilegenerateopenapi "agent-testbench/internal/domain/profilegenerate/openapi"
+	profileimporthttpcapture "agent-testbench/internal/domain/profileimport/httpcapture"
+	profileimportopenapi "agent-testbench/internal/domain/profileimport/openapi"
 )
 
 func handleOpenAPIImportPlan(w http.ResponseWriter, r *http.Request) {

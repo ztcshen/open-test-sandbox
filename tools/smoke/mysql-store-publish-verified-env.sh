@@ -22,7 +22,7 @@ USE_EXISTING_CONTAINERS=0
 ACCEPTANCE_TIMEOUT_SECONDS=240
 HEALTH_TIMEOUT_SECONDS=120
 STARTUP_FILES_TEXT=""
-OTSANDBOX_BIN="${OTSANDBOX_BIN:-}"
+AGENT_TESTBENCH_BIN="${AGENT_TESTBENCH_BIN:-}"
 
 usage() {
   cat <<'EOF'
@@ -44,7 +44,7 @@ This is the one-command promotion path for a verified environment. It:
   1. proves the source Store already contains the verified environment and
      component graph;
   2. requires a real MySQL handshake through mysql-store-preflight.sh;
-  3. provisions and upgrades the target Store through otsandbox CLI;
+  3. provisions and upgrades the target Store through agent-testbench CLI;
   4. copies verified restore metadata from the source Store;
   5. reads the copied environment back from the target Store;
   6. switches the local active Store to the target Store;
@@ -182,15 +182,15 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
-run_otsandbox() {
-  if [[ -n "$OTSANDBOX_BIN" ]]; then
-    "$OTSANDBOX_BIN" "$@"
-  elif [[ -x ".runtime/otsandbox-dev" ]]; then
-    .runtime/otsandbox-dev "$@"
-  elif [[ -x "./bin/otsandbox.sh" ]]; then
-    ./bin/otsandbox.sh "$@"
+run_agent-testbench() {
+  if [[ -n "$AGENT_TESTBENCH_BIN" ]]; then
+    "$AGENT_TESTBENCH_BIN" "$@"
+  elif [[ -x ".runtime/agent-testbench-dev" ]]; then
+    .runtime/agent-testbench-dev "$@"
+  elif [[ -x "./bin/agent-testbench.sh" ]]; then
+    ./bin/agent-testbench.sh "$@"
   else
-    go run ./cmd/otsandbox "$@"
+    go run ./cmd/agent-testbench "$@"
   fi
 }
 
@@ -211,7 +211,7 @@ STATUS_AFTER_UPGRADE_REPORT="${OUTPUT_PREFIX}-store-status-after-upgrade.json"
 STATUS_AFTER_UPGRADE_ASSERTION="${OUTPUT_PREFIX}-store-status-after-upgrade-assertion.json"
 RESTORE_REPORT="${OUTPUT_PREFIX}-restore.json"
 
-run_otsandbox environment inspect "$ENVIRONMENT_ID" \
+run_agent-testbench environment inspect "$ENVIRONMENT_ID" \
   --store "$SOURCE_STORE" \
   --json > "$SOURCE_INSPECT_REPORT"
 
@@ -242,12 +242,12 @@ tools/smoke/mysql-store-preflight.sh \
   --store "$TARGET_STORE" \
   --output-prefix "$OUTPUT_PREFIX"
 
-run_otsandbox store provision --store "$TARGET_STORE" \
+run_agent-testbench store provision --store "$TARGET_STORE" \
   --json > "${OUTPUT_PREFIX}-store-provision.json"
-run_otsandbox store status --store "$TARGET_STORE" \
+run_agent-testbench store status --store "$TARGET_STORE" \
   --json > "${OUTPUT_PREFIX}-store-status-before-copy.json"
-run_otsandbox store upgrade --store "$TARGET_STORE"
-run_otsandbox store status --store "$TARGET_STORE" \
+run_agent-testbench store upgrade --store "$TARGET_STORE"
+run_agent-testbench store status --store "$TARGET_STORE" \
   --json > "$STATUS_AFTER_UPGRADE_REPORT"
 
 jq -e '
@@ -277,7 +277,7 @@ fi
 if [[ "$MIN_INLINE_ASSET_BYTES" -gt 0 ]]; then
   copy_args+=(--require-inline-asset-bytes "$MIN_INLINE_ASSET_BYTES")
 fi
-run_otsandbox "${copy_args[@]}" > "$COPY_REPORT"
+run_agent-testbench "${copy_args[@]}" > "$COPY_REPORT"
 
 jq -e '
   .ok == true
@@ -306,7 +306,7 @@ jq -e '
   --arg minInlineAssetBytes "$MIN_INLINE_ASSET_BYTES" \
   "$COPY_REPORT" > "$COPY_ASSERTION"
 
-run_otsandbox environment inspect "$ENVIRONMENT_ID" \
+run_agent-testbench environment inspect "$ENVIRONMENT_ID" \
   --store "$TARGET_STORE" \
   --json > "$INSPECT_REPORT"
 
@@ -343,14 +343,14 @@ while IFS= read -r startup_file; do
     exit 2
   fi
   index=$((index + 1))
-  run_otsandbox environment startup-file put "$ENVIRONMENT_ID" \
+  run_agent-testbench environment startup-file put "$ENVIRONMENT_ID" \
     --store "$TARGET_STORE" \
     --file "$startup_file" \
     --json > "${OUTPUT_PREFIX}-startup-file-${index}.json"
 done <<< "$STARTUP_FILES_TEXT"
 
-run_otsandbox store use "$TARGET_STORE" > "$ACTIVE_STORE_REPORT"
-run_otsandbox store current --json > "$ACTIVE_STORE_CURRENT_REPORT"
+run_agent-testbench store use "$TARGET_STORE" > "$ACTIVE_STORE_REPORT"
+run_agent-testbench store current --json > "$ACTIVE_STORE_CURRENT_REPORT"
 
 jq -e '
   .ok == true
@@ -401,7 +401,7 @@ if [[ "$RESTORE" == "1" ]]; then
   if [[ -n "$BASE_URL" ]]; then
     restore_args+=(--base-url "$BASE_URL")
   fi
-  run_otsandbox "${restore_args[@]}" > "$RESTORE_REPORT"
+  run_agent-testbench "${restore_args[@]}" > "$RESTORE_REPORT"
   jq -e '
     .ok == true
     and .environment.summary.lastRestore.ok == true

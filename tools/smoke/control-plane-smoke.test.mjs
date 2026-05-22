@@ -26,18 +26,18 @@ describe("control-plane smoke Store selection", () => {
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
         "const calls = [];",
-        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'postgres://user:secret@example.com:5432/ots?sslmode=disable' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
+        "const ref = await prepareSmokeStoreReference('/tmp/agent-testbench-smoke', { AGENT_TESTBENCH_SMOKE_STORE_DSN: 'postgres://user:secret@example.com:5432/agent_testbench?sslmode=disable' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
         "if (ref.storeRef !== 'smoke-postgres') throw new Error(JSON.stringify(ref));",
-        "if (!ref.serverEnv.OTSANDBOX_CONFIG_HOME?.endsWith('/store-config')) throw new Error(JSON.stringify(ref));",
+        "if (!ref.serverEnv.AGENT_TESTBENCH_CONFIG_HOME?.endsWith('/store-config')) throw new Error(JSON.stringify(ref));",
         "if (calls.length !== 3) throw new Error(JSON.stringify(calls));",
-        "if (calls[0].args.join(' ') !== 'run ./cmd/otsandbox store config set smoke-postgres --url postgres://user:secret@example.com:5432/ots?sslmode=disable') throw new Error(JSON.stringify(calls));",
-        "if (calls[1].args.join(' ') !== 'run ./cmd/otsandbox store use smoke-postgres') throw new Error(JSON.stringify(calls));",
-        "if (calls[2].args.join(' ') !== 'run ./cmd/otsandbox store upgrade --store smoke-postgres') throw new Error(JSON.stringify(calls));",
+        "if (calls[0].args.join(' ') !== 'run ./cmd/agent-testbench store config set smoke-postgres --url postgres://user:secret@example.com:5432/agent_testbench?sslmode=disable') throw new Error(JSON.stringify(calls));",
+        "if (calls[1].args.join(' ') !== 'run ./cmd/agent-testbench store use smoke-postgres') throw new Error(JSON.stringify(calls));",
+        "if (calls[2].args.join(' ') !== 'run ./cmd/agent-testbench store upgrade --store smoke-postgres') throw new Error(JSON.stringify(calls));",
       ].join("\n"),
     ], {
       cwd: rootDir,
       encoding: "utf8",
-      env: { ...process.env, OTSANDBOX_SMOKE_IMPORT_ONLY: "1" },
+      env: { ...process.env, AGENT_TESTBENCH_SMOKE_IMPORT_ONLY: "1" },
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   });
@@ -49,16 +49,16 @@ describe("control-plane smoke Store selection", () => {
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
         "const calls = [];",
-        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
+        "const ref = await prepareSmokeStoreReference('/tmp/agent-testbench-smoke', { AGENT_TESTBENCH_SMOKE_STORE_DSN: 'mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
         "if (ref.storeRef !== 'smoke-mysql') throw new Error(JSON.stringify(ref));",
-        "if (calls[0].args.join(' ') !== 'run ./cmd/otsandbox store config set smoke-mysql --url mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false') throw new Error(JSON.stringify(calls));",
-        "if (calls[1].args.join(' ') !== 'run ./cmd/otsandbox store use smoke-mysql') throw new Error(JSON.stringify(calls));",
-        "if (calls[2].args.join(' ') !== 'run ./cmd/otsandbox store upgrade --store smoke-mysql') throw new Error(JSON.stringify(calls));",
+        "if (calls[0].args.join(' ') !== 'run ./cmd/agent-testbench store config set smoke-mysql --url mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false') throw new Error(JSON.stringify(calls));",
+        "if (calls[1].args.join(' ') !== 'run ./cmd/agent-testbench store use smoke-mysql') throw new Error(JSON.stringify(calls));",
+        "if (calls[2].args.join(' ') !== 'run ./cmd/agent-testbench store upgrade --store smoke-mysql') throw new Error(JSON.stringify(calls));",
       ].join("\n"),
     ], {
       cwd: rootDir,
       encoding: "utf8",
-      env: { ...process.env, OTSANDBOX_SMOKE_IMPORT_ONLY: "1" },
+      env: { ...process.env, AGENT_TESTBENCH_SMOKE_IMPORT_ONLY: "1" },
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   });
@@ -70,12 +70,12 @@ describe("control-plane smoke Store selection", () => {
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
         "const calls = [];",
-        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'mysql://user:secret@example.com:3306/business_prod?tls=false' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
+        "await prepareSmokeStoreReference('/tmp/agent-testbench-smoke', { AGENT_TESTBENCH_SMOKE_STORE_DSN: 'mysql://user:secret@example.com:3306/business_prod?tls=false' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
       ].join("\n"),
     ], {
       cwd: rootDir,
       encoding: "utf8",
-      env: { ...process.env, OTSANDBOX_SMOKE_IMPORT_ONLY: "1" },
+      env: { ...process.env, AGENT_TESTBENCH_SMOKE_IMPORT_ONLY: "1" },
     });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /refuses database 'business_prod'/);
@@ -88,14 +88,14 @@ describe("control-plane smoke Store selection", () => {
       "-e",
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
-        "await prepareSmokeStoreReference('/tmp/ots-smoke', {}, () => {});",
+        "await prepareSmokeStoreReference('/tmp/agent-testbench-smoke', {}, () => {});",
       ].join("\n"),
     ], {
       cwd: rootDir,
       encoding: "utf8",
     });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE/);
+    assert.match(result.stderr, /AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE/);
   });
 
   it("can create a temporary SQLite smoke Store", () => {
@@ -104,8 +104,8 @@ describe("control-plane smoke Store selection", () => {
       "-e",
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
-        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE: '1' }, () => {});",
-        "if (ref.storeRef !== 'sqlite:///tmp/ots-smoke/store.sqlite') throw new Error(JSON.stringify(ref));",
+        "const ref = await prepareSmokeStoreReference('/tmp/agent-testbench-smoke', { AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_SMOKE: '1' }, () => {});",
+        "if (ref.storeRef !== 'sqlite:///tmp/agent-testbench-smoke/store.sqlite') throw new Error(JSON.stringify(ref));",
       ].join("\n"),
     ], {
       cwd: rootDir,
@@ -121,7 +121,7 @@ describe("control-plane smoke Store selection", () => {
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
         "const calls = [];",
-        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'sqlite:///tmp/ots-smoke/store.sqlite' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
+        "const ref = await prepareSmokeStoreReference('/tmp/agent-testbench-smoke', { AGENT_TESTBENCH_SMOKE_STORE_DSN: 'sqlite:///tmp/agent-testbench-smoke/store.sqlite' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
         "if (ref.storeRef !== 'smoke-sqlite') throw new Error(JSON.stringify(ref));",
         "if (!calls.some((call) => call.args.includes('upgrade'))) throw new Error(JSON.stringify(calls));",
       ].join("\n"),
@@ -138,14 +138,14 @@ describe("control-plane smoke Store selection", () => {
       "-e",
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
-        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'redis://127.0.0.1:6379/0' }, () => {});",
+        "await prepareSmokeStoreReference('/tmp/agent-testbench-smoke', { AGENT_TESTBENCH_SMOKE_STORE_DSN: 'redis://127.0.0.1:6379/0' }, () => {});",
       ].join("\n"),
     ], {
       cwd: rootDir,
       encoding: "utf8",
     });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE/);
+    assert.match(result.stderr, /AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE/);
     assert.match(result.stderr, /PostgreSQL, MySQL, or SQLite Store DSN/);
   });
 
@@ -155,7 +155,7 @@ describe("control-plane smoke Store selection", () => {
       "-e",
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
-        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE: '1', OTSANDBOX_DISABLE_SQLITE_STORE: '1' }, () => {});",
+        "await prepareSmokeStoreReference('/tmp/agent-testbench-smoke', { AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_SMOKE: '1', AGENT_TESTBENCH_DISABLE_SQLITE_STORE: '1' }, () => {});",
       ].join("\n"),
     ], {
       cwd: rootDir,
@@ -166,7 +166,7 @@ describe("control-plane smoke Store selection", () => {
   });
 
   it("uses a configured real SkyWalking GraphQL URL without starting the synthetic provider", async () => {
-    const provider = await prepareSmokeTraceProvider({ OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql" });
+    const provider = await prepareSmokeTraceProvider({ AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql" });
     assert.equal(provider.graphQLURL, "http://skywalking.example/graphql");
     assert.equal(provider.mode, "real");
     assert.equal(provider.server, null);
@@ -174,17 +174,17 @@ describe("control-plane smoke Store selection", () => {
 
   it("rejects required real SkyWalking mode without a GraphQL URL", async () => {
     await assert.rejects(
-      prepareSmokeTraceProvider({ OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1" }),
-      /requires OTS_TRACE_GRAPHQL_URL/,
+      prepareSmokeTraceProvider({ AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1" }),
+      /requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL/,
     );
   });
 
   it("rejects required real SkyWalking mode without trace ids for every step", async () => {
     await assert.rejects(
       prepareSmokeTraceProvider({
-        OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-        OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-        OTS_SMOKE_TRACE_IDS: "step-01=trace.real.01",
+        AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+        AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+        AGENT_TESTBENCH_SMOKE_TRACE_IDS: "step-01=trace.real.01",
       }),
       /every configured workflow step.*step-02/,
     );
@@ -192,11 +192,11 @@ describe("control-plane smoke Store selection", () => {
 
   it("accepts required real SkyWalking mode with all configured trace ids", async () => {
     const traceIDs = smokeStepIDs.map((stepID) => `${stepID}=trace.real.${stepID.replace("step-", "")}`).join(",");
-    requireCompleteSmokeTraceIDs({ OTS_SMOKE_TRACE_IDS: traceIDs });
+    requireCompleteSmokeTraceIDs({ AGENT_TESTBENCH_SMOKE_TRACE_IDS: traceIDs });
     const provider = await prepareSmokeTraceProvider({
-      OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-      OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-      OTS_SMOKE_TRACE_IDS: traceIDs,
+      AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+      AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+      AGENT_TESTBENCH_SMOKE_TRACE_IDS: traceIDs,
     });
     assert.equal(provider.graphQLURL, "http://skywalking.example/graphql");
     assert.equal(provider.mode, "real");
@@ -204,8 +204,8 @@ describe("control-plane smoke Store selection", () => {
   });
 
   it("accepts per-step real trace id overrides for external SkyWalking smoke", () => {
-    assert.equal(smokeTraceID("step-01", "trace.smoke.01", { OTS_SMOKE_TRACE_IDS: '{"step-01":"trace.real.01"}' }), "trace.real.01");
-    assert.equal(smokeTraceID("step-02", "trace.smoke.02", { OTS_SMOKE_TRACE_IDS: "step-02=trace.real.02" }), "trace.real.02");
+    assert.equal(smokeTraceID("step-01", "trace.smoke.01", { AGENT_TESTBENCH_SMOKE_TRACE_IDS: '{"step-01":"trace.real.01"}' }), "trace.real.01");
+    assert.equal(smokeTraceID("step-02", "trace.smoke.02", { AGENT_TESTBENCH_SMOKE_TRACE_IDS: "step-02=trace.real.02" }), "trace.real.02");
   });
 });
 
@@ -265,7 +265,7 @@ describe("control-plane smoke workflow shape", () => {
   });
 
   it("models the core button workflow as configured Store-backed steps", async () => {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-smoke-profile-"));
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-smoke-profile-"));
     try {
       const profileDir = await writeSmokeProfile(tempDir, 18080);
       const raw = await readFile(path.join(profileDir, "profile.json"), "utf8");

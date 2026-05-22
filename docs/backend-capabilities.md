@@ -1,11 +1,11 @@
 # Backend Capabilities / 后端能力总览
 
-Open Test Sandbox backend is a CLI-first, SQL Store-first control plane
+AgentTestBench backend is a CLI-first, SQL Store-first control plane
 for integration testing. It is built around a generic Store interface, local
 Docker runtime discovery, and HTTP APIs for the workbench, automation, and
 agents.
 
-Open Test Sandbox 的后端是一套 CLI-first、SQL Store-first 的集成测试
+AgentTestBench 的后端是一套 CLI-first、SQL Store-first 的集成测试
 控制平面。它由通用 Store 接口、本地 Docker runtime 发现、以及面向工作台、
 自动化和 agent 的 HTTP API 共同组成。
 

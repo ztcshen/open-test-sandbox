@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 type runtimeTimeoutEvaluation struct {

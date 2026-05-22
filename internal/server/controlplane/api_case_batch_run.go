@@ -17,11 +17,11 @@ import (
 	"sync"
 	"time"
 
-	"open-test-sandbox/internal/domain/casesuite"
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/runner/apicase"
-	"open-test-sandbox/internal/runner/junit"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/casesuite"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/runner/junit"
+	"agent-testbench/internal/store"
 )
 
 type apiCaseBatchRunRequest struct {

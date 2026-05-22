@@ -9,9 +9,9 @@ const rootDir = path.resolve(new URL("../..", import.meta.url).pathname);
 const scriptPath = path.join(rootDir, "tools/smoke/mysql-store-publish-verified-env.sh");
 
 test("MySQL Store publish script gates copy, switches active Store, and can restore", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-mysql-publish-"));
-  const logFile = path.join(tempDir, "otsandbox.log");
-  const fakeOtsandbox = path.join(tempDir, "otsandbox");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-mysql-publish-"));
+  const logFile = path.join(tempDir, "agent-testbench.log");
+  const fakeOtsandbox = path.join(tempDir, "agent-testbench");
   const fakeProbe = path.join(tempDir, "fake-mysql-probe.sh");
   const outputPrefix = path.join(tempDir, "publish");
   const controlPlaneDir = path.join(tempDir, "control-plane", "api", "store");
@@ -28,16 +28,16 @@ JSON
     configured: true,
     name: "team-mysql",
     backend: "mysql",
-    url: "mysql://tester:xxxxx@127.0.0.1:3306/ots?tls=false",
+    url: "mysql://tester:xxxxx@127.0.0.1:3306/agent_testbench?tls=false",
     source: "active-store",
   }));
 
   await writeFile(fakeOtsandbox, `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$OTS_TEST_LOG"
+printf '%s\\n' "$*" >> "$AGENT_TESTBENCH_TEST_LOG"
 case "$1 $2" in
   "store config")
     cat <<'JSON'
-{"stores":[{"name":"team-mysql","url":"mysql://tester:secret@127.0.0.1:3306/ots?tls=false"}]}
+{"stores":[{"name":"team-mysql","url":"mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"}]}
 JSON
     ;;
   "store provision")
@@ -68,7 +68,7 @@ JSON
     echo 'Active Store: team-mysql'
     ;;
   "store current")
-    echo '{"ok":true,"name":"team-mysql","backend":"mysql","url":"mysql://tester:xxxxx@127.0.0.1:3306/ots?tls=false"}'
+    echo '{"ok":true,"name":"team-mysql","backend":"mysql","url":"mysql://tester:xxxxx@127.0.0.1:3306/agent_testbench?tls=false"}'
     ;;
   *)
     echo "unexpected command: $*" >&2
@@ -110,9 +110,9 @@ esac
     cwd: rootDir,
     env: {
       ...process.env,
-      OTSANDBOX_BIN: fakeOtsandbox,
-      OTSANDBOX_MYSQL_HANDSHAKE_PROBE: fakeProbe,
-      OTS_TEST_LOG: logFile,
+      AGENT_TESTBENCH_BIN: fakeOtsandbox,
+      AGENT_TESTBENCH_MYSQL_HANDSHAKE_PROBE: fakeProbe,
+      AGENT_TESTBENCH_TEST_LOG: logFile,
     },
     encoding: "utf8",
   });

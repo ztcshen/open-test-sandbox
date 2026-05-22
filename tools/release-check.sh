@@ -23,18 +23,26 @@ is_sqlite_store_dsn() {
 step "checking whitespace"
 git diff --check
 
+step "checking release gate tools"
+for tool in rg sqlite3; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "$tool is required for release-check. Install it before running the release gate." >&2
+    exit 1
+  fi
+done
+
 step "checking SQL smoke Store"
-if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
-  echo "OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE is required for release-check." >&2
+if [[ -z "${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}" ]]; then
+  echo "AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE is required for release-check." >&2
   echo "SQL Store examples:" >&2
-  echo "PostgreSQL: OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check" >&2
-  echo "MySQL: OTSANDBOX_SMOKE_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check" >&2
-  echo "SQLite: OTSANDBOX_SMOKE_STORE='sqlite:///tmp/otsandbox-smoke.sqlite' npm run release-check" >&2
+  echo "PostgreSQL: AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check" >&2
+  echo "MySQL: AGENT_TESTBENCH_SMOKE_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check" >&2
+  echo "SQLite: AGENT_TESTBENCH_SMOKE_STORE='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check" >&2
   exit 1
 fi
-smoke_store_dsn="${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}"
+smoke_store_dsn="${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}"
 if is_postgres_store_dsn "$smoke_store_dsn"; then
-  export OTSANDBOX_TEST_PG_DSN="${OTSANDBOX_TEST_PG_DSN:-$smoke_store_dsn}"
+  export AGENT_TESTBENCH_TEST_PG_DSN="${AGENT_TESTBENCH_TEST_PG_DSN:-$smoke_store_dsn}"
 elif is_mysql_store_dsn "$smoke_store_dsn"; then
   mysql_dsn_info=$(node tools/smoke/mysql-store-dsn-guard.mjs "$smoke_store_dsn")
   mysql_parse_ok=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(String(!!p.parseOK))" "$mysql_dsn_info")
@@ -42,7 +50,7 @@ elif is_mysql_store_dsn "$smoke_store_dsn"; then
   mysql_database=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(p.database || '')" "$mysql_dsn_info")
   mysql_safe_name=$(node -e "const p=JSON.parse(process.argv[1]); process.stdout.write(String(!!p.safeName))" "$mysql_dsn_info")
   if [[ "$mysql_parse_ok" != "true" || "$mysql_scheme" != "mysql" || -z "$mysql_database" ]]; then
-    echo "OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be a mysql:// DSN with a database path." >&2
+    echo "AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE must be a mysql:// DSN with a database path." >&2
     exit 1
   fi
   if [[ "$mysql_safe_name" != "true" ]]; then
@@ -50,25 +58,25 @@ elif is_mysql_store_dsn "$smoke_store_dsn"; then
     echo "Use a dedicated sandbox/smoke/test/ci database name, not a business schema." >&2
     exit 1
   fi
-  export OTSANDBOX_MYSQL_TEST_DSN="${OTSANDBOX_MYSQL_TEST_DSN:-$smoke_store_dsn}"
-  export OTSANDBOX_MYSQL_TEST_DSN_MODE="${OTSANDBOX_MYSQL_TEST_DSN_MODE:-existing}"
+  export AGENT_TESTBENCH_MYSQL_TEST_DSN="${AGENT_TESTBENCH_MYSQL_TEST_DSN:-$smoke_store_dsn}"
+  export AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE="${AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE:-existing}"
 elif is_sqlite_store_dsn "$smoke_store_dsn"; then
-  if [[ "${OTSANDBOX_DISABLE_SQLITE_STORE:-}" == "1" ]]; then
-    echo "OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite release-check Store." >&2
+  if [[ "${AGENT_TESTBENCH_DISABLE_SQLITE_STORE:-}" == "1" ]]; then
+    echo "AGENT_TESTBENCH_DISABLE_SQLITE_STORE cannot be combined with a SQLite release-check Store." >&2
     exit 1
   fi
 else
-  echo "OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be postgres://, postgresql://, mysql://, sqlite://, or file:." >&2
+  echo "AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE must be postgres://, postgresql://, mysql://, sqlite://, or file:." >&2
   exit 1
 fi
 
 step "checking SkyWalking smoke provider mode"
-if [[ "${OTSANDBOX_REQUIRE_REAL_SKYWALKING:-}" == "1" ]]; then
-  node tools/smoke/skywalking-release-guard.mjs "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1"
+if [[ "${AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING:-}" == "1" ]]; then
+  node tools/smoke/skywalking-release-guard.mjs "AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1"
   echo "Real SkyWalking validation required; using configured GraphQL endpoint and smoke trace ids." >&2
-elif [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
-  echo "OTS_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
-  echo "Set OTS_TRACE_GRAPHQL_URL, OTS_SMOKE_TRACE_IDS, and OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 for final live SkyWalking validation; synthetic smoke is not live topology proof." >&2
+elif [[ -z "${AGENT_TESTBENCH_TRACE_GRAPHQL_URL:-}" ]]; then
+  echo "AGENT_TESTBENCH_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
+  echo "Set AGENT_TESTBENCH_TRACE_GRAPHQL_URL, AGENT_TESTBENCH_SMOKE_TRACE_IDS, and AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 for final live SkyWalking validation; synthetic smoke is not live topology proof." >&2
 fi
 
 step "checking generated state is not tracked"
@@ -79,7 +87,7 @@ fi
 
 tracked_generated=$(git ls-files \
   '.runtime' \
-  'cmd/otsandbox/.runtime' \
+  'cmd/agent-testbench/.runtime' \
   'internal/server/controlplane/.runtime' \
   'node_modules' \
   'team-configs' \
@@ -111,9 +119,9 @@ fi
 
 step "running generic API case demo"
 if is_sqlite_store_dsn "$smoke_store_dsn"; then
-  OTSANDBOX_CLEAN_DEMO_OUTPUT=1 OTSANDBOX_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
+  AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1 AGENT_TESTBENCH_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
 else
-  OTSANDBOX_CLEAN_DEMO_OUTPUT=1 OTSANDBOX_DISABLE_SQLITE_STORE=1 OTSANDBOX_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
+  AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1 AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 AGENT_TESTBENCH_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
 fi
 
 step "building React workbench"
@@ -134,7 +142,7 @@ fi
 
 if is_mysql_store_dsn "$smoke_store_dsn"; then
   step "running MySQL Store API smoke tests"
-  OTSANDBOX_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
+  AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
 fi
 
 step "running active SQL Store browser smoke tests"

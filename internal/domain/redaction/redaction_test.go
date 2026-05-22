@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"open-test-sandbox/internal/domain/redaction"
+	"agent-testbench/internal/domain/redaction"
 )
 
 func TestRedactTextMasksSensitiveJSONKeys(t *testing.T) {

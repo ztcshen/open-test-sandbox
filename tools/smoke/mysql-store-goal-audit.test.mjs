@@ -13,7 +13,7 @@ async function writeFakeOtsandbox(filePath, { targetReady }) {
 case "$1 $2" in
   "store config")
     cat <<'JSON'
-{"stores":[{"name":"team-mysql","url":"mysql://tester:secret@127.0.0.1:3306/ots?tls=false"}]}
+{"stores":[{"name":"team-mysql","url":"mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"}]}
 JSON
     ;;
   "environment inspect")
@@ -29,7 +29,7 @@ JSON
     echo '{"ok":true,"backend":"mysql","version":7,"pending":0}'
     ;;
   "store current")
-    echo '{"ok":true,"name":"team-mysql","backend":"mysql","url":"mysql://tester:xxxxx@127.0.0.1:3306/ots?tls=false"}'
+    echo '{"ok":true,"name":"team-mysql","backend":"mysql","url":"mysql://tester:xxxxx@127.0.0.1:3306/agent_testbench?tls=false"}'
     ;;
   *)
     echo "unexpected command: $*" >&2
@@ -41,8 +41,8 @@ esac
 }
 
 test("MySQL Store goal audit reports target handshake blocker after source readiness", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-mysql-goal-audit-blocked-"));
-  const fakeOtsandbox = path.join(tempDir, "otsandbox");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-mysql-goal-audit-blocked-"));
+  const fakeOtsandbox = path.join(tempDir, "agent-testbench");
   const fakeProbe = path.join(tempDir, "probe.sh");
   const outputPrefix = path.join(tempDir, "audit");
   await writeFakeOtsandbox(fakeOtsandbox, { targetReady: false });
@@ -67,8 +67,8 @@ exit 2
     cwd: rootDir,
     env: {
       ...process.env,
-      OTSANDBOX_BIN: fakeOtsandbox,
-      OTSANDBOX_MYSQL_HANDSHAKE_PROBE: fakeProbe,
+      AGENT_TESTBENCH_BIN: fakeOtsandbox,
+      AGENT_TESTBENCH_MYSQL_HANDSHAKE_PROBE: fakeProbe,
     },
     encoding: "utf8",
   });
@@ -87,8 +87,8 @@ exit 2
 });
 
 test("MySQL Store goal audit passes when all read-only gates are ready", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-mysql-goal-audit-ready-"));
-  const fakeOtsandbox = path.join(tempDir, "otsandbox");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-mysql-goal-audit-ready-"));
+  const fakeOtsandbox = path.join(tempDir, "agent-testbench");
   const fakeProbe = path.join(tempDir, "probe.sh");
   const outputPrefix = path.join(tempDir, "audit");
   const controlPlaneDir = path.join(tempDir, "control-plane", "api", "store");
@@ -121,8 +121,8 @@ echo '{"ok":true,"backend":"mysql","host":"127.0.0.1","port":3306}'
     cwd: rootDir,
     env: {
       ...process.env,
-      OTSANDBOX_BIN: fakeOtsandbox,
-      OTSANDBOX_MYSQL_HANDSHAKE_PROBE: fakeProbe,
+      AGENT_TESTBENCH_BIN: fakeOtsandbox,
+      AGENT_TESTBENCH_MYSQL_HANDSHAKE_PROBE: fakeProbe,
     },
     encoding: "utf8",
   });

@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"open-test-sandbox/internal/domain/casesuite"
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/casesuite"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/store"
 )
 
 func handleCaseSuiteCoverage(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {

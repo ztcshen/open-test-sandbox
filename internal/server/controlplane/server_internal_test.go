@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/sqlite"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/sqlite"
 )
 
 func TestSourceSnapshotRevision(t *testing.T) {

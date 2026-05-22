@@ -17,12 +17,12 @@ function configuredTraceIDs(expectedSteps = 3) {
 
 function releaseCheckEnv(overrides = {}) {
   const env = { ...process.env };
-  delete env.OTS_TRACE_GRAPHQL_URL;
-  delete env.OTS_SMOKE_TRACE_IDS;
-  delete env.OTSANDBOX_REQUIRE_REAL_SKYWALKING;
+  delete env.AGENT_TESTBENCH_TRACE_GRAPHQL_URL;
+  delete env.AGENT_TESTBENCH_SMOKE_TRACE_IDS;
+  delete env.AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING;
   return {
     ...env,
-    OTSANDBOX_SMOKE_STORE_DSN: "postgres://user:pass@127.0.0.1:5432/otsandbox_smoke?sslmode=disable",
+    AGENT_TESTBENCH_SMOKE_STORE_DSN: "postgres://user:pass@127.0.0.1:5432/agent_testbench_smoke?sslmode=disable",
     ...overrides,
   };
 }
@@ -38,9 +38,9 @@ function runReleaseCheck(env) {
 
 function runRealMySQLWrapper(env) {
   const wrapperEnv = { ...process.env };
-  delete wrapperEnv.OTSANDBOX_REAL_MYSQL_STORE_DSN;
-  delete wrapperEnv.OTSANDBOX_SMOKE_STORE_DSN;
-  delete wrapperEnv.OTSANDBOX_SMOKE_STORE;
+  delete wrapperEnv.AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN;
+  delete wrapperEnv.AGENT_TESTBENCH_SMOKE_STORE_DSN;
+  delete wrapperEnv.AGENT_TESTBENCH_SMOKE_STORE;
   return spawnSync("bash", ["tools/smoke/mysql-real-store-release-check.sh"], {
     cwd: rootDir,
     env: { ...wrapperEnv, ...env },
@@ -59,7 +59,7 @@ function runNPM(args, env) {
 }
 
 test("release-check blocks tracked private test assets before expensive gates", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-release-index-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-index-"));
   try {
     const indexFile = path.join(tempDir, "index");
     const gitEnv = { ...process.env, GIT_INDEX_FILE: indexFile };
@@ -103,23 +103,23 @@ test("release-check blocks tracked private test assets before expensive gates", 
 
 test("release-check missing Store guidance lists every supported smoke Store env", () => {
   const result = runReleaseCheck(releaseCheckEnv({
-    OTSANDBOX_SMOKE_STORE_DSN: "",
-    OTSANDBOX_SMOKE_STORE: "",
+    AGENT_TESTBENCH_SMOKE_STORE_DSN: "",
+    AGENT_TESTBENCH_SMOKE_STORE: "",
   }));
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE is required/);
+  assert.match(result.stderr, /AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE is required/);
   assert.match(result.stderr, /SQL Store examples:/);
-  assert.match(result.stderr, /PostgreSQL: OTSANDBOX_SMOKE_STORE_DSN='postgres:\/\/user:pass@host:5432\/otsandbox_smoke\?sslmode=disable'/);
-  assert.match(result.stderr, /MySQL: OTSANDBOX_SMOKE_STORE='mysql:\/\/user:pass@host:3306\/otsandbox_smoke\?tls=false'/);
-  assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE='mysql:\/\/user:pass@host:3306\/otsandbox_smoke\?tls=false'/);
+  assert.match(result.stderr, /PostgreSQL: AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres:\/\/user:pass@host:5432\/agent_testbench_smoke\?sslmode=disable'/);
+  assert.match(result.stderr, /MySQL: AGENT_TESTBENCH_SMOKE_STORE='mysql:\/\/user:pass@host:3306\/agent_testbench_smoke\?tls=false'/);
+  assert.match(result.stderr, /AGENT_TESTBENCH_SMOKE_STORE='mysql:\/\/user:pass@host:3306\/agent_testbench_smoke\?tls=false'/);
   assert.doesNotMatch(result.stderr, /also supported/i);
   assert.doesNotMatch(result.stdout, /checking SkyWalking smoke provider mode/);
 });
 
 test("release-check refuses unsafe MySQL smoke database names before expensive gates", () => {
   const result = runReleaseCheck(releaseCheckEnv({
-    OTSANDBOX_SMOKE_STORE_DSN: "mysql://user:secret@example.com:3306/business_prod?tls=false",
+    AGENT_TESTBENCH_SMOKE_STORE_DSN: "mysql://user:secret@example.com:3306/business_prod?tls=false",
   }));
 
   assert.equal(result.status, 1);
@@ -130,67 +130,67 @@ test("release-check refuses unsafe MySQL smoke database names before expensive g
 
 test("release-check real SkyWalking mode requires a GraphQL URL before expensive gates", () => {
   const result = runReleaseCheck(releaseCheckEnv({
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
   }));
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /requires OTS_TRACE_GRAPHQL_URL/);
+  assert.match(result.stderr, /requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
 
 test("release-check real SkyWalking mode rejects invalid GraphQL URLs before expensive gates", () => {
   for (const graphQLURL of ["not-a-url", "ftp://skywalking.example/graphql"]) {
     const result = runReleaseCheck(releaseCheckEnv({
-      OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-      OTS_TRACE_GRAPHQL_URL: graphQLURL,
-      OTS_SMOKE_EXPECTED_STEPS: "3",
-      OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
+      AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+      AGENT_TESTBENCH_TRACE_GRAPHQL_URL: graphQLURL,
+      AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+      AGENT_TESTBENCH_SMOKE_TRACE_IDS: configuredTraceIDs(),
     }));
 
     assert.equal(result.status, 1, graphQLURL);
-    assert.match(result.stderr, /requires OTS_TRACE_GRAPHQL_URL to be an http\/https URL/);
+    assert.match(result.stderr, /requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL to be an http\/https URL/);
     assert.doesNotMatch(result.stdout, /running Go tests/);
   }
 });
 
 test("release-check accepts uppercase SQL Store schemes before expensive gates", () => {
   const mysql = runReleaseCheck(releaseCheckEnv({
-    OTSANDBOX_SMOKE_STORE_DSN: "MYSQL://user:pass@127.0.0.1:3306/otsandbox_smoke?tls=false",
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_SMOKE_STORE_DSN: "MYSQL://user:pass@127.0.0.1:3306/agent_testbench_smoke?tls=false",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
   }));
   assert.equal(mysql.status, 1);
-  assert.match(mysql.stderr, /requires OTS_TRACE_GRAPHQL_URL/);
+  assert.match(mysql.stderr, /requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL/);
   assert.doesNotMatch(mysql.stderr, /must be postgres:\/\/, postgresql:\/\/, or mysql:\/\//);
   assert.doesNotMatch(mysql.stdout, /running Go tests/);
 
   const postgres = runReleaseCheck(releaseCheckEnv({
-    OTSANDBOX_SMOKE_STORE_DSN: "POSTGRESQL://user:pass@127.0.0.1:5432/otsandbox_smoke?sslmode=disable",
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_SMOKE_STORE_DSN: "POSTGRESQL://user:pass@127.0.0.1:5432/agent_testbench_smoke?sslmode=disable",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
   }));
   assert.equal(postgres.status, 1);
-  assert.match(postgres.stderr, /requires OTS_TRACE_GRAPHQL_URL/);
+  assert.match(postgres.stderr, /requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL/);
   assert.doesNotMatch(postgres.stderr, /must be postgres:\/\/, postgresql:\/\/, or mysql:\/\//);
   assert.doesNotMatch(postgres.stdout, /running Go tests/);
 });
 
 test("release-check real SkyWalking mode requires configured workflow trace ids before expensive gates", () => {
   const result = runReleaseCheck(releaseCheckEnv({
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "3",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
   }));
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /requires OTS_SMOKE_TRACE_IDS/);
+  assert.match(result.stderr, /requires AGENT_TESTBENCH_SMOKE_TRACE_IDS/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
 
 test("release-check real SkyWalking mode requires trace ids for every configured workflow step", () => {
   const result = runReleaseCheck(releaseCheckEnv({
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "3",
-    OTS_SMOKE_TRACE_IDS: "step-01=trace.real.01",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+    AGENT_TESTBENCH_SMOKE_TRACE_IDS: "step-01=trace.real.01",
   }));
 
   assert.equal(result.status, 1);
@@ -201,10 +201,10 @@ test("release-check real SkyWalking mode requires trace ids for every configured
 
 test("release-check real SkyWalking mode rejects empty workflow step trace ids", () => {
   const result = runReleaseCheck(releaseCheckEnv({
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "3",
-    OTS_SMOKE_TRACE_IDS: [
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+    AGENT_TESTBENCH_SMOKE_TRACE_IDS: [
       "step-01=trace.real.01",
       "step-02=",
       "step-03=trace.real.03",
@@ -219,14 +219,14 @@ test("release-check real SkyWalking mode rejects empty workflow step trace ids",
 
 test("real MySQL release wrapper requires a dedicated MySQL Store DSN", () => {
   const missing = runRealMySQLWrapper({
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "",
-    OTSANDBOX_SMOKE_STORE_DSN: "",
+    AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "",
+    AGENT_TESTBENCH_SMOKE_STORE_DSN: "",
   });
   assert.equal(missing.status, 1);
-  assert.match(missing.stderr, /Set OTSANDBOX_REAL_MYSQL_STORE_DSN/);
+  assert.match(missing.stderr, /Set AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN/);
 
   const postgres = runRealMySQLWrapper({
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "postgres://user:secret@example.com:5432/otsandbox_smoke?sslmode=disable",
+    AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "postgres://user:secret@example.com:5432/agent_testbench_smoke?sslmode=disable",
   });
   assert.equal(postgres.status, 1);
   assert.match(postgres.stderr, /must be a mysql:\/\/ DSN/);
@@ -234,7 +234,7 @@ test("real MySQL release wrapper requires a dedicated MySQL Store DSN", () => {
 
 test("real MySQL release wrapper refuses likely business databases", () => {
   const result = runRealMySQLWrapper({
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/business_prod?tls=false",
+    AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/business_prod?tls=false",
   });
 
   assert.equal(result.status, 1);
@@ -244,28 +244,28 @@ test("real MySQL release wrapper refuses likely business databases", () => {
 
 test("real MySQL release wrapper requires real SkyWalking sign-off inputs", () => {
   const result = runRealMySQLWrapper({
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",
-    OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+    AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/agent_testbench_smoke?tls=false",
+    AGENT_TESTBENCH_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /requires OTSANDBOX_REQUIRE_REAL_SKYWALKING=1/);
+  assert.match(result.stderr, /requires AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1/);
   assert.doesNotMatch(result.stderr, /secret/);
 });
 
 test("real MySQL release wrapper rejects invalid or non-http SkyWalking GraphQL URLs", () => {
   for (const graphQLURL of ["not-a-url", "ftp://skywalking.example/graphql"]) {
     const result = runRealMySQLWrapper({
-      OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
-      OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-      OTS_TRACE_GRAPHQL_URL: graphQLURL,
-      OTS_SMOKE_EXPECTED_STEPS: "3",
-      OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
-      OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+      AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false",
+      AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+      AGENT_TESTBENCH_TRACE_GRAPHQL_URL: graphQLURL,
+      AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+      AGENT_TESTBENCH_SMOKE_TRACE_IDS: configuredTraceIDs(),
+      AGENT_TESTBENCH_REAL_MYSQL_RELEASE_DRY_RUN: "1",
     });
 
     assert.equal(result.status, 1, graphQLURL);
-    assert.match(result.stderr, /requires OTS_TRACE_GRAPHQL_URL to be an http\/https URL/);
+    assert.match(result.stderr, /requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL to be an http\/https URL/);
     assert.doesNotMatch(result.stderr, /secret/);
     assert.doesNotMatch(result.stderr, /Would run: npm run release-check/);
   }
@@ -273,33 +273,33 @@ test("real MySQL release wrapper rejects invalid or non-http SkyWalking GraphQL 
 
 test("real MySQL release wrapper requires existing-database contract mode", () => {
   const result = runRealMySQLWrapper({
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "3",
-    OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
-    OTSANDBOX_MYSQL_TEST_DSN_MODE: "create-drop",
-    OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+    AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+    AGENT_TESTBENCH_SMOKE_TRACE_IDS: configuredTraceIDs(),
+    AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE: "create-drop",
+    AGENT_TESTBENCH_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /requires OTSANDBOX_MYSQL_TEST_DSN_MODE=existing/);
+  assert.match(result.stderr, /requires AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE=existing/);
   assert.doesNotMatch(result.stderr, /secret/);
   assert.doesNotMatch(result.stderr, /Would run: npm run release-check/);
 });
 
 test("real MySQL release wrapper dry-run masks credentials and accepts smoke database", () => {
   const result = runRealMySQLWrapper({
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "3",
-    OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
-    OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+    AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/agent_testbench_smoke?tls=false",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+    AGENT_TESTBENCH_SMOKE_TRACE_IDS: configuredTraceIDs(),
+    AGENT_TESTBENCH_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/otsandbox_smoke/);
+  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/agent_testbench_smoke/);
   assert.doesNotMatch(result.stderr, /secret/);
   assert.match(result.stderr, /MySQL Store contract mode: existing/);
   assert.match(result.stderr, /Real SkyWalking release mode: required/);
@@ -308,33 +308,33 @@ test("real MySQL release wrapper dry-run masks credentials and accepts smoke dat
 
 test("real MySQL release preflight npm script runs the guarded dry-run", () => {
   const result = runNPM(["run", "release-check:mysql-real:preflight"], {
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "3",
-    OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
+    AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+    AGENT_TESTBENCH_SMOKE_TRACE_IDS: configuredTraceIDs(),
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/otsandbox_smoke/);
+  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/agent_testbench_smoke/);
   assert.doesNotMatch(result.stderr, /secret/);
   assert.match(result.stderr, /Would run: npm run release-check/);
 });
 
 test("real MySQL release wrapper accepts shared smoke Store env", () => {
   const result = runRealMySQLWrapper({
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "",
-    OTSANDBOX_SMOKE_STORE_DSN: "",
-    OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
-    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
-    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_EXPECTED_STEPS: "3",
-    OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
-    OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+    AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN: "",
+    AGENT_TESTBENCH_SMOKE_STORE_DSN: "",
+    AGENT_TESTBENCH_SMOKE_STORE: "mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false",
+    AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING: "1",
+    AGENT_TESTBENCH_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS: "3",
+    AGENT_TESTBENCH_SMOKE_TRACE_IDS: configuredTraceIDs(),
+    AGENT_TESTBENCH_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/otsandbox_smoke/);
+  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/agent_testbench_smoke/);
   assert.doesNotMatch(result.stderr, /secret/);
   assert.match(result.stderr, /Would run: npm run release-check/);
 });

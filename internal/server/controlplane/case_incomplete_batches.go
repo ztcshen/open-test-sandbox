@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/store"
 )
 
 func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
@@ -80,7 +80,7 @@ func apiCaseSuggestedCommand(item profile.APICase) string {
 	if casePath == "" {
 		return ""
 	}
-	parts := []string{"otsandbox case run --case " + strconv.Quote(casePath)}
+	parts := []string{"agent-testbench case run --case " + strconv.Quote(casePath)}
 	if strings.TrimSpace(item.BaseURL) != "" {
 		parts = append(parts, "--base-url "+strconv.Quote(item.BaseURL))
 	}

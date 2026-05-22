@@ -1,6 +1,6 @@
 # Code of Conduct
 
-Open Test Sandbox follows a simple contribution norm: be respectful, precise,
+AgentTestBench follows a simple contribution norm: be respectful, precise,
 and oriented toward making the project safer and easier to use.
 
 ## Expected Behavior

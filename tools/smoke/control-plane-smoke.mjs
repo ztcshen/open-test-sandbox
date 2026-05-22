@@ -16,7 +16,7 @@ const minimumSmokeCatalogTemplateCount = smokeWorkflowStepCount * 2;
 const minimumSmokeCatalogTemplateConfigCount = smokeWorkflowStepCount + 1;
 
 function smokeTraceOverrides(env = process.env) {
-  const raw = String(env.OTS_SMOKE_TRACE_IDS || "").trim();
+  const raw = String(env.AGENT_TESTBENCH_SMOKE_TRACE_IDS || "").trim();
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -61,7 +61,7 @@ export function missingSmokeTraceIDSteps(env = process.env) {
 export function requireCompleteSmokeTraceIDs(env = process.env) {
   const missing = missingSmokeTraceIDSteps(env);
   if (missing.length > 0) {
-    throw new Error(`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for every configured workflow step; missing: ${missing.join(" ")}`);
+    throw new Error(`AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 requires AGENT_TESTBENCH_SMOKE_TRACE_IDS for every configured workflow step; missing: ${missing.join(" ")}`);
   }
 }
 
@@ -232,10 +232,10 @@ async function startSmokeTraceProvider(port) {
 }
 
 export async function prepareSmokeTraceProvider(env = process.env) {
-  const configuredURL = String(env.OTS_TRACE_GRAPHQL_URL || "").trim();
-  if (envFlag(env.OTSANDBOX_REQUIRE_REAL_SKYWALKING)) {
+  const configuredURL = String(env.AGENT_TESTBENCH_TRACE_GRAPHQL_URL || "").trim();
+  if (envFlag(env.AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING)) {
     if (!configuredURL) {
-      throw new Error("OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL");
+      throw new Error("AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL");
     }
     requireCompleteSmokeTraceIDs(env);
   }
@@ -341,22 +341,22 @@ export async function writeSmokeProfile(baseDir, targetPort) {
 }
 
 export async function prepareSmokeStoreReference(tempDir, env = process.env, runCommand = run) {
-  const smokeStoreDSN = env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
+  const smokeStoreDSN = env.AGENT_TESTBENCH_SMOKE_STORE_DSN || env.AGENT_TESTBENCH_SMOKE_STORE || "";
   if (!smokeStoreDSN) {
-    if (/^(1|true|yes|on)$/i.test(env.OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE || "")) {
-      if (/^(1|true|yes|on)$/i.test(env.OTSANDBOX_DISABLE_SQLITE_STORE || "")) {
-        throw new Error("OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE cannot be combined with OTSANDBOX_DISABLE_SQLITE_STORE");
+    if (/^(1|true|yes|on)$/i.test(env.AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_SMOKE || "")) {
+      if (/^(1|true|yes|on)$/i.test(env.AGENT_TESTBENCH_DISABLE_SQLITE_STORE || "")) {
+        throw new Error("AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_SMOKE cannot be combined with AGENT_TESTBENCH_DISABLE_SQLITE_STORE");
       }
       return { storeRef: `sqlite://${path.join(tempDir, "store.sqlite")}`, serverEnv: env };
     }
-    throw new Error("set OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE to a PostgreSQL, MySQL, or SQLite Store DSN for smoke validation");
+    throw new Error("set AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE to a PostgreSQL, MySQL, or SQLite Store DSN for smoke validation");
   }
   const backend = /^postgres(?:ql)?:\/\//i.test(smokeStoreDSN) ? "postgres" : /^mysql:\/\//i.test(smokeStoreDSN) ? "mysql" : /^(sqlite:\/\/|file:)/i.test(smokeStoreDSN) ? "sqlite" : "";
   if (!backend) {
-    throw new Error("OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be a PostgreSQL, MySQL, or SQLite Store DSN");
+    throw new Error("AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE must be a PostgreSQL, MySQL, or SQLite Store DSN");
   }
-  if (backend === "sqlite" && /^(1|true|yes|on)$/i.test(env.OTSANDBOX_DISABLE_SQLITE_STORE || "")) {
-    throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE cannot be combined with a SQLite smoke Store DSN");
+  if (backend === "sqlite" && /^(1|true|yes|on)$/i.test(env.AGENT_TESTBENCH_DISABLE_SQLITE_STORE || "")) {
+    throw new Error("AGENT_TESTBENCH_DISABLE_SQLITE_STORE cannot be combined with a SQLite smoke Store DSN");
   }
   if (backend === "mysql") {
     requireSafeMySQLStoreDSN(smokeStoreDSN, { label: "The control-plane smoke" });
@@ -364,10 +364,10 @@ export async function prepareSmokeStoreReference(tempDir, env = process.env, run
   const storeName = backend === "mysql" ? "smoke-mysql" : backend === "sqlite" ? "smoke-sqlite" : "smoke-postgres";
   const configHome = path.join(tempDir, "store-config");
   await mkdir(configHome, { recursive: true });
-  const serverEnv = { ...env, OTSANDBOX_CONFIG_HOME: configHome };
-  runCommand("go", ["run", "./cmd/otsandbox", "store", "config", "set", storeName, "--url", smokeStoreDSN], { env: serverEnv });
-  runCommand("go", ["run", "./cmd/otsandbox", "store", "use", storeName], { env: serverEnv });
-  runCommand("go", ["run", "./cmd/otsandbox", "store", "upgrade", "--store", storeName], { env: serverEnv });
+  const serverEnv = { ...env, AGENT_TESTBENCH_CONFIG_HOME: configHome };
+  runCommand("go", ["run", "./cmd/agent-testbench", "store", "config", "set", storeName, "--url", smokeStoreDSN], { env: serverEnv });
+  runCommand("go", ["run", "./cmd/agent-testbench", "store", "use", storeName], { env: serverEnv });
+  runCommand("go", ["run", "./cmd/agent-testbench", "store", "upgrade", "--store", storeName], { env: serverEnv });
   return { storeRef: storeName, serverEnv };
 }
 
@@ -588,7 +588,7 @@ async function checkEvidenceViewerTimeline(browser, baseURL) {
   page.on("pageerror", (error) => errors.push(error.message));
 
   try {
-    const storageKey = "open-test-sandbox-evidence:smoke-timeline";
+    const storageKey = "agent-testbench-evidence:smoke-timeline";
     const payload = {
       step: {
         title: "Case Alpha Evidence",
@@ -752,16 +752,16 @@ async function stopServer(server) {
 async function main() {
   run("node", ["control-plane/frontend/build.mjs"]);
 
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "otsandbox-smoke-"));
-  const cliBin = path.join(tempDir, "otsandbox");
-  run("go", ["build", "-o", cliBin, "./cmd/otsandbox"]);
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-smoke-"));
+  const cliBin = path.join(tempDir, "agent-testbench");
+  run("go", ["build", "-o", cliBin, "./cmd/agent-testbench"]);
   const targetPort = await freePort();
   const targetServer = await startSmokeTargetServer(targetPort);
   const traceProvider = await prepareSmokeTraceProvider();
   const profileDir = await writeSmokeProfile(tempDir, targetPort);
   const profileHome = path.join(tempDir, "profile-home");
   const runSmokeCLI = (command, args, options = {}) => {
-    if (command === "go" && args[0] === "run" && args[1] === "./cmd/otsandbox") {
+    if (command === "go" && args[0] === "run" && args[1] === "./cmd/agent-testbench") {
       run(cliBin, args.slice(2), options);
       return;
     }

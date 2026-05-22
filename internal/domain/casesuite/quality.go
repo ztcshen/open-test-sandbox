@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	"open-test-sandbox/internal/domain/profile"
+	"agent-testbench/internal/domain/profile"
 )
 
 type QualityCounts struct {

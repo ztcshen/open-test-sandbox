@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"open-test-sandbox/internal/domain/profile"
+	"agent-testbench/internal/domain/profile"
 )
 
 func TestEmptyProfileBundle(t *testing.T) {

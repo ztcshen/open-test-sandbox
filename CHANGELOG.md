@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Open Test Sandbox will be recorded here.
+All notable changes to AgentTestBench will be recorded here.
 
 The project is pre-1.0. Public contracts may still change, but breaking changes
 should be called out in this file and in the relevant docs.

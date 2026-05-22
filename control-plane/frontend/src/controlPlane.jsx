@@ -117,7 +117,7 @@ function TraceEvidenceBody({ catalog, runs }) {
 function ControlPlaneApp() {
   const copy = pageCopy[window.location.pathname] || {
     title: "Control Plane",
-    kicker: "Open Test Sandbox",
+    kicker: "AgentTestBench",
     summary: "Generic local-first workbench surface.",
     templateId: "TPL-CONTROL-PLANE-V1",
   };

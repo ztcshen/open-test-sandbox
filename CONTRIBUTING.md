@@ -1,8 +1,9 @@
 # Contributing
 
-Thanks for helping improve Open Test Sandbox. The project is local-first and
-API-operated: the core should stay generic, while team-specific test assets are
-stored through sandbox APIs or kept in private validation data.
+Thanks for helping improve AgentTestBench. The project is local-first and
+agent-native and API-operated: the core should stay generic, while team-specific
+test assets are stored through AgentTestBench APIs or kept in private
+validation data.
 
 ## Ground Rules
 
@@ -25,7 +26,7 @@ npm run build:frontend
 Run the full release gate before opening a pull request:
 
 ```sh
-OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
 ```
 
 The gate runs formatting hygiene, generated-state checks, source-domain

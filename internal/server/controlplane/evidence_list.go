@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 var ErrEvidenceListRunNotFound = errors.New("run not found")

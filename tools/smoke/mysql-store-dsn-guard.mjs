@@ -1,4 +1,4 @@
-const safeDatabaseNamePattern = /(^|[_-])otsandbox([_-]|$)|(^|[_-])(smoke|test|ci)([_-]|$)/i;
+const safeDatabaseNamePattern = /(^|[_-])agent[_-]testbench([_-]|$)|(^|[_-])(smoke|test|ci)([_-]|$)/i;
 
 export function inspectMySQLStoreDSN(rawValue) {
   const raw = String(rawValue || "").trim();

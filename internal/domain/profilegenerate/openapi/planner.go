@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/runner/apicase"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/runner/apicase"
 )
 
 type Options struct {

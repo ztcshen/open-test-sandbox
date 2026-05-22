@@ -7,8 +7,8 @@ cd "$ROOT_DIR"
 STORE_NAME=""
 STORE_URL=""
 OUTPUT_PREFIX=".runtime/mysql-store-preflight"
-OTSANDBOX_BIN="${OTSANDBOX_BIN:-}"
-HANDSHAKE_PROBE="${OTSANDBOX_MYSQL_HANDSHAKE_PROBE:-python3 tools/smoke/mysql-handshake-probe.py}"
+AGENT_TESTBENCH_BIN="${AGENT_TESTBENCH_BIN:-}"
+HANDSHAKE_PROBE="${AGENT_TESTBENCH_MYSQL_HANDSHAKE_PROBE:-python3 tools/smoke/mysql-handshake-probe.py}"
 
 usage() {
   cat <<'EOF'
@@ -57,19 +57,19 @@ if [[ -n "$STORE_NAME" && -n "$STORE_URL" ]]; then
   exit 2
 fi
 
-run_otsandbox() {
-  if [[ -n "$OTSANDBOX_BIN" ]]; then
-    "$OTSANDBOX_BIN" "$@"
-  elif [[ -x ".runtime/otsandbox-dev" ]]; then
-    .runtime/otsandbox-dev "$@"
+run_agent-testbench() {
+  if [[ -n "$AGENT_TESTBENCH_BIN" ]]; then
+    "$AGENT_TESTBENCH_BIN" "$@"
+  elif [[ -x ".runtime/agent-testbench-dev" ]]; then
+    .runtime/agent-testbench-dev "$@"
   else
-    go run ./cmd/otsandbox "$@"
+    go run ./cmd/agent-testbench "$@"
   fi
 }
 
 if [[ -n "$STORE_NAME" ]]; then
   STORE_URL="$(
-    run_otsandbox store config list --json |
+    run_agent-testbench store config list --json |
       jq -r --arg name "$STORE_NAME" '.stores[] | select(.name == $name) | .url'
   )"
 fi

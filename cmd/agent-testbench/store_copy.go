@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/server/controlplane"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/server/controlplane"
+	"agent-testbench/internal/store"
 )
 
 type storeCopyStateReport struct {

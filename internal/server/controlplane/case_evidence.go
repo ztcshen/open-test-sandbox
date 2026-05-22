@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"open-test-sandbox/internal/domain/redaction"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/redaction"
+	"agent-testbench/internal/store"
 )
 
 var ErrCaseEvidenceNotFound = errors.New("case evidence not found")

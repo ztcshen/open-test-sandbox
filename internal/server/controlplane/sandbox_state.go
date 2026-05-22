@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 const currentSandboxStoreID = "current"

@@ -1,4 +1,4 @@
-# Open Test Sandbox Context
+# AgentTestBench Context
 
 This file defines the shared language for the project.
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	storeopen "open-test-sandbox/internal/store/open"
+	storeopen "agent-testbench/internal/store/open"
 )
 
 func TestBackendFromReferenceRecognizesSupportedDatabaseFamilies(t *testing.T) {
@@ -17,9 +17,9 @@ func TestBackendFromReferenceRecognizesSupportedDatabaseFamilies(t *testing.T) {
 	}{
 		{name: "sqlite dsn", ref: "sqlite:///tmp/store.sqlite", want: storeopen.BackendSQLite},
 		{name: "file dsn", ref: "file:/tmp/store.sqlite", want: storeopen.BackendSQLite},
-		{name: "postgres dsn", ref: "postgres://user:pass@localhost:5432/otsandbox", want: storeopen.BackendPostgres},
-		{name: "postgresql dsn", ref: "postgresql://user:pass@localhost:5432/otsandbox", want: storeopen.BackendPostgres},
-		{name: "mysql dsn", ref: "mysql://user:pass@localhost:3306/otsandbox", want: storeopen.BackendMySQL},
+		{name: "postgres dsn", ref: "postgres://user:pass@localhost:5432/agent-testbench", want: storeopen.BackendPostgres},
+		{name: "postgresql dsn", ref: "postgresql://user:pass@localhost:5432/agent-testbench", want: storeopen.BackendPostgres},
+		{name: "mysql dsn", ref: "mysql://user:pass@localhost:3306/agent-testbench", want: storeopen.BackendMySQL},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,7 +46,7 @@ func TestBackendFromReferenceRequiresExplicitBackendScheme(t *testing.T) {
 }
 
 func TestOpenRoutesRecognizedMySQLBackendToDriver(t *testing.T) {
-	_, err := storeopen.Open(context.Background(), "mysql://user:pass@127.0.0.1:1/otsandbox")
+	_, err := storeopen.Open(context.Background(), "mysql://user:pass@127.0.0.1:1/agent-testbench")
 	if err == nil {
 		t.Fatal("expected mysql open to fail because no test server is listening")
 	}

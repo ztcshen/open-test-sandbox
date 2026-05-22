@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"open-test-sandbox/internal/store/sqlite"
+	"agent-testbench/internal/store/sqlite"
 )
 
 type SQLiteImportOptions struct {

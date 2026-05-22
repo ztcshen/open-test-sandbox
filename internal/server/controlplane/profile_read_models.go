@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"open-test-sandbox/internal/domain/profilecatalog"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profilecatalog"
+	"agent-testbench/internal/store"
 )
 
 func UpsertProfileReadModels(ctx context.Context, runtime store.Store, catalog store.ProfileCatalog, configVersionID string, generatedAt time.Time) ([]string, error) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 )
 
 func handleCaseTiming(w http.ResponseWriter, r *http.Request, runtime store.Store) {

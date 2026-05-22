@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"open-test-sandbox/internal/domain/profileimport/openapi"
+	"agent-testbench/internal/domain/profileimport/openapi"
 )
 
 func TestPlanFromOpenAPIJSONCreatesReviewableProfileAssets(t *testing.T) {

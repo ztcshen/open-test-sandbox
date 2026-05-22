@@ -20,19 +20,19 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/domain/profilecatalog"
-	"open-test-sandbox/internal/runner/apicase"
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/mysql"
-	"open-test-sandbox/internal/store/postgres"
-	"open-test-sandbox/internal/store/schema"
-	"open-test-sandbox/internal/store/sqlite"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
+	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/mysql"
+	"agent-testbench/internal/store/postgres"
+	"agent-testbench/internal/store/schema"
+	"agent-testbench/internal/store/sqlite"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv("OTSANDBOX_TEST_CLI") == "1" {
+	if os.Getenv("AGENT_TESTBENCH_TEST_CLI") == "1" {
 		main()
 		os.Exit(0)
 	}
@@ -44,7 +44,7 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "--store NAME_OR_DSN") {
 		t.Fatalf("top-level help should show Store-first flag, got %q", out)
 	}
-	if !strings.Contains(out, "otsandbox store config set NAME --url postgres://...") || !strings.Contains(out, "otsandbox store config set NAME --url mysql://...") {
+	if !strings.Contains(out, "agent-testbench store config set NAME --url postgres://...") || !strings.Contains(out, "agent-testbench store config set NAME --url mysql://...") {
 		t.Fatalf("top-level help should show copyable PostgreSQL and MySQL Store setup commands:\n%s", out)
 	}
 	for _, want := range []string{"--clean-docker-state", "--clean-docker-images", "--allow-destructive-docker-cleanup"} {
@@ -377,7 +377,7 @@ func TestStoreDDLCommandPrintsMySQLSchema(t *testing.T) {
 
 func TestStoreDDLCommandInfersMySQLBackendFromNamedStore(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@example.com:3306/team_verified?tls=false")
 
 	out := runStoreCommand(t, "ddl", "--store", "team-mysql")
@@ -394,8 +394,8 @@ func TestStoreDDLCommandInfersMySQLBackendFromNamedStore(t *testing.T) {
 
 func TestStoreDDLCommandInfersActiveMySQLBackend(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
-	runStoreCommand(t, "config", "set", "local-mysql", "--url", "mysql://user:secret@example.com:3306/otsandbox_local?tls=false")
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
+	runStoreCommand(t, "config", "set", "local-mysql", "--url", "mysql://user:secret@example.com:3306/agent_testbench_local?tls=false")
 	runStoreCommand(t, "use", "local-mysql")
 
 	out := runStoreCommand(t, "ddl")
@@ -409,8 +409,8 @@ func TestStoreDDLCommandInfersActiveMySQLBackend(t *testing.T) {
 
 func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 	configHome := t.TempDir()
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + configHome}
-	dsn := "postgres://user:secret@example.com:5432/otsandbox_local?sslmode=disable"
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + configHome}
+	dsn := "postgres://user:secret@example.com:5432/agent_testbench_local?sslmode=disable"
 
 	setOut := runCLIWithEnv(t, env, "store", "config", "set", "local-personal", "--url", dsn)
 	if !strings.Contains(setOut, "Configured store: local-personal") || !strings.Contains(setOut, "Backend: postgres") {
@@ -418,11 +418,11 @@ func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 	}
 
 	listOut := runCLIWithEnv(t, env, "store", "config", "list")
-	if !strings.Contains(listOut, "local-personal") || !strings.Contains(listOut, "postgres://user:xxxxx@example.com:5432/otsandbox_local?sslmode=disable") {
+	if !strings.Contains(listOut, "local-personal") || !strings.Contains(listOut, "postgres://user:xxxxx@example.com:5432/agent_testbench_local?sslmode=disable") {
 		t.Fatalf("store config list output = %q", listOut)
 	}
 	listJSONOut := runCLIWithEnv(t, env, "store", "config", "list", "--json")
-	if strings.Contains(listJSONOut, "secret") || !strings.Contains(listJSONOut, "postgres://user:xxxxx@example.com:5432/otsandbox_local?sslmode=disable") {
+	if strings.Contains(listJSONOut, "secret") || !strings.Contains(listJSONOut, "postgres://user:xxxxx@example.com:5432/agent_testbench_local?sslmode=disable") {
 		t.Fatalf("store config list json should mask credentials = %q", listJSONOut)
 	}
 
@@ -441,7 +441,7 @@ func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 	if err := json.Unmarshal([]byte(currentOut), &current); err != nil {
 		t.Fatalf("decode current store: %v\n%s", err, currentOut)
 	}
-	if !current.OK || current.Name != "local-personal" || current.Backend != "postgres" || current.URL != "postgres://user:xxxxx@example.com:5432/otsandbox_local?sslmode=disable" {
+	if !current.OK || current.Name != "local-personal" || current.Backend != "postgres" || current.URL != "postgres://user:xxxxx@example.com:5432/agent_testbench_local?sslmode=disable" {
 		t.Fatalf("current store = %#v", current)
 	}
 	if strings.Contains(currentOut, "secret") {
@@ -451,8 +451,8 @@ func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 
 func TestStoreConfigCommandsManageActiveMySQLStore(t *testing.T) {
 	configHome := t.TempDir()
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + configHome}
-	dsn := "mysql://user:secret@example.com:3306/otsandbox_local?tls=false"
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + configHome}
+	dsn := "mysql://user:secret@example.com:3306/agent_testbench_local?tls=false"
 
 	setOut := runCLIWithEnv(t, env, "store", "config", "set", "local-mysql", "--url", dsn)
 	if !strings.Contains(setOut, "Configured store: local-mysql") || !strings.Contains(setOut, "Backend: mysql") {
@@ -460,7 +460,7 @@ func TestStoreConfigCommandsManageActiveMySQLStore(t *testing.T) {
 	}
 
 	listJSONOut := runCLIWithEnv(t, env, "store", "config", "list", "--json")
-	if strings.Contains(listJSONOut, "secret") || !strings.Contains(listJSONOut, "mysql://user:xxxxx@example.com:3306/otsandbox_local?tls=false") {
+	if strings.Contains(listJSONOut, "secret") || !strings.Contains(listJSONOut, "mysql://user:xxxxx@example.com:3306/agent_testbench_local?tls=false") {
 		t.Fatalf("store config list json should mask mysql credentials = %q", listJSONOut)
 	}
 
@@ -470,14 +470,14 @@ func TestStoreConfigCommandsManageActiveMySQLStore(t *testing.T) {
 	if err := json.Unmarshal([]byte(currentOut), &current); err != nil {
 		t.Fatalf("decode current store: %v\n%s", err, currentOut)
 	}
-	if !current.OK || current.Name != "local-mysql" || current.Backend != "mysql" || current.URL != "mysql://user:xxxxx@example.com:3306/otsandbox_local?tls=false" {
+	if !current.OK || current.Name != "local-mysql" || current.Backend != "mysql" || current.URL != "mysql://user:xxxxx@example.com:3306/agent_testbench_local?tls=false" {
 		t.Fatalf("current store = %#v", current)
 	}
 }
 
 func TestStoreConfigSetRejectsInvalidMySQLDSNBeforePersisting(t *testing.T) {
 	configHome := t.TempDir()
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + configHome}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + configHome}
 
 	out := runCLIFailsWithEnv(t, env, "store", "config", "set", "broken-mysql", "--url", "mysql://user:secret@example.com:3306")
 	if !strings.Contains(out, `store config "broken-mysql" has invalid mysql DSN`) || !strings.Contains(out, "requires database name") {
@@ -491,7 +491,7 @@ func TestStoreConfigSetRejectsInvalidMySQLDSNBeforePersisting(t *testing.T) {
 }
 
 func TestStoreStatusAndUpgradeRequireActiveStore(t *testing.T) {
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 	for _, command := range []string{"status", "upgrade"} {
 		out := runCLIFailsWithEnv(t, env, "store", command)
 		if !strings.Contains(out, "no active store configured") || !strings.Contains(out, "store config set NAME --url postgres://") || !strings.Contains(out, "store config set NAME --url mysql://") {
@@ -505,8 +505,8 @@ func TestStoreStatusSupportsMySQLURLs(t *testing.T) {
 		return mysql.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
 	})
 
-	out := runStoreCommand(t, "status", "--store-url", "mysql://user:secret@localhost:3306/open_test_sandbox")
-	if !strings.Contains(out, "Store: mysql") || !strings.Contains(out, "open_test_sandbox") || strings.Contains(out, "secret") || !strings.Contains(out, fmt.Sprintf("Pending: %d", sqlstore.CurrentSchemaVersion)) {
+	out := runStoreCommand(t, "status", "--store-url", "mysql://user:secret@localhost:3306/agent_testbench")
+	if !strings.Contains(out, "Store: mysql") || !strings.Contains(out, "agent_testbench") || strings.Contains(out, "secret") || !strings.Contains(out, fmt.Sprintf("Pending: %d", sqlstore.CurrentSchemaVersion)) {
 		t.Fatalf("mysql status output = %q", out)
 	}
 }
@@ -516,7 +516,7 @@ func TestStoreStatusSupportsPostgresURLs(t *testing.T) {
 		return postgres.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
 	})
 
-	out := runStoreCommand(t, "status", "--store-url", "postgres://localhost/open_test_sandbox")
+	out := runStoreCommand(t, "status", "--store-url", "postgres://localhost/agent_testbench")
 	if !strings.Contains(out, "Store: postgres") || !strings.Contains(out, "Version: 0") || !strings.Contains(out, fmt.Sprintf("Pending: %d", sqlstore.CurrentSchemaVersion)) {
 		t.Fatalf("postgres status output = %q", out)
 	}
@@ -524,7 +524,7 @@ func TestStoreStatusSupportsPostgresURLs(t *testing.T) {
 
 func TestStoreStatusCanUseNamedPostgresStore(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	withPostgresSchemaStatus(t, func(_ context.Context, cfg postgres.Config) (postgres.SchemaStatusResult, error) {
 		return postgres.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
 	})
@@ -538,7 +538,7 @@ func TestStoreStatusCanUseNamedPostgresStore(t *testing.T) {
 
 func TestStoreStatusCanUseNamedMySQLStore(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	withMySQLSchemaStatus(t, func(_ context.Context, cfg mysql.Config) (mysql.SchemaStatusResult, error) {
 		return mysql.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
 	})
@@ -552,7 +552,7 @@ func TestStoreStatusCanUseNamedMySQLStore(t *testing.T) {
 
 func TestStoreStatusCanEmitJSONForNamedMySQLStore(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	withMySQLSchemaStatus(t, func(_ context.Context, cfg mysql.Config) (mysql.SchemaStatusResult, error) {
 		return mysql.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 1, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
 	})
@@ -577,7 +577,7 @@ func TestStoreStatusCanEmitJSONForNamedMySQLStore(t *testing.T) {
 
 func TestStoreProvisionCanCreateNamedMySQLDatabase(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	withMySQLProvisionDatabase(t, func(_ context.Context, cfg mysql.Config) (mysql.ProvisionDatabaseResult, error) {
 		return mysql.ProvisionDatabaseResult{URL: cfg.URL, Database: "team_verified", Created: true}, nil
 	})
@@ -601,11 +601,11 @@ func TestStoreProvisionCanCreateNamedMySQLDatabase(t *testing.T) {
 
 func TestStoreProvisionJSONReportsMySQLConnectionError(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	withMySQLProvisionDatabase(t, func(context.Context, mysql.Config) (mysql.ProvisionDatabaseResult, error) {
 		return mysql.ProvisionDatabaseResult{}, errors.New("dial tcp 10.0.20.108:3306: i/o timeout")
 	})
-	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@10.0.20.108:3306/OTS_SANDBOX_TEST?tls=false")
+	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@10.0.20.108:3306/AGENT_TESTBENCH_TEST?tls=false")
 
 	out := runStoreCommandFails(t, "provision", "--store", "team-mysql", "--json")
 	var report struct {
@@ -619,18 +619,18 @@ func TestStoreProvisionJSONReportsMySQLConnectionError(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode provision error json: %v\n%s", err, out)
 	}
-	if report.OK || report.Backend != "mysql" || !strings.Contains(report.URL, "OTS_SANDBOX_TEST") || strings.Contains(report.URL, "secret") || !strings.Contains(report.Error, "i/o timeout") {
+	if report.OK || report.Backend != "mysql" || !strings.Contains(report.URL, "AGENT_TESTBENCH_TEST") || strings.Contains(report.URL, "secret") || !strings.Contains(report.Error, "i/o timeout") {
 		t.Fatalf("mysql provision error json = %#v raw=%s", report, out)
 	}
 }
 
 func TestStoreStatusJSONReportsMySQLConnectionError(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	withMySQLSchemaStatus(t, func(context.Context, mysql.Config) (mysql.SchemaStatusResult, error) {
 		return mysql.SchemaStatusResult{}, errors.New("dial tcp 10.0.20.108:3306: i/o timeout")
 	})
-	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@10.0.20.108:3306/OTS_SANDBOX_TEST?tls=false")
+	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@10.0.20.108:3306/AGENT_TESTBENCH_TEST?tls=false")
 
 	out := runStoreCommandFails(t, "status", "--store", "team-mysql", "--json")
 	var report struct {
@@ -644,14 +644,14 @@ func TestStoreStatusJSONReportsMySQLConnectionError(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode status error json: %v\n%s", err, out)
 	}
-	if report.OK || report.Backend != "mysql" || !strings.Contains(report.URL, "OTS_SANDBOX_TEST") || strings.Contains(report.URL, "secret") || report.TargetVersion != sqlstore.CurrentSchemaVersion || report.Pending != sqlstore.CurrentSchemaVersion || !strings.Contains(report.Error, "i/o timeout") {
+	if report.OK || report.Backend != "mysql" || !strings.Contains(report.URL, "AGENT_TESTBENCH_TEST") || strings.Contains(report.URL, "secret") || report.TargetVersion != sqlstore.CurrentSchemaVersion || report.Pending != sqlstore.CurrentSchemaVersion || !strings.Contains(report.Error, "i/o timeout") {
 		t.Fatalf("mysql status error json = %#v raw=%s", report, out)
 	}
 }
 
 func TestStoreReferenceResolutionKeepsLocalAndRemotePostgresCommandShape(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	cfg := storeConfigFile{Stores: map[string]storeConfigEntry{}}
 	local, err := newStoreConfigEntry("local-personal", "postgres://tester:secret@localhost:5432/local_personal?sslmode=disable")
 	if err != nil {
@@ -713,7 +713,7 @@ func TestDailyStoreReferenceRejectsLegacySQLiteStoreURL(t *testing.T) {
 
 func TestDailyStoreReferenceAcceptsNamedSQLiteConfig(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", filepath.Join(dir, "config"))
 	storeRef := "sqlite://" + filepath.Join(dir, "store.sqlite")
 	if err := saveStoreConfig(storeConfigFile{
 		Stores: map[string]storeConfigEntry{
@@ -753,7 +753,7 @@ func TestDailyStoreReferenceAcceptsDirectSQLiteStoreFlag(t *testing.T) {
 
 func TestEnvironmentCommandsAcceptActiveSQLiteStore(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", filepath.Join(dir, "config"))
 	if err := saveStoreConfig(storeConfigFile{
 		Active: "local-sqlite",
 		Stores: map[string]storeConfigEntry{
@@ -1594,16 +1594,16 @@ func TestEnvironmentRestoreRequiresRemoteGitSourcesForSQLOneClickEnvironment(t *
 		name     string
 		storeURL string
 	}{
-		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
-		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/agent_testbench?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			workspace := filepath.Join(t.TempDir(), "workspace")
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env.remote.sources." + tt.name,
-				ReposJSON:              `{"llt":{"url":"/Users/zlh/codes/open-test-sandbox-llt-simulator","checkout":"llt"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				ReposJSON:              `{"llt":{"url":"/Users/zlh/codes/agent-testbench-llt-simulator","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","package":{"url":"/Users/zlh/codes/agent-testbench-validation","checkout":"."}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -1627,15 +1627,15 @@ func TestEnvironmentRestoreRequiresRemoteGitSourcesForSQLOneClickEnvironment(t *
 
 func TestEnvironmentRestoreRequiresRemoteSourcesForSQLStoreBackends(t *testing.T) {
 	for _, storeURL := range []string{
-		"postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-		"postgresql://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-		"mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false",
+		"postgres://tester@127.0.0.1:5432/agent_testbench?sslmode=disable",
+		"postgresql://tester@127.0.0.1:5432/agent_testbench?sslmode=disable",
+		"mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false",
 	} {
 		if !environmentRestoreRequiresRemoteSources(storeURL) {
 			t.Fatalf("SQL Store URL should require remote restore sources: %s", storeURL)
 		}
 	}
-	for _, storeURL := range []string{"", "sqlite:///tmp/otsandbox.sqlite", "file:///tmp/otsandbox.sqlite"} {
+	for _, storeURL := range []string{"", "sqlite:///tmp/agent-testbench.sqlite", "file:///tmp/agent-testbench.sqlite"} {
 		if environmentRestoreRequiresRemoteSources(storeURL) {
 			t.Fatalf("compatibility Store URL should not require SQL remote source policy: %s", storeURL)
 		}
@@ -1723,8 +1723,8 @@ func TestEnvironmentRestoreRequiresComponentGraphForSQLOneClick(t *testing.T) {
 		name     string
 		storeURL string
 	}{
-		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
-		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/agent_testbench?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2051,8 +2051,8 @@ func TestEnvironmentRestoreSQLStoreUsesStoreGeneratedStartupFiles(t *testing.T) 
 		name     string
 		storeURL string
 	}{
-		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
-		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/agent_testbench?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2070,8 +2070,8 @@ func TestEnvironmentRestoreSQLStoreUsesStoreGeneratedStartupFiles(t *testing.T) 
 
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env." + tt.name + ".generated",
-				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  llt:\n    image: alpine:3.20\n"},"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/agent-testbench-llt-simulator.git","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  llt:\n    image: alpine:3.20\n"},"package":{"url":"/Users/zlh/codes/agent-testbench-validation","checkout":"."}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -2098,8 +2098,8 @@ func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGenerated
 		name     string
 		storeURL string
 	}{
-		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
-		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/agent_testbench?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2117,8 +2117,8 @@ func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGenerated
 
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env." + tt.name + ".local.compose",
-				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/agent-testbench-llt-simulator.git","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"package":{"url":"/Users/zlh/codes/agent-testbench-validation","checkout":"."}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -2142,8 +2142,8 @@ func TestEnvironmentRestoreSQLStoreRejectsMissingComposeStartupAssets(t *testing
 		name     string
 		storeURL string
 	}{
-		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
-		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/agent_testbench?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2162,7 +2162,7 @@ func TestEnvironmentRestoreSQLStoreRejectsMissingComposeStartupAssets(t *testing
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env." + tt.name + ".missing.assets",
 				ReposJSON:              `{"app":{"url":"git@example.com:team/app.git","checkout":"app"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n"},"env":{"DOCKER_APP_REPO":"$AGENT_TESTBENCH_WORKSPACE/app","SANDBOX_ROOT":"$AGENT_TESTBENCH_WORKSPACE"}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -2186,8 +2186,8 @@ func TestEnvironmentRestoreSQLStoreAcceptsStoreGeneratedComposeStartupAssets(t *
 		name     string
 		storeURL string
 	}{
-		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
-		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/agent_testbench?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2206,7 +2206,7 @@ func TestEnvironmentRestoreSQLStoreAcceptsStoreGeneratedComposeStartupAssets(t *
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env." + tt.name + ".assets",
 				ReposJSON:              `{"app":{"url":"git@example.com:team/app.git","checkout":"app"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n","compose/mysql/init/schema.sql":"create database app;\n","compose/scripts/run-app.sh":"#!/bin/sh\nexit 0\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n","compose/mysql/init/schema.sql":"create database app;\n","compose/scripts/run-app.sh":"#!/bin/sh\nexit 0\n"},"env":{"DOCKER_APP_REPO":"$AGENT_TESTBENCH_WORKSPACE/app","SANDBOX_ROOT":"$AGENT_TESTBENCH_WORKSPACE"}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -2230,8 +2230,8 @@ func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.
 		name     string
 		storeURL string
 	}{
-		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
-		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/agent_testbench?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/agent_testbench?tls=false"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2250,7 +2250,7 @@ func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env." + tt.name + ".component.assets",
 				ReposJSON:              `{"app":{"url":"https://example.com/team/app.git","checkout":"app"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n"},"env":{"DOCKER_APP_REPO":"$AGENT_TESTBENCH_WORKSPACE/app","SANDBOX_ROOT":"$AGENT_TESTBENCH_WORKSPACE"}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -2776,7 +2776,7 @@ func TestEnvironmentRestoreEdgeAssetsAvoidNonSQLMySQLAndDuplicateApply(t *testin
 	if actions["shared.schema"] != "plan-apply-mysql-sql" || strings.Contains(commands["shared.schema"], "-proot") || !strings.Contains(commands["shared.schema"], "MYSQL_ROOT_PASSWORD") {
 		t.Fatalf("SQL MySQL asset command should use container env credentials: actions=%#v commands=%#v", actions, commands)
 	}
-	if strings.Contains(commands["shared.schema"], "MYSQL_DATABASE") || !strings.Contains(commands["shared.schema"], "OTSANDBOX_MYSQL_APPLY_DATABASE") {
+	if strings.Contains(commands["shared.schema"], "MYSQL_DATABASE") || !strings.Contains(commands["shared.schema"], "AGENT_TESTBENCH_MYSQL_APPLY_DATABASE") {
 		t.Fatalf("SQL MySQL asset command should not force MYSQL_DATABASE by default: %#v", commands)
 	}
 }
@@ -3030,7 +3030,7 @@ func TestEnvironmentRestoreSupportsMultipleComposeFiles(t *testing.T) {
 		"--id", "env.compose.multi",
 		"--compose-file", "compose.base.yml",
 		"--compose-file", "compose.apps.yml",
-		"--compose-env", "SANDBOX_ROOT=$OTS_WORKSPACE",
+		"--compose-env", "SANDBOX_ROOT=$AGENT_TESTBENCH_WORKSPACE",
 		"--compose-skip-pull",
 		"--compose-skip-build",
 		"--health-compose-service", "web",
@@ -3060,11 +3060,11 @@ func TestEnvironmentRestoreSupportsMultipleComposeFiles(t *testing.T) {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
 	want := "compose -f " + filepath.Join(workspace, "compose.base.yml") + " -f " + filepath.Join(workspace, "compose.apps.yml") + " up -d"
-	want = strings.Replace(want, " up -d", " --env-file "+filepath.Join(workspace, ".otsandbox", "restore.env")+" up -d", 1)
+	want = strings.Replace(want, " up -d", " --env-file "+filepath.Join(workspace, ".agent-testbench", "restore.env")+" up -d", 1)
 	if !strings.Contains(string(dockerCalls), want) {
 		t.Fatalf("multi compose docker calls missing %q:\n%s", want, dockerCalls)
 	}
-	envFile, err := os.ReadFile(filepath.Join(workspace, ".otsandbox", "restore.env"))
+	envFile, err := os.ReadFile(filepath.Join(workspace, ".agent-testbench", "restore.env"))
 	if err != nil || !strings.Contains(string(envFile), "SANDBOX_ROOT="+workspace) {
 		t.Fatalf("generated compose env file = %q err=%v", envFile, err)
 	}
@@ -3081,14 +3081,14 @@ func TestEnvironmentRestoreDoesNotPullComposeBuildServices(t *testing.T) {
   llt:
     build:
       context: ${DOCKER_LLT_SIMULATOR_REPO}
-    image: open-test-sandbox/llt-simulator:local
+    image: agent-testbench/llt-simulator:local
 `)
 	runCLI(t, "environment", "register",
 		"--store", "sqlite://"+storePath,
 		"--id", "env.compose.build-filter",
 		"--compose-file", "compose/docker-compose.yml",
 		"--compose-generated-file", "compose/docker-compose.yml="+composeSource,
-		"--compose-env", "DOCKER_LLT_SIMULATOR_REPO=$OTS_WORKSPACE/open-test-sandbox-llt-simulator",
+		"--compose-env", "DOCKER_LLT_SIMULATOR_REPO=$AGENT_TESTBENCH_WORKSPACE/agent-testbench-llt-simulator",
 		"--compose-service", "web",
 		"--compose-service", "llt",
 		"--verification-workflow", "workflow.core-10",
@@ -3444,10 +3444,10 @@ func TestEnvironmentRestoreAssumeCleanDockerIgnoresLocalContainerConflicts(t *te
 	if len(report.NextActions) == 0 || !strings.Contains(report.NextActions[0], "colleague machine") {
 		t.Fatalf("clean-machine next actions should point to colleague machine: %#v", report.NextActions)
 	}
-	if !report.CleanMachine.Ready || strings.Join(report.CleanMachine.ExecuteCommand, " ") != "otsandbox environment restore env.clean-machine --store STORE_NAME_OR_SQL_DSN --workspace "+workspace+" --execute --json" {
+	if !report.CleanMachine.Ready || strings.Join(report.CleanMachine.ExecuteCommand, " ") != "agent-testbench environment restore env.clean-machine --store STORE_NAME_OR_SQL_DSN --workspace "+workspace+" --execute --json" {
 		t.Fatalf("clean-machine execute command = %#v", report.CleanMachine)
 	}
-	if strings.Join(report.CleanMachine.PrepareCommand, " ") != "otsandbox environment restore env.clean-machine --store STORE_NAME_OR_SQL_DSN --workspace "+workspace+" --execute --prepare-repos-only --json" {
+	if strings.Join(report.CleanMachine.PrepareCommand, " ") != "agent-testbench environment restore env.clean-machine --store STORE_NAME_OR_SQL_DSN --workspace "+workspace+" --execute --prepare-repos-only --json" {
 		t.Fatalf("clean-machine prepare command = %#v", report.CleanMachine)
 	}
 	if !restoreCleanMachinePrereqOK(report.CleanMachine.Prerequisites, "tool:docker") || !restoreCleanMachinePrereqOK(report.CleanMachine.Prerequisites, "docker-start-plan") {
@@ -8008,7 +8008,7 @@ func TestCaseRunCommandRequiresActiveStoreBeforeFileExecution(t *testing.T) {
 	writeAPICaseFile(t, casePath)
 	configHome := filepath.Join(dir, "config")
 
-	out := runCLIFailsWithEnv(t, []string{"OTSANDBOX_CONFIG_HOME=" + configHome}, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-no-store")
+	out := runCLIFailsWithEnv(t, []string{"AGENT_TESTBENCH_CONFIG_HOME=" + configHome}, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-no-store")
 	if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
 		t.Fatalf("case run without store output = %q", out)
 	}
@@ -8028,7 +8028,7 @@ func TestCaseRunCommandUsesActiveSQLiteStore(t *testing.T) {
 	dir := t.TempDir()
 	casePath := filepath.Join(dir, "case.json")
 	writeAPICaseFile(t, casePath)
-	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", filepath.Join(dir, "config"))
 	storePath := filepath.Join(dir, "store.sqlite")
 	if err := saveStoreConfig(storeConfigFile{
 		Active: "legacy-local",
@@ -8569,7 +8569,7 @@ func TestDailyReportExecutionsUseSelectedStoreWithoutSQLiteDefault(t *testing.T)
 		t.Fatalf("open selected store before disabling sqlite: %v", err)
 	}
 	defer sourceStore.Close()
-	t.Setenv("OTSANDBOX_DISABLE_SQLITE_STORE", "1")
+	t.Setenv("AGENT_TESTBENCH_DISABLE_SQLITE_STORE", "1")
 
 	interfaceBundle, err := profile.Load(writeInterfaceNodeBatchReportProfile(t))
 	if err != nil {
@@ -8624,7 +8624,7 @@ func TestDailyReportExecutionsUseSelectedStoreWithoutSQLiteDefault(t *testing.T)
 }
 
 func TestInterfaceNodeCaseReportRequiresStoreBeforeProfileLoad(t *testing.T) {
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 	out := runCLIFailsWithEnv(t, env,
 		"interface-node", "case", "report",
 		"--node", "node.alpha",
@@ -8640,7 +8640,7 @@ func TestInterfaceNodeCaseReportRequiresStoreBeforeProfileLoad(t *testing.T) {
 }
 
 func TestWorkflowReportRequiresStoreBeforeProfileLoad(t *testing.T) {
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 	out := runCLIFailsWithEnv(t, env,
 		"workflow", "report",
 		"--workflow", "workflow.alpha",
@@ -8656,7 +8656,7 @@ func TestWorkflowReportRequiresStoreBeforeProfileLoad(t *testing.T) {
 }
 
 func TestCaseSuiteReportRequiresStoreBeforeProfileLoad(t *testing.T) {
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 	out := runCLIFailsWithEnv(t, env,
 		"case", "suite", "report",
 		"--profile", filepath.Join(t.TempDir(), "missing-profile"),
@@ -8736,7 +8736,7 @@ func TestDailyPlanningCommandsRequireStoreBeforeProfileLoad(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+			env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 			out := runCLIFailsWithEnv(t, env, tt.args...)
 			if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
 				t.Fatalf("%s output = %q", tt.name, out)
@@ -8766,7 +8766,7 @@ func TestExecutorAndTemplateCommandsRequireStoreBeforeProfileLoad(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+			env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 			out := runCLIFailsWithEnv(t, env, tt.args...)
 			if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
 				t.Fatalf("%s output = %q", tt.name, out)
@@ -8804,7 +8804,7 @@ func TestAuditCommandsRequireExplicitStoreOrOfflineReviewBeforeProfileLoad(t *te
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+			env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 			out := runCLIFailsWithEnv(t, env, tt.args...)
 			for _, want := range tt.wantPieces {
 				if !strings.Contains(out, want) {
@@ -8886,7 +8886,7 @@ func runCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T, _ string, label s
 
 func TestCaseDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 
 	missingStore := runCLIFailsWithEnv(t, env, "case", "discover", "--profile", profileDir, "--json")
 	if !strings.Contains(missingStore, "--offline-template-package") || !strings.Contains(missingStore, "--store") {
@@ -9142,7 +9142,7 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 
 func TestInterfaceNodeDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 
 	missingStore := runCLIFailsWithEnv(t, env, "interface-node", "discover", "--profile", profileDir, "--json")
 	if !strings.Contains(missingStore, "--offline-template-package") || !strings.Contains(missingStore, "--store") {
@@ -9165,7 +9165,7 @@ func TestInterfaceNodeDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testi
 
 func TestWorkflowDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
 	profileDir := writeWorkflowBatchReportProfile(t)
-	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
 
 	missingStore := runCLIFailsWithEnv(t, env, "workflow", "discover", "--profile", profileDir, "--json")
 	if !strings.Contains(missingStore, "--offline-template-package") || !strings.Contains(missingStore, "--store") {
@@ -10681,7 +10681,7 @@ func TestServeHandlerUsesConfiguredStore(t *testing.T) {
 
 func TestServeHandlerRequiresActiveStore(t *testing.T) {
 	configHome := t.TempDir()
-	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", configHome)
 	cwd := t.TempDir()
 	originalCwd, err := os.Getwd()
 	if err != nil {
@@ -11188,10 +11188,10 @@ func runServeAndEvidenceTasksUseNamedActiveStore(t *testing.T, storeRef string, 
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)
-	cmd.Env = append(os.Environ(), "OTSANDBOX_TEST_CLI=1")
+	cmd.Env = append(os.Environ(), "AGENT_TESTBENCH_TEST_CLI=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("otsandbox %s failed: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("agent-testbench %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
 }
@@ -11226,11 +11226,11 @@ func writeTestJSON(t *testing.T, w http.ResponseWriter, status int, value any) {
 
 func configureNamedPostgreSQLActiveStore(t *testing.T, name string) string {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_TEST_PG_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_TEST_PG_DSN"))
 	if dsn == "" {
-		t.Skip("set OTSANDBOX_TEST_PG_DSN to run named PostgreSQL daily path coverage")
+		t.Skip("set AGENT_TESTBENCH_TEST_PG_DSN to run named PostgreSQL daily path coverage")
 	}
-	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	runCLI(t, "store", "config", "set", name, "--url", dsn)
 	runCLI(t, "store", "use", name)
 	runCLI(t, "store", "upgrade")
@@ -11239,11 +11239,11 @@ func configureNamedPostgreSQLActiveStore(t *testing.T, name string) string {
 
 func configureNamedMySQLActiveStore(t *testing.T, name string) string {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_MYSQL_TEST_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_MYSQL_TEST_DSN"))
 	if dsn == "" {
-		t.Skip("set OTSANDBOX_MYSQL_TEST_DSN to run named MySQL daily path coverage")
+		t.Skip("set AGENT_TESTBENCH_MYSQL_TEST_DSN to run named MySQL daily path coverage")
 	}
-	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	runCLI(t, "store", "config", "set", name, "--url", dsn)
 	runCLI(t, "store", "use", name)
 	runCLI(t, "store", "upgrade")
@@ -11254,7 +11254,7 @@ func configureNamedMySQLActiveStore(t *testing.T, name string) string {
 func configureNamedSQLiteActiveStore(t *testing.T, name string) string {
 	t.Helper()
 	storeRef := "sqlite://" + filepath.Join(t.TempDir(), "store.sqlite")
-	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	runCLI(t, "store", "config", "set", name, "--url", storeRef)
 	runCLI(t, "store", "use", name)
 	runCLI(t, "store", "upgrade")
@@ -11502,10 +11502,10 @@ exec %q "${args[@]}"
 func runCLIWithEnv(t *testing.T, env []string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)
-	cmd.Env = append(append(os.Environ(), env...), "OTSANDBOX_TEST_CLI=1")
+	cmd.Env = append(append(os.Environ(), env...), "AGENT_TESTBENCH_TEST_CLI=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("otsandbox %s failed: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("agent-testbench %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
 }
@@ -11513,10 +11513,10 @@ func runCLIWithEnv(t *testing.T, env []string, args ...string) string {
 func runCLIFailsWithEnv(t *testing.T, env []string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)
-	cmd.Env = append(append(os.Environ(), env...), "OTSANDBOX_TEST_CLI=1")
+	cmd.Env = append(append(os.Environ(), env...), "AGENT_TESTBENCH_TEST_CLI=1")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("otsandbox %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
+		t.Fatalf("agent-testbench %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
 	}
 	return string(out)
 }
@@ -11631,10 +11631,10 @@ func hasReadModels(readModels []string, required ...string) bool {
 func runCLIFails(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)
-	cmd.Env = append(os.Environ(), "OTSANDBOX_TEST_CLI=1")
+	cmd.Env = append(os.Environ(), "AGENT_TESTBENCH_TEST_CLI=1")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("otsandbox %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
+		t.Fatalf("agent-testbench %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
 	}
 	return string(out)
 }

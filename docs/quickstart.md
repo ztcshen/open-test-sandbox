@@ -19,61 +19,61 @@ npm ci
 ## Verify the Checkout
 
 ```sh
-./bin/otsandbox.sh version
+./bin/agent-testbench.sh version
 # SQL Store examples:
 # PostgreSQL:
-OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
 # MySQL:
-OTSANDBOX_DEMO_STORE="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check
 # SQLite:
-OTSANDBOX_DEMO_STORE="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check
 ```
 
 The release check requires a SQLite, PostgreSQL, or MySQL smoke Store DSN. It runs Go
 tests, the source-domain guardrail, the React build, active SQL Store CLI
 smoke, and a SQL Store headless browser smoke test against a generated generic import
 bundle. For final live topology sign-off, add
-`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
-`OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` with trace id mappings
+`AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`, `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`,
+`AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` with trace id mappings
 for every configured workflow step so release-check fails instead of using the
 synthetic SkyWalking provider or a partial trace-id set.
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store, or
-`OTSANDBOX_DEMO_STORE=postgres://...` / `OTSANDBOX_DEMO_STORE=mysql://...` /
-`OTSANDBOX_DEMO_STORE=sqlite://...`, and
+`AGENT_TESTBENCH_DEMO_STORE=postgres://...` / `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
+`AGENT_TESTBENCH_DEMO_STORE=sqlite://...`, and
 prints the Evidence bundle path.
 MySQL demo Stores must use dedicated sandbox/smoke/test/CI-looking database
 names and must not point at application schemas.
 Demo output is kept under the system temp directory so you can inspect it after
-the command exits. Set `OTSANDBOX_CLEAN_DEMO_OUTPUT=1` to remove it
+the command exits. Set `AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.
 
 ## Configure a SQL Store
 
 ```sh
-./bin/otsandbox.sh store config set local-personal \
-  --url "postgres://user:pass@host:5432/otsandbox_local?sslmode=disable"
-./bin/otsandbox.sh store use local-personal
-./bin/otsandbox.sh store status --store local-personal
-./bin/otsandbox.sh store upgrade --store local-personal
-./bin/otsandbox.sh store ddl --backend postgres > otsandbox-schema.sql
+./bin/agent-testbench.sh store config set local-personal \
+  --url "postgres://user:pass@host:5432/agent_testbench_local?sslmode=disable"
+./bin/agent-testbench.sh store use local-personal
+./bin/agent-testbench.sh store status --store local-personal
+./bin/agent-testbench.sh store upgrade --store local-personal
+./bin/agent-testbench.sh store ddl --backend postgres > agent-testbench-schema.sql
 
-./bin/otsandbox.sh store config set team-mysql \
-  --url "mysql://user:pass@host:3306/otsandbox_local?tls=false"
-./bin/otsandbox.sh store use team-mysql
+./bin/agent-testbench.sh store config set team-mysql \
+  --url "mysql://user:pass@host:3306/agent_testbench_local?tls=false"
+./bin/agent-testbench.sh store use team-mysql
 tools/smoke/mysql-store-preflight.sh --store team-mysql \
   --output-prefix .runtime/team-mysql-preflight
 python3 tools/smoke/mysql-handshake-probe.py \
-  --url "mysql://user:xxxxx@host:3306/otsandbox_local?tls=false" \
+  --url "mysql://user:xxxxx@host:3306/agent_testbench_local?tls=false" \
   --json
-./bin/otsandbox.sh store provision --store team-mysql --json
-./bin/otsandbox.sh store status --store team-mysql
-./bin/otsandbox.sh store status --store team-mysql --json
-./bin/otsandbox.sh store upgrade --store team-mysql
-./bin/otsandbox.sh store ddl --store team-mysql > otsandbox-mysql-schema.sql
+./bin/agent-testbench.sh store provision --store team-mysql --json
+./bin/agent-testbench.sh store status --store team-mysql
+./bin/agent-testbench.sh store status --store team-mysql --json
+./bin/agent-testbench.sh store upgrade --store team-mysql
+./bin/agent-testbench.sh store ddl --store team-mysql > agent-testbench-mysql-schema.sql
 
 # Promote verified restore metadata from a local Store into the team MySQL Store.
 npm run store:publish:mysql -- \
@@ -86,7 +86,7 @@ npm run store:publish:mysql -- \
   --verify-control-plane-url http://127.0.0.1:58663
 
 # The underlying copy command is also available when you need a custom script.
-./bin/otsandbox.sh store copy --from local-personal --to team-mysql \
+./bin/agent-testbench.sh store copy --from local-personal --to team-mysql \
   --require-environment local-sample \
   --require-verification-workflow workflow.local-sample \
   --require-verified-environment \
@@ -94,11 +94,11 @@ npm run store:publish:mysql -- \
   --require-min-assets 1 \
   --json
 
-./bin/otsandbox.sh store config set local-sqlite \
-  --url "sqlite://$PWD/.runtime/otsandbox-local.sqlite"
-./bin/otsandbox.sh store use local-sqlite
-./bin/otsandbox.sh store status --store local-sqlite
-./bin/otsandbox.sh store upgrade --store local-sqlite
+./bin/agent-testbench.sh store config set local-sqlite \
+  --url "sqlite://$PWD/.runtime/agent-testbench-local.sqlite"
+./bin/agent-testbench.sh store use local-sqlite
+./bin/agent-testbench.sh store status --store local-sqlite
+./bin/agent-testbench.sh store upgrade --store local-sqlite
 ```
 
 Run `store provision`, `store upgrade`, and `store copy` only after the MySQL
@@ -115,7 +115,7 @@ include the profile catalog, profile index, active config version, and read
 models used by the acceptance workflow.
 When a control plane is already running, pass `--verify-control-plane-url` to
 also prove `/api/store/current` is serving from the same MySQL Store; restart
-`otsandbox serve` with the target Store if that check fails.
+`agent-testbench serve` with the target Store if that check fails.
 
 After a team Store has been published, a colleague can restore from that shared
 MySQL Store without copying local Store data:
@@ -123,7 +123,7 @@ MySQL Store without copying local Store data:
 ```sh
 npm run store:restore:mysql -- \
   --store team-mysql \
-  --store-url "mysql://user:pass@host:3306/otsandbox_team?tls=false" \
+  --store-url "mysql://user:pass@host:3306/agent_testbench_team?tls=false" \
   --environment local-sample \
   --workspace "$HOME/open-test-runtime" \
   --server-url http://127.0.0.1:58663 \
@@ -160,7 +160,7 @@ next operator or colleague command to run.
 
 Use a private SQLite, PostgreSQL, or MySQL Store for unverified local work and a
 separate shared PostgreSQL or MySQL database for verified team environments.
-The Open Test Sandbox Store is the control-plane database and should already
+The AgentTestBench Store is the control-plane database and should already
 exist outside any Docker environment restored for a tested target. Do not point
 the Store DSN at a Docker database that `environment restore` is responsible
 for starting; application databases used by the tested services belong to the
@@ -170,18 +170,18 @@ For an optional organization-owned MySQL path, validate against a dedicated
 sandbox Store database:
 
 ```sh
-OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
-OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
-OTS_SMOKE_EXPECTED_STEPS=2 \
-OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
-OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 \
+AGENT_TESTBENCH_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
+AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS=2 \
+AGENT_TESTBENCH_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
+AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" \
 npm run release-check:mysql-real:preflight
 
-OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
-OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
-OTS_SMOKE_EXPECTED_STEPS=2 \
-OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
-OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 \
+AGENT_TESTBENCH_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
+AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS=2 \
+AGENT_TESTBENCH_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
+AGENT_TESTBENCH_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" \
 npm run release-check:mysql-real
 ```
 
@@ -194,11 +194,11 @@ validation. It uses existing-database contract mode, so the operator account
 needs normal DDL/DML permissions on that dedicated Store database but does not
 need permission to create or drop databases. It also requires the real
 SkyWalking release mode and trace ids for every configured workflow step;
-`OTS_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic topology
-smoke is not accepted by this wrapper, and `OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop`
+`AGENT_TESTBENCH_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic topology
+smoke is not accepted by this wrapper, and `AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE=create-drop`
 overrides are rejected.
 Direct Go MySQL contract tests also require an explicit
-`OTSANDBOX_MYSQL_TEST_DSN_MODE`; use `existing` for shared smoke databases and
+`AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE`; use `existing` for shared smoke databases and
 reserve `create-drop` for local admin-only tests.
 The generic MySQL release-check path, CLI smoke, frontend smoke, and standalone
 MySQL API smoke apply the same dedicated database-name guard before running
@@ -210,9 +210,9 @@ PostgreSQL Store, a remote team PostgreSQL Store, and a team MySQL Store. Use
 one-off read:
 
 ```sh
-./bin/otsandbox.sh case discover --filter "login"
-./bin/otsandbox.sh workflow discover --store team-verified --filter "smoke"
-./bin/otsandbox.sh interface-node discover --store local-personal --filter "POST /orders"
+./bin/agent-testbench.sh case discover --filter "login"
+./bin/agent-testbench.sh workflow discover --store team-verified --filter "smoke"
+./bin/agent-testbench.sh interface-node discover --store local-personal --filter "POST /orders"
 ```
 
 ## Register and Verify an Environment
@@ -222,14 +222,14 @@ facts needed to reach the service and observability endpoint, then verify before
 publishing it to the verified discovery list:
 
 ```sh
-./bin/otsandbox.sh environment register --store local-personal --id local-sample
-./bin/otsandbox.sh environment discover --store local-personal
-./bin/otsandbox.sh environment inspect --store local-personal local-sample
-./bin/otsandbox.sh environment bootstrap --store local-personal local-sample
-./bin/otsandbox.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --json
-./bin/otsandbox.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --execute --run-workflow --server-url http://127.0.0.1:58663 --base-url http://127.0.0.1:8080 --json
-./bin/otsandbox.sh environment verify --store local-personal local-sample --run RUN_ID --status passed --evidence-complete --topology-complete
-./bin/otsandbox.sh environment publish-verified --store local-personal local-sample
+./bin/agent-testbench.sh environment register --store local-personal --id local-sample
+./bin/agent-testbench.sh environment discover --store local-personal
+./bin/agent-testbench.sh environment inspect --store local-personal local-sample
+./bin/agent-testbench.sh environment bootstrap --store local-personal local-sample
+./bin/agent-testbench.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --json
+./bin/agent-testbench.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --execute --run-workflow --server-url http://127.0.0.1:58663 --base-url http://127.0.0.1:8080 --json
+./bin/agent-testbench.sh environment verify --store local-personal local-sample --run RUN_ID --status passed --evidence-complete --topology-complete
+./bin/agent-testbench.sh environment publish-verified --store local-personal local-sample
 ```
 
 An environment can appear in verified discovery only after its verification
@@ -286,7 +286,7 @@ Environment Catalog verification run status are written to the selected Store.
 Restore records Evidence completeness from the workflow result but does not
 mark SkyWalking topology complete or publish the environment as verified; real
 topology collection and `publish-verified` remain separate gates. Use
-`--server-url` points at the Open Test Sandbox control plane that will run the
+`--server-url` points at the AgentTestBench control plane that will run the
 acceptance workflow; `--base-url` is optional target-service context for the
 workflow. Use `--workflow-output-dir` when you want a fixed local report
 directory. When `composeFile` is recorded, the
@@ -360,12 +360,12 @@ CLI restore path.
 
 ```sh
 template_dir="$(mktemp -d)/template-package"
-./bin/otsandbox.sh template-package init \
+./bin/agent-testbench.sh template-package init \
   --output "$template_dir" \
   --id sample \
   --display-name "Sample Template Package"
-./bin/otsandbox.sh template-package install --from "$template_dir" --force
-./bin/otsandbox.sh template-package verify --template-package "$template_dir" --store local-personal --force
+./bin/agent-testbench.sh template-package install --from "$template_dir" --force
+./bin/agent-testbench.sh template-package verify --template-package "$template_dir" --store local-personal --force
 ```
 
 The core repository intentionally ships without bundled team template packages.
@@ -377,7 +377,7 @@ the active SQL Store, Environment Catalog, CLI/API discovery, and the workbench.
 ## Start the Workbench
 
 ```sh
-./bin/otsandbox.sh serve \
+./bin/agent-testbench.sh serve \
   --store local-personal \
   --host 127.0.0.1 \
   --port 18191

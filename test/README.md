@@ -1,6 +1,6 @@
 # Test Asset Layout
 
-Open Test Sandbox keeps fast, generic Go unit tests next to the package they
+AgentTestBench keeps fast, generic Go unit tests next to the package they
 exercise. Shared test assets belong here when they are safe to publish.
 
 - `fixtures/`: public sample profiles, API cases, Store payloads, and traces.

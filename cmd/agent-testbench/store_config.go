@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"open-test-sandbox/internal/store/mysql"
-	"open-test-sandbox/internal/store/postgres"
-	"open-test-sandbox/internal/store/sqlite"
+	"agent-testbench/internal/store/mysql"
+	"agent-testbench/internal/store/postgres"
+	"agent-testbench/internal/store/sqlite"
 )
 
 type storeConfigFile struct {
@@ -39,7 +39,7 @@ var errNoActiveStoreConfigured = errors.New("no active store configured")
 const legacyStoreURLFlagHelp = "Deprecated compatibility Store URL or path; use --store NAME_OR_DSN for daily commands"
 
 func activeStoreRequiredError() error {
-	return fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...`, `otsandbox store config set NAME --url mysql://...`, or `otsandbox store config set NAME --url sqlite://PATH`, then `otsandbox store use NAME`", errNoActiveStoreConfigured)
+	return fmt.Errorf("%w; run `agent-testbench store config set NAME --url postgres://...`, `agent-testbench store config set NAME --url mysql://...`, or `agent-testbench store config set NAME --url sqlite://PATH`, then `agent-testbench store use NAME`", errNoActiveStoreConfigured)
 }
 
 func dailyStoreRequiresSQLStoreError(name string, backend string) error {
@@ -49,7 +49,7 @@ func dailyStoreRequiresSQLStoreError(name string, backend string) error {
 	} else if !strings.HasPrefix(name, "--") {
 		name = fmt.Sprintf("Store config %q", name)
 	}
-	return fmt.Errorf("%s uses %s; daily commands require a SQL Store. Use `otsandbox store config set NAME --url postgres://...`, `otsandbox store config set NAME --url mysql://...`, or `otsandbox store config set NAME --url sqlite://PATH`, then `otsandbox store use NAME`", name, backend)
+	return fmt.Errorf("%s uses %s; daily commands require a SQL Store. Use `agent-testbench store config set NAME --url postgres://...`, `agent-testbench store config set NAME --url mysql://...`, or `agent-testbench store config set NAME --url sqlite://PATH`, then `agent-testbench store use NAME`", name, backend)
 }
 
 func runStoreConfig(args []string) error {
@@ -426,14 +426,18 @@ func saveStoreConfig(cfg storeConfigFile) error {
 }
 
 func storeConfigPath() (string, error) {
-	if home := strings.TrimSpace(os.Getenv("OTSANDBOX_CONFIG_HOME")); home != "" {
+	if home := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_CONFIG_HOME")); home != "" {
 		return filepath.Join(home, "store-config.json"), nil
 	}
+	return defaultStoreConfigPath("agent-testbench")
+}
+
+func defaultStoreConfigPath(appName string) (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "open-test-sandbox", "store-config.json"), nil
+	return filepath.Join(dir, appName, "store-config.json"), nil
 }
 
 func maskStoreURL(rawURL string) string {

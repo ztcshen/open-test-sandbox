@@ -1,15 +1,15 @@
-# Open Test Sandbox Agent Guide
+# AgentTestBench Agent Guide
 
-Open Test Sandbox is a new open-source-oriented project. Keep the core generic,
-API-operated, Store-first, and local-first.
+AgentTestBench is a new open-source-oriented project. Keep the core generic,
+agent-native, API-operated, Store-first, and local-first.
 
 ## Core Rules
 
 - Do not hardcode a concrete business domain into core packages.
 - Source code and default core assets must not contain source-domain terms.
   Put domain-specific names and language only in private validation/config data.
-- Treat test engineers as sandbox users, not external configuration maintainers.
-  Day-to-day testing should be possible through sandbox APIs and UI discovery,
+- Treat test engineers and agents as workbench users, not external configuration maintainers.
+  Day-to-day testing should be possible through AgentTestBench APIs and UI discovery,
   with minimal one-time registration when a runtime or service must be known.
 - SQL Store is the active source of truth for current sandbox configuration,
   runtime facts, workflow catalog, execution state, Evidence indexes, and
@@ -47,7 +47,7 @@ API-operated, Store-first, and local-first.
 
 ## Project Shape
 
-- `cmd/otsandbox/`: CLI entrypoint.
+- `cmd/agent-testbench/`: CLI entrypoint.
 - `internal/server/controlplane/`: generic control-plane API and workbench server.
 - `internal/runner/`: automation runners, request rendering, report output, and Evidence import helpers.
 - `internal/domain/`: generic profile, case-suite, redaction, and audit domain logic.
@@ -61,5 +61,7 @@ of becoming the daily maintenance surface.
 
 ## Naming
 
-The working product name is **Open Test Sandbox**. Keep names easy to change
-until the first public release.
+The product name is **AgentTestBench** and the preferred repository slug is
+`agent-testbench`. The primary CLI path is `cmd/agent-testbench`, the wrapper is
+`bin/agent-testbench.sh`, and public environment variables use the
+`AGENT_TESTBENCH_*` namespace.

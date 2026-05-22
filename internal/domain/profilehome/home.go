@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"open-test-sandbox/internal/domain/profile"
+	"agent-testbench/internal/domain/profile"
 )
 
 type InstallReport struct {
@@ -67,14 +67,14 @@ type Counts struct {
 
 func ResolveHome(value string) (string, error) {
 	if strings.TrimSpace(value) == "" {
-		value = os.Getenv("OTSANDBOX_PROFILE_HOME")
+		value = os.Getenv("AGENT_TESTBENCH_PROFILE_HOME")
 	}
 	if strings.TrimSpace(value) == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		value = filepath.Join(home, ".otsandbox", "profiles")
+		value = filepath.Join(home, ".agent-testbench", "profiles")
 	}
 	return filepath.Abs(value)
 }
@@ -349,7 +349,7 @@ func IsArchivePath(path string) bool {
 }
 
 func extractProfileArchive(path string) (string, func(), error) {
-	tempDir, err := os.MkdirTemp("", "otsandbox-profile-archive-*")
+	tempDir, err := os.MkdirTemp("", "agent-testbench-profile-archive-*")
 	if err != nil {
 		return "", func() {}, err
 	}

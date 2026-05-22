@@ -9,7 +9,7 @@ const rootDir = path.resolve(new URL("../..", import.meta.url).pathname);
 const scriptPath = path.join(rootDir, "tools/smoke/mysql-store-preflight.sh");
 
 test("MySQL Store preflight writes masked blocked report before Store mutation", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-mysql-preflight-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-mysql-preflight-"));
   const fakeProbe = path.join(tempDir, "fake-mysql-probe.sh");
   await writeFile(fakeProbe, `#!/usr/bin/env bash
 cat <<'JSON'
@@ -23,14 +23,14 @@ exit 2
   const result = spawnSync("bash", [
     scriptPath,
     "--url",
-    "mysql://baofoo:secret@10.0.20.108:3306/OTS_SANDBOX_TEST?tls=false",
+    "mysql://baofoo:secret@10.0.20.108:3306/AGENT_TESTBENCH_TEST?tls=false",
     "--output-prefix",
     outputPrefix,
   ], {
     cwd: rootDir,
     env: {
       ...process.env,
-      OTSANDBOX_MYSQL_HANDSHAKE_PROBE: fakeProbe,
+      AGENT_TESTBENCH_MYSQL_HANDSHAKE_PROBE: fakeProbe,
     },
     encoding: "utf8",
   });
@@ -40,7 +40,7 @@ exit 2
   assert.doesNotMatch(result.stderr, /secret/);
 
   const blocked = await readFile(`${outputPrefix}-mysql-preflight-blocked.md`, "utf8");
-  assert.match(blocked, /mysql:\/\/baofoo:xxxxx@10\.0\.20\.108:3306\/OTS_SANDBOX_TEST/);
+  assert.match(blocked, /mysql:\/\/baofoo:xxxxx@10\.0\.20\.108:3306\/AGENT_TESTBENCH_TEST/);
   assert.match(blocked, /The script stopped before store provision, schema upgrade, store copy, read-back, or restore/);
   assert.match(blocked, /mysql_error: `timed out`/);
   assert.doesNotMatch(blocked, /secret/);

@@ -1,16 +1,16 @@
 # CLI and API Surface
 
-This document summarizes the current Open Test Sandbox command-line and
+This document summarizes the current AgentTestBench command-line and
 control-plane HTTP surfaces, then calls out where the two are not yet one-to-one.
 
-Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
+Verification baseline: this page was checked against `cmd/agent-testbench/main.go`,
 `internal/server/controlplane/server.go`, and `go test ./...`.
 
 ## Scope
 
-- CLI means `otsandbox ...`.
+- CLI means `agent-testbench ...`.
 - CLI is the primary operator surface for daily local testing workflows.
-- API means local control-plane routes exposed by `otsandbox serve` for the
+- API means local control-plane routes exposed by `agent-testbench serve` for the
   workbench, automation, and agents; it is not a separate cloud product surface.
 - Static HTML pages under `control-plane/static/` are UI entrypoints, not API
   contracts, so they are not counted as API parity targets here.

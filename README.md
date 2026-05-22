@@ -1,21 +1,22 @@
-# Open Test Sandbox
+# AgentTestBench
 
-[![CI](https://github.com/ztcshen/open-test-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/ztcshen/open-test-sandbox/actions/workflows/ci.yml)
+[![CI](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml/badge.svg)](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 **English** | [简体中文](README.zh-CN.md)
 
-Open Test Sandbox is a local-first, API-operated testing workbench. It helps
-test engineers and automation agents discover runnable targets, run API cases
-and workflows, record reproducible Evidence, and inspect compact HTML/JSON
-reports without hardcoding one business domain into the open-source core.
+AgentTestBench is an agent-native test environment for API workflows,
+auditable Evidence, and quality gates. It helps test engineers and automation
+agents discover runnable targets, run API cases and workflows, record
+reproducible Evidence, and inspect compact HTML/JSON reports without
+hardcoding one business domain into the open-source core.
 
 ## Product Direction
 
-The current product direction is Store-first:
+The current product direction is agent-native and Store-first:
 
-- Test engineers use the sandbox through APIs and UI. They do not maintain a
-  separate sandbox project or repeatedly edit external configuration.
+- Test engineers and agents use the workbench through APIs and UI. They do not
+  maintain a separate sandbox project or repeatedly edit external configuration.
 - SQL Store is the active Store for current sandbox state, runtime facts,
   workflow catalog, execution state, Evidence indexes, and verification
   results. SQLite, PostgreSQL, and MySQL are supported SQL Store engines. Local
@@ -38,9 +39,10 @@ Modern integration testing often has three painful gaps:
 - failing cases rarely come with enough request, response, log, timing, and
   topology Evidence to review quickly.
 
-Open Test Sandbox turns those pieces into one local control plane. The Store is
+AgentTestBench turns those pieces into one local control plane. The Store is
 the live source of truth; CLI, Control plane APIs, the React workbench, reports,
-and validation tools all read the same facts.
+and validation tools all read the same facts. Agents get a discover-then-run
+contract instead of guessing target ids from prompts or private notes.
 
 ## Current Shape
 
@@ -63,7 +65,7 @@ and validation tools all read the same facts.
 | Capability | What it means |
 | --- | --- |
 | SQL Store-first | Named SQLite, PostgreSQL, or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
-| API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through sandbox APIs and UI discovery. |
+| API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through AgentTestBench APIs and UI discovery. |
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
 | Workflow execution | Run ordered workflow steps and keep per-step Evidence, timing, status, logs, and topology. |
@@ -75,7 +77,7 @@ and validation tools all read the same facts.
 
 ## Who It Helps
 
-- **Test engineers** who need to consume a sandbox through stable APIs and UI,
+- **Test engineers** who need to consume a test environment through stable APIs and UI,
   not maintain another local project.
 - **QA and platform teams** that need a repeatable local workbench for
   integration cases, workflow regressions, and runtime Evidence.
@@ -89,24 +91,27 @@ Install dependencies and verify the checkout:
 
 ```sh
 npm ci
-./bin/otsandbox.sh version
+./bin/agent-testbench.sh version
 # SQL Store examples:
 # PostgreSQL:
-OTSANDBOX_DEMO_STORE='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_DEMO_STORE='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
 # MySQL:
-OTSANDBOX_DEMO_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_DEMO_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
 # SQLite:
-OTSANDBOX_DEMO_STORE="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check
 ```
+
+The primary CLI is `agent-testbench`; public configuration and smoke-test
+environment variables use the `AGENT_TESTBENCH_*` namespace.
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or
-`OTSANDBOX_DEMO_STORE=postgres://...` /
-`OTSANDBOX_DEMO_STORE=mysql://...` /
-`OTSANDBOX_DEMO_STORE=sqlite://...`, and prints the Evidence bundle path. The
+`AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
+`AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
+`AGENT_TESTBENCH_DEMO_STORE=sqlite://...`, and prints the Evidence bundle path. The
 demo and release gate require dedicated MySQL Store database names that look
 like sandbox/smoke/test/CI targets; do not point them at an application schema. The
 release gate requires a SQLite, PostgreSQL, or MySQL smoke Store DSN.
@@ -117,18 +122,18 @@ headless browser smoke tests.
 By default, smoke tests use a deterministic synthetic SkyWalking GraphQL
 provider so local wiring checks are repeatable. This is not release evidence
 for a real SkyWalking deployment. To validate the real topology path, set
-`OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
-`OTS_SMOKE_TRACE_IDS` so the configured workflow smoke uses real trace ids. For
+`AGENT_TESTBENCH_TRACE_GRAPHQL_URL`, `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and
+`AGENT_TESTBENCH_SMOKE_TRACE_IDS` so the configured workflow smoke uses real trace ids. For
 final sign-off that must fail instead of using synthetic topology evidence,
-also set `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`; in that mode
-`OTS_SMOKE_TRACE_IDS` must map every configured workflow step.
+also set `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`; in that mode
+`AGENT_TESTBENCH_SMOKE_TRACE_IDS` must map every configured workflow step.
 When no SkyWalking endpoint is configured, topology collection must
 report unavailable, failed, or skipped status instead of inventing a topology.
 
 ## Architecture
 
 ```text
-Sandbox APIs and UI
+AgentTestBench APIs and UI
   -> active SQL Store (SQLite, PostgreSQL, or MySQL)
   -> catalog read-models
   -> Environment Catalog and component graph
@@ -142,7 +147,7 @@ Sandbox APIs and UI
 
 Core packages stay generic:
 
-- `cmd/otsandbox/`: CLI entrypoint and command orchestration.
+- `cmd/agent-testbench/`: CLI entrypoint and command orchestration.
 - `internal/server/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.
 - `internal/runner/`: runnable automation helpers such as API cases, request templates, JUnit output, executor planning, and Evidence import.
 - `internal/domain/`: generic profile, case-suite, redaction, and audit domain logic.
@@ -151,7 +156,7 @@ Core packages stay generic:
 - `internal/store/mysql/`: MySQL product Store backend.
 - `internal/store/sqlite/`: SQLite product Store backend for local and personal Stores.
 - `control-plane/frontend/`: React workbench source.
-- `control-plane/static/`: built static workbench assets served by `otsandbox serve`.
+- `control-plane/static/`: built static workbench assets served by `agent-testbench serve`.
 
 ## Documentation
 
@@ -201,13 +206,13 @@ Current working areas:
   acceptance workflow recording, and verified publishing gates.
 - Workbench: local React pages backed by Control plane APIs for catalog,
   workflow, environment, run, Evidence, and topology review.
-- Release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`
-  or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`; for an
+- Release gate: `AGENT_TESTBENCH_SMOKE_STORE_DSN=postgres://... npm run release-check`
+  or `AGENT_TESTBENCH_SMOKE_STORE_DSN=mysql://... npm run release-check`; for an
   optional organization-owned MySQL Store sign-off, run
   `npm run release-check:mysql-real:preflight` first, then
   `npm run release-check:mysql-real` with
-  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
-  `OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` for every configured
+  `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`, `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`,
+  `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` for every configured
   workflow step.
 
 Remaining optional real-environment proof is operational rather than
@@ -220,11 +225,11 @@ for that workflow before running the strict gate.
 Run the full local gate before publishing a change:
 
 ```sh
-OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
 # or
-OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
-[docs/release-checklist.md](docs/release-checklist.md). Open Test Sandbox is
+[docs/release-checklist.md](docs/release-checklist.md). AgentTestBench is
 licensed under the [Apache License 2.0](LICENSE).

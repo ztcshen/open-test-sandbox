@@ -5,7 +5,7 @@ import { buildEvidenceArtifacts, buildEvidenceNavigation, buildEvidenceReproduct
 import { TopologyDiagram, topologyEdges } from "./topologyView.jsx";
 import { isSkyWalkingTopology, unavailableSkyWalkingTopology } from "./workflowStepModel.mjs";
 
-const STORAGE_PREFIX = "open-test-sandbox-evidence:";
+const STORAGE_PREFIX = "agent-testbench-evidence:";
 
 function query() {
   const params = new URLSearchParams(window.location.search);

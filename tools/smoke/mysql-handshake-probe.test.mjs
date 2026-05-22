@@ -46,7 +46,7 @@ async function withServer(handler, fn) {
 function mysqlHandshakePacket() {
   const payload = Buffer.concat([
     Buffer.from([10]),
-    Buffer.from("8.0.36-otsandbox-test\0", "utf8"),
+    Buffer.from("8.0.36-agent-testbench-test\0", "utf8"),
     Buffer.from([1, 0, 0, 0]),
   ]);
   const header = Buffer.from([
@@ -67,7 +67,7 @@ test("mysql handshake probe accepts a real initial handshake packet", async () =
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, true);
     assert.equal(report.handshake.protocol, 10);
-    assert.equal(report.handshake.serverVersion, "8.0.36-otsandbox-test");
+    assert.equal(report.handshake.serverVersion, "8.0.36-agent-testbench-test");
   });
 });
 

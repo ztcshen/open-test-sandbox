@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"open-test-sandbox/internal/domain/profileimport/httpcapture"
+	"agent-testbench/internal/domain/profileimport/httpcapture"
 )
 
 func TestPlanFromHTTPCaptureCreatesDraftReplayCases(t *testing.T) {

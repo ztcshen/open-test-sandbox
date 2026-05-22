@@ -20,28 +20,28 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/domain/casesuite"
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/domain/profileaudit"
-	"open-test-sandbox/internal/domain/profilecatalog"
-	profilegenerateopenapi "open-test-sandbox/internal/domain/profilegenerate/openapi"
-	"open-test-sandbox/internal/domain/profilehome"
-	profileimporthttpcapture "open-test-sandbox/internal/domain/profileimport/httpcapture"
-	profileimportopenapi "open-test-sandbox/internal/domain/profileimport/openapi"
-	"open-test-sandbox/internal/domain/redaction"
-	"open-test-sandbox/internal/domain/workflowaudit"
-	"open-test-sandbox/internal/runner/apicase"
-	"open-test-sandbox/internal/runner/evidence"
-	"open-test-sandbox/internal/runner/executor"
-	"open-test-sandbox/internal/runner/junit"
-	"open-test-sandbox/internal/runner/requesttemplate"
-	"open-test-sandbox/internal/server/controlplane"
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/mysql"
-	storeopen "open-test-sandbox/internal/store/open"
-	"open-test-sandbox/internal/store/postgres"
-	"open-test-sandbox/internal/store/sqlite"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/domain/casesuite"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profileaudit"
+	"agent-testbench/internal/domain/profilecatalog"
+	profilegenerateopenapi "agent-testbench/internal/domain/profilegenerate/openapi"
+	"agent-testbench/internal/domain/profilehome"
+	profileimporthttpcapture "agent-testbench/internal/domain/profileimport/httpcapture"
+	profileimportopenapi "agent-testbench/internal/domain/profileimport/openapi"
+	"agent-testbench/internal/domain/redaction"
+	"agent-testbench/internal/domain/workflowaudit"
+	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/runner/evidence"
+	"agent-testbench/internal/runner/executor"
+	"agent-testbench/internal/runner/junit"
+	"agent-testbench/internal/runner/requesttemplate"
+	"agent-testbench/internal/server/controlplane"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/mysql"
+	storeopen "agent-testbench/internal/store/open"
+	"agent-testbench/internal/store/postgres"
+	"agent-testbench/internal/store/sqlite"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 const version = "0.1.0"
@@ -174,7 +174,7 @@ func main() {
 
 	switch os.Args[1] {
 	case "version", "--version", "-v":
-		fmt.Printf("Open Test Sandbox %s\n", version)
+		fmt.Printf("AgentTestBench %s\n", version)
 	case "help", "--help", "-h":
 		printHelp()
 	case "store":
@@ -313,110 +313,110 @@ func isBoolFlagValue(value flag.Value) bool {
 }
 
 func printHelp() {
-	fmt.Println(`Open Test Sandbox
+	fmt.Println(`AgentTestBench
 
 Usage:
-  otsandbox version
-  otsandbox store config set NAME --url postgres://...
-  otsandbox store config set NAME --url mysql://...
-  otsandbox store config set NAME --url sqlite://PATH
-  otsandbox store config list [--json]
-  otsandbox store use NAME
-  otsandbox store current [--json]
-  otsandbox store status [--store NAME_OR_DSN] [--json]
-  otsandbox store provision [--store NAME_OR_DSN] [--json]
-  otsandbox store upgrade [--store NAME_OR_DSN]
-  otsandbox store ddl [--backend postgres|mysql] [--store NAME_OR_DSN]
-  otsandbox store copy --from NAME_OR_DSN --to NAME_OR_DSN [--require-environment ENV_ID] [--require-verification-workflow ID] [--require-verified-environment] [--require-min-components N] [--require-min-dependencies N] [--require-min-assets N] [--require-inline-asset-bytes N] [--json]
-  otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-generated-file TARGET=SOURCE_FILE]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
-  otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
-  otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
-  otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
-  otsandbox environment repo set ENV_ID [--repo SERVICE=URL] [--branch SERVICE=BRANCH] [--repo-ref SERVICE=REF] [--checkout SERVICE=PATH] [--store NAME_OR_DSN] [--json]
-  otsandbox environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
-  otsandbox environment components inspect ENV_ID [--store NAME_OR_DSN] [--json]
-  otsandbox environment components replace ENV_ID --file COMPONENT_GRAPH_JSON [--store NAME_OR_DSN] [--json]
-  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--assume-clean-docker] [--use-existing-containers] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
-  otsandbox environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox environment acceptance report ENV_ID --server-url URL --run ID [--json]
-  otsandbox environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
-  otsandbox environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
-  otsandbox sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
-  otsandbox sandbox service register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--kind KIND] [--service-port N] [--health-url URL] [--json]
-  otsandbox sandbox interface register --id ID --service-id ID --path PATH [--store NAME_OR_DSN] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
-  otsandbox template-package install --from PATH [--profile-home PATH] [--force]
-  otsandbox template-package inspect --template-package PATH_OR_ID [--profile-home PATH]
-  otsandbox template-package catalog-index [--store NAME_OR_DSN] [--json]
-  otsandbox template-package verify --template-package PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
-  otsandbox template-package import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
-  otsandbox profile init --output PATH [--id ID] [--display-name NAME] [--force]
-  otsandbox profile install --from PATH [--profile-home PATH] [--force]
-  otsandbox profile pack --profile PATH_OR_ID --output PATH [--profile-home PATH] [--force]
-  otsandbox profile list [--profile-home PATH] [--json]
-  otsandbox profile inspect --profile PATH_OR_ID [--profile-home PATH]
-  otsandbox profile export --store NAME_OR_DSN --output PATH [--force] [--json]
-  otsandbox profile audit --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
-  otsandbox profile audit-plan --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
-  otsandbox profile doctor --profile PATH_OR_ID --case-id ID [--profile-home PATH] [--json]
-  otsandbox profile repair --from-manifest PATH [--profile PATH_OR_ID] [--profile-home PATH] [--apply] [--json]
-  otsandbox profile generation-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
-  otsandbox profile import-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
-  otsandbox profile import-plan http-capture --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
-  otsandbox profile verify --profile PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
-  otsandbox profile import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
-  otsandbox config publish --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
-  otsandbox executor plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--json]
-  otsandbox evidence import --from PATH --profile ID [--store NAME_OR_DSN]
-  otsandbox evidence list [--store NAME_OR_DSN] [--run ID] [--json]
-  otsandbox evidence tasks [--store NAME_OR_DSN] --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
-  otsandbox trace topology collect --run ID [--store NAME_OR_DSN] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]
-  otsandbox replay evidence --trace-id ID [--json]
-  otsandbox workflow discover [--store NAME_OR_DSN] [--filter TEXT] [--json]
-  otsandbox workflow discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
-  otsandbox workflow plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --workflow ID [--json]
-  otsandbox workflow audit --workflow ID [--store NAME_OR_DSN] [--json]
-  otsandbox workflow audit --profile PATH --offline-template-package --workflow ID [--store NAME_OR_DSN] [--json]
-  otsandbox workflow runs [--store NAME_OR_DSN] [--json]
-  otsandbox workflow run --run ID [--store NAME_OR_DSN] [--json]
-  otsandbox workflow step --run ID --step ID [--store NAME_OR_DSN] [--json]
-  otsandbox workflow latest-step --workflow ID --step ID [--store NAME_OR_DSN] [--json]
-  otsandbox workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--json]
-  otsandbox workflow acceptance start --server-url URL --workflow ID --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox workflow acceptance report --server-url URL --run ID [--json]
-  otsandbox baseline get --profile ID --subject ID [--store NAME_OR_DSN]
-  otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN]
-  otsandbox template render [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --template ID [--fixture ID]
-  otsandbox interface-node discover [--store NAME_OR_DSN] [--filter TEXT] [--json]
-  otsandbox interface-node discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
-  otsandbox interface-node coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--workflow ID] [--json]
-  otsandbox interface-node coverage-gaps [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--workflow ID] [--json]
-  otsandbox interface-node case audit --profile PATH --node ID [--json]
-  otsandbox interface-node case draft --profile PATH --node ID --case-id ID [--title TEXT] [--case-path PATH] [--method METHOD] [--path PATH] [--tag TAG] [--priority PRIORITY] [--owner OWNER] [--output PATH] [--json]
-  otsandbox interface-node case apply --profile PATH --file PATH [--json]
-  otsandbox interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case discover [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
-  otsandbox case suite priority [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite brief [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--stability-limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite quality [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite quality-plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite quality-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--output-dir PATH] [--json]
-  otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite impact-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case runs [--store NAME_OR_DSN] [--run ID] [--json]
-  otsandbox case evidence [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
-  otsandbox case timing [--store NAME_OR_DSN] [--kind KIND] [--max-age-minutes N] [--json]
-  otsandbox case batch start --server-url URL [--case ID]... [--node ID]... [--workflow ID] [--suite NAME] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case batch report --server-url URL --run ID [--json]
-  otsandbox case run (--case PATH | --case-id ID) [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
-  otsandbox case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]
-  otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
-  otsandbox help
+  agent-testbench version
+  agent-testbench store config set NAME --url postgres://...
+  agent-testbench store config set NAME --url mysql://...
+  agent-testbench store config set NAME --url sqlite://PATH
+  agent-testbench store config list [--json]
+  agent-testbench store use NAME
+  agent-testbench store current [--json]
+  agent-testbench store status [--store NAME_OR_DSN] [--json]
+  agent-testbench store provision [--store NAME_OR_DSN] [--json]
+  agent-testbench store upgrade [--store NAME_OR_DSN]
+  agent-testbench store ddl [--backend postgres|mysql] [--store NAME_OR_DSN]
+  agent-testbench store copy --from NAME_OR_DSN --to NAME_OR_DSN [--require-environment ENV_ID] [--require-verification-workflow ID] [--require-verified-environment] [--require-min-components N] [--require-min-dependencies N] [--require-min-assets N] [--require-inline-asset-bytes N] [--json]
+  agent-testbench environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-generated-file TARGET=SOURCE_FILE]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
+  agent-testbench environment discover [--store NAME_OR_DSN] [--all] [--json]
+  agent-testbench environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
+  agent-testbench environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
+  agent-testbench environment repo set ENV_ID [--repo SERVICE=URL] [--branch SERVICE=BRANCH] [--repo-ref SERVICE=REF] [--checkout SERVICE=PATH] [--store NAME_OR_DSN] [--json]
+  agent-testbench environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
+  agent-testbench environment components inspect ENV_ID [--store NAME_OR_DSN] [--json]
+  agent-testbench environment components replace ENV_ID --file COMPONENT_GRAPH_JSON [--store NAME_OR_DSN] [--json]
+  agent-testbench environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--assume-clean-docker] [--use-existing-containers] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
+  agent-testbench environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench environment acceptance report ENV_ID --server-url URL --run ID [--json]
+  agent-testbench environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
+  agent-testbench environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
+  agent-testbench sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
+  agent-testbench sandbox service register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--kind KIND] [--service-port N] [--health-url URL] [--json]
+  agent-testbench sandbox interface register --id ID --service-id ID --path PATH [--store NAME_OR_DSN] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
+  agent-testbench template-package install --from PATH [--profile-home PATH] [--force]
+  agent-testbench template-package inspect --template-package PATH_OR_ID [--profile-home PATH]
+  agent-testbench template-package catalog-index [--store NAME_OR_DSN] [--json]
+  agent-testbench template-package verify --template-package PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
+  agent-testbench template-package import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
+  agent-testbench profile init --output PATH [--id ID] [--display-name NAME] [--force]
+  agent-testbench profile install --from PATH [--profile-home PATH] [--force]
+  agent-testbench profile pack --profile PATH_OR_ID --output PATH [--profile-home PATH] [--force]
+  agent-testbench profile list [--profile-home PATH] [--json]
+  agent-testbench profile inspect --profile PATH_OR_ID [--profile-home PATH]
+  agent-testbench profile export --store NAME_OR_DSN --output PATH [--force] [--json]
+  agent-testbench profile audit --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
+  agent-testbench profile audit-plan --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
+  agent-testbench profile doctor --profile PATH_OR_ID --case-id ID [--profile-home PATH] [--json]
+  agent-testbench profile repair --from-manifest PATH [--profile PATH_OR_ID] [--profile-home PATH] [--apply] [--json]
+  agent-testbench profile generation-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
+  agent-testbench profile import-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
+  agent-testbench profile import-plan http-capture --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
+  agent-testbench profile verify --profile PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
+  agent-testbench profile import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
+  agent-testbench config publish --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
+  agent-testbench executor plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--json]
+  agent-testbench evidence import --from PATH --profile ID [--store NAME_OR_DSN]
+  agent-testbench evidence list [--store NAME_OR_DSN] [--run ID] [--json]
+  agent-testbench evidence tasks [--store NAME_OR_DSN] --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
+  agent-testbench trace topology collect --run ID [--store NAME_OR_DSN] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]
+  agent-testbench replay evidence --trace-id ID [--json]
+  agent-testbench workflow discover [--store NAME_OR_DSN] [--filter TEXT] [--json]
+  agent-testbench workflow discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
+  agent-testbench workflow plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --workflow ID [--json]
+  agent-testbench workflow audit --workflow ID [--store NAME_OR_DSN] [--json]
+  agent-testbench workflow audit --profile PATH --offline-template-package --workflow ID [--store NAME_OR_DSN] [--json]
+  agent-testbench workflow runs [--store NAME_OR_DSN] [--json]
+  agent-testbench workflow run --run ID [--store NAME_OR_DSN] [--json]
+  agent-testbench workflow step --run ID --step ID [--store NAME_OR_DSN] [--json]
+  agent-testbench workflow latest-step --workflow ID --step ID [--store NAME_OR_DSN] [--json]
+  agent-testbench workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--json]
+  agent-testbench workflow acceptance start --server-url URL --workflow ID --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench workflow acceptance report --server-url URL --run ID [--json]
+  agent-testbench baseline get --profile ID --subject ID [--store NAME_OR_DSN]
+  agent-testbench baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN]
+  agent-testbench template render [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --template ID [--fixture ID]
+  agent-testbench interface-node discover [--store NAME_OR_DSN] [--filter TEXT] [--json]
+  agent-testbench interface-node discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
+  agent-testbench interface-node coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--workflow ID] [--json]
+  agent-testbench interface-node coverage-gaps [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--workflow ID] [--json]
+  agent-testbench interface-node case audit --profile PATH --node ID [--json]
+  agent-testbench interface-node case draft --profile PATH --node ID --case-id ID [--title TEXT] [--case-path PATH] [--method METHOD] [--path PATH] [--tag TAG] [--priority PRIORITY] [--owner OWNER] [--output PATH] [--json]
+  agent-testbench interface-node case apply --profile PATH --file PATH [--json]
+  agent-testbench interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case discover [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  agent-testbench case discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  agent-testbench case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  agent-testbench case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
+  agent-testbench case suite priority [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case suite brief [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--stability-limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case suite quality [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  agent-testbench case suite quality-plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  agent-testbench case suite quality-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--output-dir PATH] [--json]
+  agent-testbench case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  agent-testbench case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case suite impact-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case runs [--store NAME_OR_DSN] [--run ID] [--json]
+  agent-testbench case evidence [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
+  agent-testbench case timing [--store NAME_OR_DSN] [--kind KIND] [--max-age-minutes N] [--json]
+  agent-testbench case batch start --server-url URL [--case ID]... [--node ID]... [--workflow ID] [--suite NAME] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case batch report --server-url URL --run ID [--json]
+  agent-testbench case run (--case PATH | --case-id ID) [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
+  agent-testbench case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]
+  agent-testbench serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
+  agent-testbench help
 
 Serve reads profile catalog data from the local Store. When --profile is set,
 the external bundle is first published into the Store/read-model, then served
@@ -1834,7 +1834,7 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 			LargeBinariesStored:     false,
 		},
 		PrepareCommand: []string{
-			"otsandbox",
+			"agent-testbench",
 			"environment",
 			"restore",
 			report.EnvironmentID,
@@ -1847,7 +1847,7 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 			"--json",
 		},
 		ExecuteCommand: []string{
-			"otsandbox",
+			"agent-testbench",
 			"environment",
 			"restore",
 			report.EnvironmentID,
@@ -2652,7 +2652,7 @@ func environmentRestoreRemoteComponentAssets(ctx context.Context, envID string, 
 		}
 		checkout := strings.TrimSpace(valueString(ref["checkout"]))
 		if checkout == "" {
-			checkout = filepath.Join(workspace, ".otsandbox", "component-assets", safeReportID(sourceURL))
+			checkout = filepath.Join(workspace, ".agent-testbench", "component-assets", safeReportID(sourceURL))
 		} else if !filepath.IsAbs(checkout) {
 			checkout = filepath.Join(workspace, checkout)
 		}
@@ -2939,7 +2939,7 @@ func environmentRestoreMySQLApplyCommand(composeBaseArgs []string, service strin
 func environmentRestoreMySQLClientScript() string {
 	return `user="${MYSQL_USER:-root}"
 password="${MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"
-database="${OTSANDBOX_MYSQL_APPLY_DATABASE:-}"
+database="${AGENT_TESTBENCH_MYSQL_APPLY_DATABASE:-}"
 set --
 if [ -n "$user" ]; then
   set -- "$@" "-u${user}"
@@ -3554,7 +3554,7 @@ func expandEnvironmentRestoreComposeSource(source string, compose map[string]any
 	values := stringMapFromAny(compose["env"])
 	expanded := strings.TrimSpace(source)
 	for key, value := range values {
-		value = strings.ReplaceAll(value, "$OTS_WORKSPACE", workspace)
+		value = strings.ReplaceAll(value, "$AGENT_TESTBENCH_WORKSPACE", workspace)
 		expanded = strings.ReplaceAll(expanded, "${"+key+"}", value)
 		expanded = strings.ReplaceAll(expanded, "$"+key, value)
 		for {
@@ -3570,8 +3570,8 @@ func expandEnvironmentRestoreComposeSource(source string, compose map[string]any
 			expanded = expanded[:start] + value + expanded[end+1:]
 		}
 	}
-	expanded = strings.ReplaceAll(expanded, "$OTS_WORKSPACE", workspace)
-	expanded = strings.ReplaceAll(expanded, "${OTS_WORKSPACE}", workspace)
+	expanded = strings.ReplaceAll(expanded, "$AGENT_TESTBENCH_WORKSPACE", workspace)
+	expanded = strings.ReplaceAll(expanded, "${AGENT_TESTBENCH_WORKSPACE}", workspace)
 	return expanded
 }
 
@@ -4109,7 +4109,7 @@ func environmentRestoreRunWorkflow(ctx context.Context, workflowID string, works
 	}
 	outputDir := strings.TrimSpace(options.OutputDir)
 	if outputDir == "" {
-		outputDir = filepath.Join(workspace, ".otsandbox", "reports", "acceptance."+safeReportID(workflowID)+"."+time.Now().UTC().Format("20060102T150405.000000000Z"))
+		outputDir = filepath.Join(workspace, ".agent-testbench", "reports", "acceptance."+safeReportID(workflowID)+"."+time.Now().UTC().Format("20060102T150405.000000000Z"))
 	}
 	absOutputDir, err := filepath.Abs(outputDir)
 	if err != nil {
@@ -4363,7 +4363,7 @@ func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string,
 }
 
 func environmentRestoreGeneratedEnvFilePath(workspace string) string {
-	return filepath.Join(workspace, ".otsandbox", "restore.env")
+	return filepath.Join(workspace, ".agent-testbench", "restore.env")
 }
 
 func environmentRestoreComposeCommandServices(compose map[string]any, workspace string, composeFiles []string, selected []string) ([]string, []string) {
@@ -4492,7 +4492,7 @@ func writeEnvironmentRestoreGeneratedEnvFile(workspace string, compose map[strin
 	sort.Strings(keys)
 	var b strings.Builder
 	for _, key := range keys {
-		value := strings.ReplaceAll(values[key], "$OTS_WORKSPACE", workspace)
+		value := strings.ReplaceAll(values[key], "$AGENT_TESTBENCH_WORKSPACE", workspace)
 		b.WriteString(key)
 		b.WriteString("=")
 		b.WriteString(value)
@@ -6074,7 +6074,7 @@ func runTraceTopologyCollect(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	graphQLURL := flags.String("trace-graphql-url", os.Getenv("OTS_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
+	graphQLURL := flags.String("trace-graphql-url", os.Getenv("AGENT_TESTBENCH_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
 	runID := flags.String("run", "", "Workflow run id")
 	stepID := flags.String("step", "", "Workflow step id")
 	caseID := flags.String("case", "", "API case id")
@@ -6666,7 +6666,7 @@ func initProfileBundle(outputPath string, profileID string, displayName string, 
 	manifest := profile.Bundle{
 		ID:               profileID,
 		DisplayName:      displayName,
-		Description:      "External profile bundle generated by Open Test Sandbox.",
+		Description:      "External profile bundle generated by AgentTestBench.",
 		Services:         []profile.Service{},
 		Workflows:        []profile.Workflow{},
 		InterfaceNodes:   []profile.InterfaceNode{},
@@ -6685,7 +6685,7 @@ func initProfileBundle(outputPath string, profileID string, displayName string, 
 	}
 	readmePath := filepath.Join(outputPath, "README.md")
 	if _, err := os.Stat(readmePath); errors.Is(err, os.ErrNotExist) || force {
-		body := "# External Profile Bundle\n\nPublish this bundle into the selected SQL Store before serving it through Open Test Sandbox:\n\n```sh\notsandbox store use local-personal\notsandbox config publish --from . --store local-personal\notsandbox serve --profile . --store local-personal\n```\n"
+		body := "# External Profile Bundle\n\nPublish this bundle into the selected SQL Store before serving it through AgentTestBench:\n\n```sh\nagent-testbench store use local-personal\nagent-testbench config publish --from . --store local-personal\nagent-testbench serve --profile . --store local-personal\n```\n"
 		if err := os.WriteFile(readmePath, []byte(body), 0o644); err != nil {
 			return profileInitReport{}, err
 		}
@@ -13388,7 +13388,7 @@ func apiCaseSuggestedCommand(item profile.APICase) string {
 	if casePath == "" {
 		return ""
 	}
-	parts := []string{"otsandbox case run --case " + strconv.Quote(casePath)}
+	parts := []string{"agent-testbench case run --case " + strconv.Quote(casePath)}
 	if strings.TrimSpace(item.BaseURL) != "" {
 		parts = append(parts, "--base-url "+strconv.Quote(item.BaseURL))
 	}
@@ -13808,7 +13808,7 @@ func runServe(args []string) error {
 	defer cleanup()
 
 	addr := cfg.host + ":" + strconv.Itoa(cfg.port)
-	fmt.Printf("Open Test Sandbox listening on http://%s\n", addr)
+	fmt.Printf("AgentTestBench listening on http://%s\n", addr)
 	return http.ListenAndServe(addr, handler)
 }
 
@@ -13839,7 +13839,7 @@ func serveConfigFromArgs(args []string) (serveConfig, error) {
 	port := flags.Int("port", 18191, "HTTP port")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	traceGraphQLURL := flags.String("trace-graphql-url", os.Getenv("OTS_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
+	traceGraphQLURL := flags.String("trace-graphql-url", os.Getenv("AGENT_TESTBENCH_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
 	if err := flags.Parse(args); err != nil {
 		return serveConfig{}, err
 	}

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/store"
 
 	gonumgraph "gonum.org/v1/gonum/graph"
 	"gonum.org/v1/gonum/graph/simple"

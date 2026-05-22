@@ -6,27 +6,27 @@ import { assertCaseEvidencePayload, assertEnvironmentAcceptancePayload, assertEn
 test("MySQL API smoke accepts the shared SQL smoke Store env", () => {
   assert.equal(
     requiredMySQLDSN({
-      OTSANDBOX_SMOKE_STORE: "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+      AGENT_TESTBENCH_SMOKE_STORE: "MYSQL://user:secret@example.com:3306/agent_testbench_smoke?tls=false",
     }),
-    "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+    "MYSQL://user:secret@example.com:3306/agent_testbench_smoke?tls=false",
   );
 });
 
 test("MySQL API smoke prefers its dedicated DSN over shared smoke Store env", () => {
   assert.equal(
     requiredMySQLDSN({
-      OTSANDBOX_MYSQL_API_SMOKE_DSN: "mysql://user:secret@example.com:3306/otsandbox_api?tls=false",
-      OTSANDBOX_SMOKE_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_release?tls=false",
-      OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306/otsandbox_legacy?tls=false",
+      AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN: "mysql://user:secret@example.com:3306/agent_testbench_api_smoke?tls=false",
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: "mysql://user:secret@example.com:3306/agent_testbench_release_smoke?tls=false",
+      AGENT_TESTBENCH_SMOKE_STORE: "mysql://user:secret@example.com:3306/agent_testbench_shared_smoke?tls=false",
     }),
-    "mysql://user:secret@example.com:3306/otsandbox_api?tls=false",
+    "mysql://user:secret@example.com:3306/agent_testbench_api_smoke?tls=false",
   );
 });
 
 test("MySQL API smoke rejects non-MySQL shared Store env", () => {
   assert.throws(
     () => requiredMySQLDSN({
-      OTSANDBOX_SMOKE_STORE: "postgres://user:secret@example.com:5432/otsandbox_smoke?sslmode=disable",
+      AGENT_TESTBENCH_SMOKE_STORE: "postgres://user:secret@example.com:5432/agent_testbench_smoke?sslmode=disable",
     }),
     /requires a mysql:\/\/ Store DSN/,
   );
@@ -35,7 +35,7 @@ test("MySQL API smoke rejects non-MySQL shared Store env", () => {
 test("MySQL API smoke rejects MySQL DSNs without a database", () => {
   assert.throws(
     () => requiredMySQLDSN({
-      OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306?tls=false",
+      AGENT_TESTBENCH_SMOKE_STORE: "mysql://user:secret@example.com:3306?tls=false",
     }),
     /requires a mysql:\/\/ Store DSN with a database path/,
   );
@@ -44,7 +44,7 @@ test("MySQL API smoke rejects MySQL DSNs without a database", () => {
 test("MySQL API smoke refuses likely business databases", () => {
   assert.throws(
     () => requiredMySQLDSN({
-      OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306/business_prod?tls=false",
+      AGENT_TESTBENCH_SMOKE_STORE: "mysql://user:secret@example.com:3306/business_prod?tls=false",
     }),
     /refuses database 'business_prod'/,
   );

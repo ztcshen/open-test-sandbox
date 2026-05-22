@@ -24,7 +24,7 @@ ALLOW_DESTRUCTIVE_DOCKER_CLEANUP=0
 VERIFY_CONTROL_PLANE_URL=""
 ACCEPTANCE_TIMEOUT_SECONDS=240
 HEALTH_TIMEOUT_SECONDS=120
-OTSANDBOX_BIN="${OTSANDBOX_BIN:-}"
+AGENT_TESTBENCH_BIN="${AGENT_TESTBENCH_BIN:-}"
 
 usage() {
   cat <<'EOF'
@@ -182,15 +182,15 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
-run_otsandbox() {
-  if [[ -n "$OTSANDBOX_BIN" ]]; then
-    "$OTSANDBOX_BIN" "$@"
-  elif [[ -x ".runtime/otsandbox-dev" ]]; then
-    .runtime/otsandbox-dev "$@"
-  elif [[ -x "./bin/otsandbox.sh" ]]; then
-    ./bin/otsandbox.sh "$@"
+run_agent-testbench() {
+  if [[ -n "$AGENT_TESTBENCH_BIN" ]]; then
+    "$AGENT_TESTBENCH_BIN" "$@"
+  elif [[ -x ".runtime/agent-testbench-dev" ]]; then
+    .runtime/agent-testbench-dev "$@"
+  elif [[ -x "./bin/agent-testbench.sh" ]]; then
+    ./bin/agent-testbench.sh "$@"
   else
-    go run ./cmd/otsandbox "$@"
+    go run ./cmd/agent-testbench "$@"
   fi
 }
 
@@ -211,7 +211,7 @@ PUBLISH_REPORT="${OUTPUT_PREFIX}-publish-verified.json"
 PUBLISH_ASSERTION="${OUTPUT_PREFIX}-publish-verified-assertion.json"
 
 if [[ -n "$STORE_URL" ]]; then
-  run_otsandbox store config set "$STORE_NAME" --url "$STORE_URL" \
+  run_agent-testbench store config set "$STORE_NAME" --url "$STORE_URL" \
     > "${OUTPUT_PREFIX}-store-config-set.txt"
 fi
 
@@ -219,15 +219,15 @@ tools/smoke/mysql-store-preflight.sh \
   --store "$STORE_NAME" \
   --output-prefix "$OUTPUT_PREFIX"
 
-run_otsandbox store status --store "$STORE_NAME" --json > "$STATUS_REPORT"
+run_agent-testbench store status --store "$STORE_NAME" --json > "$STATUS_REPORT"
 jq -e '
   .ok == true
   and .backend == "mysql"
   and ((.pending // 0) == 0)
 ' "$STATUS_REPORT" > "$STATUS_ASSERTION"
 
-run_otsandbox store use "$STORE_NAME" > "$ACTIVE_STORE_REPORT"
-run_otsandbox store current --json > "$ACTIVE_STORE_CURRENT_REPORT"
+run_agent-testbench store use "$STORE_NAME" > "$ACTIVE_STORE_REPORT"
+run_agent-testbench store current --json > "$ACTIVE_STORE_CURRENT_REPORT"
 jq -e '
   .ok == true
   and .name == $storeName
@@ -260,7 +260,7 @@ jq -e '
 ' --arg storeName "$STORE_NAME" \
   "$CONTROL_PLANE_CURRENT_REPORT" > "$CONTROL_PLANE_ASSERTION"
 
-run_otsandbox environment inspect "$ENVIRONMENT_ID" \
+run_agent-testbench environment inspect "$ENVIRONMENT_ID" \
   --store "$STORE_NAME" \
   --json > "$INSPECT_REPORT"
 jq -e '
@@ -313,7 +313,7 @@ fi
 if [[ -n "$BASE_URL" ]]; then
   restore_args+=(--base-url "$BASE_URL")
 fi
-run_otsandbox "${restore_args[@]}" > "$RESTORE_REPORT"
+run_agent-testbench "${restore_args[@]}" > "$RESTORE_REPORT"
 
 jq -e '
   .ok == true
@@ -329,7 +329,7 @@ jq -e '
 ' --arg minAcceptanceSteps "$MIN_ACCEPTANCE_STEPS" \
   "$RESTORE_REPORT" > "$RESTORE_ASSERTION"
 
-run_otsandbox environment publish-verified "$ENVIRONMENT_ID" \
+run_agent-testbench environment publish-verified "$ENVIRONMENT_ID" \
   --store "$STORE_NAME" \
   --json > "$PUBLISH_REPORT"
 jq -e '

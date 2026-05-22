@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/domain/workflowaudit"
-	"open-test-sandbox/internal/store"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/workflowaudit"
+	"agent-testbench/internal/store"
 )
 
 func handleWorkflowAudit(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
