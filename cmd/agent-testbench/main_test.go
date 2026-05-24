@@ -605,8 +605,8 @@ func TestResearchBriefBuildsSearchBackedImplementationBrief(t *testing.T) {
 				"title":  "Quality Gates",
 				"intent": "Find projects that gate releases with policy checks.",
 				"topMatches": []map[string]any{
-					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "featureScore": 8},
-					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z", "featureScore": 7},
+					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "featureScore": 8, "language": "Go", "reasons": []string{"high-star reference", "matches 'security'"}},
+					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z", "featureScore": 7, "language": "OCaml", "reasons": []string{"matches 'static analysis'"}},
 				},
 			},
 			"workflow-orchestration": map[string]any{
@@ -687,9 +687,15 @@ func TestResearchBriefBuildsSearchBackedImplementationBrief(t *testing.T) {
 	}
 
 	textOut := runCLI(t, "research", "brief", "--query", "gate", "--radar-index", indexPath, "--min-references", "2", "--reference-limit", "1", "--now", "2026-05-24T05:00:00Z")
-	for _, want := range []string{"Research Brief", "Selected: Quality Gates", "Reference gate: ok", "aquasecurity/trivy", "Gate:"} {
+	for _, want := range []string{"Research Brief", "Selected: Quality Gates", "Reference gate: ok", "aquasecurity/trivy", "Reference signals", "Go; high-star reference; matches 'security'", "Gate:"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("research brief text missing %q:\n%s", want, textOut)
+		}
+	}
+	markdownOut := runCLI(t, "research", "brief", "--query", "gate", "--radar-index", indexPath, "--min-references", "2", "--reference-limit", "1", "--now", "2026-05-24T05:00:00Z", "--format", "markdown")
+	for _, want := range []string{"## Reference Signals", "`aquasecurity/trivy`: Go; high-star reference; matches 'security'"} {
+		if !strings.Contains(markdownOut, want) {
+			t.Fatalf("research brief markdown missing %q:\n%s", want, markdownOut)
 		}
 	}
 
@@ -1831,12 +1837,16 @@ func TestResearchPlanConnectsFeatureReferencesToVerificationCommands(t *testing.
 						"url":      "https://github.com/microsoft/playwright",
 						"stars":    89295,
 						"pushedAt": "2026-05-24T01:19:02Z",
+						"language": "TypeScript",
+						"reasons":  []string{"high-star reference", "matches 'automation'"},
 					},
 					{
 						"fullName": "usebruno/bruno",
 						"url":      "https://github.com/usebruno/bruno",
 						"stars":    44401,
 						"pushedAt": "2026-05-22T12:06:58Z",
+						"language": "JavaScript",
+						"reasons":  []string{"matches 'api'"},
 					},
 				},
 			},
@@ -1895,6 +1905,8 @@ func TestResearchPlanConnectsFeatureReferencesToVerificationCommands(t *testing.
 		"## Reference Gate",
 		"| Required | Found | Status |",
 		"[microsoft/playwright](https://github.com/microsoft/playwright)",
+		"## Reference Signals",
+		"`microsoft/playwright`: TypeScript; high-star reference; matches 'automation'",
 		"## Next Commands",
 		"`agent-testbench case run --case PATH --base-url URL --dry-run --json`",
 		"## Verification Commands",

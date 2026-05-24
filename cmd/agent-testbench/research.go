@@ -48,6 +48,8 @@ type featureRadarMatch struct {
 	PushedAt     string   `json:"pushedAt"`
 	FeatureScore int      `json:"featureScore"`
 	Reasons      []string `json:"reasons"`
+	Language     string   `json:"language,omitempty"`
+	Topics       []string `json:"topics,omitempty"`
 }
 
 type featureRadarProject struct {
@@ -1268,8 +1270,8 @@ func featureMatrixReferenceFromMatch(match featureRadarMatch, project featureRad
 		PushedAt:        match.PushedAt,
 		FeatureScore:    match.FeatureScore,
 		Reasons:         match.Reasons,
-		Language:        project.Language,
-		Topics:          project.Topics,
+		Language:        researchFirstNonEmpty(match.Language, project.Language),
+		Topics:          researchFirstNonEmptyStrings(match.Topics, project.Topics),
 		MatchedFeatures: projectMatchedFeatures(project),
 	}
 }
@@ -1633,6 +1635,15 @@ func researchFirstNonEmpty(values ...string) string {
 	return ""
 }
 
+func researchFirstNonEmptyStrings(values ...[]string) []string {
+	for _, value := range values {
+		if len(value) > 0 {
+			return value
+		}
+	}
+	return nil
+}
+
 func featureRadarRefreshCommands(indexPath string, maxAgeHours int, minReferences int) []string {
 	if maxAgeHours <= 0 {
 		maxAgeHours = 72
@@ -1863,6 +1874,7 @@ func featurePlanCommand(featureID string, minReferences int, indexPath string) s
 
 func buildFeatureResearchPlan(index featureRadarIndex, indexPath string, feature featureRadarFeature, featureQuery string, limit int, requireMinMatches int) featureResearchPlanReport {
 	nextCommands := contextualizeFeaturePlanCommands(featureNextCommands(feature.ID), feature.ID, featureQuery, requireMinMatches, indexPath)
+	references := enrichFeatureRadarMatches(index, limitFeatureRadarMatches(feature.TopMatches, limit))
 	gate := featureReferenceGate{
 		Required: requireMinMatches,
 		Found:    len(feature.TopMatches),
@@ -1874,10 +1886,22 @@ func buildFeatureResearchPlan(index featureRadarIndex, indexPath string, feature
 		Policy:               index.Policy,
 		SourceGeneratedAt:    index.SourceGeneratedAt,
 		ReferenceGate:        gate,
-		References:           limitFeatureRadarMatches(feature.TopMatches, limit),
+		References:           references,
 		NextCommands:         nextCommands,
 		VerificationCommands: featureVerificationCommands(featureQuery, requireMinMatches, indexPath, nextCommands),
 	}
+}
+
+func enrichFeatureRadarMatches(index featureRadarIndex, matches []featureRadarMatch) []featureRadarMatch {
+	out := make([]featureRadarMatch, len(matches))
+	copy(out, matches)
+	for i := range out {
+		project := index.ProjectIndex[out[i].FullName]
+		out[i].URL = researchFirstNonEmpty(out[i].URL, project.URL)
+		out[i].Language = researchFirstNonEmpty(out[i].Language, project.Language)
+		out[i].Topics = researchFirstNonEmptyStrings(out[i].Topics, project.Topics)
+	}
+	return out
 }
 
 func contextualizeFeaturePlanCommands(commands []featureNextCommand, featureID string, featureQuery string, requireMinMatches int, indexPath string) []featureNextCommand {
@@ -1947,7 +1971,7 @@ func buildFeatureGateReport(index featureRadarIndex, indexPath string, feature f
 		},
 		ReferenceGate:        referenceGate,
 		CommandGate:          commandGate,
-		References:           limitFeatureRadarMatches(feature.TopMatches, limit),
+		References:           enrichFeatureRadarMatches(index, limitFeatureRadarMatches(feature.TopMatches, limit)),
 		NextCommands:         nextCommands,
 		VerificationCommands: featureGateVerificationCommands(featureQuery, requireMinMatches, requireCommand, maxAgeHours, indexPath, nextCommands),
 	}
@@ -2133,7 +2157,7 @@ func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query s
 			References:    references,
 			Gate:          featureGateStatus(references, minReferences),
 			PlanCommand:   featurePlanCommand(feature.ID, minReferences, indexPath),
-			TopReferences: limitFeatureRadarMatches(feature.TopMatches, referenceLimit),
+			TopReferences: enrichFeatureRadarMatches(index, limitFeatureRadarMatches(feature.TopMatches, referenceLimit)),
 		})
 	}
 
@@ -2724,6 +2748,7 @@ func printFeatureBriefReport(report featureBriefReport) {
 	for _, match := range report.References {
 		fmt.Printf("- %s (%d stars, pushed %s)\n", match.FullName, match.Stars, shortDate(match.PushedAt))
 	}
+	printFeatureReferenceSignals(report.References)
 	fmt.Printf("Plan: %s\n", report.PlanCommand)
 	fmt.Printf("Matrix: %s\n", report.MatrixCommand)
 	fmt.Printf("Gate: %s\n", report.GateCommand)
@@ -2974,6 +2999,7 @@ func printFeatureResearchPlanMarkdown(report featureResearchPlanReport) {
 		fmt.Printf("| %s | %d | %s | %d |\n", project, match.Stars, shortDate(match.PushedAt), match.FeatureScore)
 	}
 	fmt.Println()
+	printFeatureReferenceSignalsMarkdown(report.References)
 	fmt.Println("## Next Commands")
 	fmt.Println()
 	for _, command := range report.NextCommands {
@@ -3020,6 +3046,7 @@ func printFeatureBriefMarkdown(report featureBriefReport) {
 		fmt.Printf("| %s | %d | %s | %d |\n", project, match.Stars, shortDate(match.PushedAt), match.FeatureScore)
 	}
 	fmt.Println()
+	printFeatureReferenceSignalsMarkdown(report.References)
 	fmt.Println("## Commands")
 	fmt.Println()
 	fmt.Printf("- Plan: `%s`\n", report.PlanCommand)
@@ -3031,6 +3058,64 @@ func printFeatureBriefMarkdown(report featureBriefReport) {
 	for _, command := range report.VerificationCommands {
 		fmt.Printf("- `%s`\n", command)
 	}
+}
+
+func printFeatureReferenceSignals(matches []featureRadarMatch) {
+	if !featureReferenceSignalsAvailable(matches) {
+		return
+	}
+	fmt.Println("Reference signals:")
+	for _, match := range matches {
+		signal := featureReferenceSignal(match)
+		if signal == "" {
+			continue
+		}
+		fmt.Printf("- %s: %s\n", match.FullName, signal)
+	}
+}
+
+func printFeatureReferenceSignalsMarkdown(matches []featureRadarMatch) {
+	if !featureReferenceSignalsAvailable(matches) {
+		return
+	}
+	fmt.Println("## Reference Signals")
+	fmt.Println()
+	for _, match := range matches {
+		signal := featureReferenceSignal(match)
+		if signal == "" {
+			continue
+		}
+		fmt.Printf("- `%s`: %s\n", match.FullName, signal)
+	}
+	fmt.Println()
+}
+
+func featureReferenceSignalsAvailable(matches []featureRadarMatch) bool {
+	for _, match := range matches {
+		if featureReferenceSignal(match) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func featureReferenceSignal(match featureRadarMatch) string {
+	parts := []string{}
+	if strings.TrimSpace(match.Language) != "" {
+		parts = append(parts, strings.TrimSpace(match.Language))
+	}
+	parts = append(parts, match.Reasons...)
+	if len(parts) == 0 && len(match.Topics) > 0 {
+		parts = append(parts, "topics: "+strings.Join(firstStrings(match.Topics, 4), ", "))
+	}
+	return strings.Join(uniquePreserveOrder(parts), "; ")
+}
+
+func firstStrings(values []string, limit int) []string {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	return values[:limit]
 }
 
 func statusWord(ok bool) string {
