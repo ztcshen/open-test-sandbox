@@ -783,6 +783,82 @@ func TestResearchLiveCheckVerifiesGitHubPolicyAgainstLiveMetadata(t *testing.T) 
 	}
 }
 
+func TestResearchLiveCheckFlagsReferenceDriftBeforePolicyFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/repos/example/api-runner" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"full_name":"example/api-runner","html_url":"https://github.com/example/api-runner","stargazers_count":3242,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-20T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"api runner": []string{"api-test-runner"},
+		},
+		"features": map[string]any{
+			"api-test-runner": map[string]any{
+				"id":    "api-test-runner",
+				"title": "API Test Runner",
+				"topMatches": []map[string]any{
+					{"fullName": "example/api-runner", "url": "https://github.com/example/api-runner", "stars": 3041, "pushedAt": "2026-05-20T12:00:00Z", "featureScore": 8},
+				},
+			},
+		},
+		"projectIndex": map[string]any{
+			"example/api-runner": map[string]any{"fullName": "example/api-runner", "url": "https://github.com/example/api-runner", "stars": 3041, "pushedAt": "2026-05-20T12:00:00Z", "matchedFeatures": []string{"api-test-runner"}},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t, "research", "live-check", "--feature", "api runner", "--radar-index", indexPath, "--github-api-url", server.URL, "--max-star-drift", "50", "--max-pushed-drift-hours", "24", "--json")
+	out = firstJSONObject(t, out)
+	var report struct {
+		OK            bool `json:"ok"`
+		RefreshNeeded bool `json:"refreshNeeded"`
+		RefreshCount  int  `json:"refreshCount"`
+		FailedCount   int  `json:"failedCount"`
+		References    []struct {
+			FullName         string   `json:"fullName"`
+			Status           string   `json:"status"`
+			OK               bool     `json:"ok"`
+			StarDelta        int      `json:"starDelta"`
+			PushedDeltaHours int      `json:"pushedDeltaHours"`
+			RefreshNeeded    bool     `json:"refreshNeeded"`
+			Reasons          []string `json:"reasons"`
+			RefreshReasons   []string `json:"refreshReasons"`
+		} `json:"references"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode drift report: %v\n%s", err, out)
+	}
+	if report.OK || !report.RefreshNeeded || report.RefreshCount != 1 || report.FailedCount != 0 {
+		t.Fatalf("drift report identity = %#v", report)
+	}
+	if len(report.References) != 1 {
+		t.Fatalf("drift references = %#v", report.References)
+	}
+	ref := report.References[0]
+	if ref.FullName != "example/api-runner" || ref.Status != "refresh-needed" || ref.OK || !ref.RefreshNeeded {
+		t.Fatalf("drift reference status = %#v", ref)
+	}
+	if ref.StarDelta != 201 || ref.PushedDeltaHours != 96 || len(ref.Reasons) != 0 || !stringSliceContains(ref.RefreshReasons, "star_drift") || !stringSliceContains(ref.RefreshReasons, "pushed_at_drift") {
+		t.Fatalf("drift reference details = %#v", ref)
+	}
+}
+
 func TestResearchBriefBuildsSearchBackedImplementationBrief(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{

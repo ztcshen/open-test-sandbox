@@ -127,7 +127,10 @@ repository metadata before a CLI slice uses them as design evidence. It fetches
 stars, pushed date, archived status, and fork status from the GitHub REST API,
 then fails non-zero when a selected reference no longer satisfies the radar
 policy. Use `--token-env GITHUB_TOKEN` or another token environment variable
-when local rate limits are too low.
+when local rate limits are too low. For stricter maintenance gates, add
+`--max-star-drift N` and `--max-pushed-drift-hours N`; the command then marks
+policy-passing but stale local entries as `refresh-needed` so the project ledger
+is refreshed before new CLI design work depends on it.
 
 ```sh
 ./bin/agent-testbench.sh research feature \
@@ -187,6 +190,8 @@ Before picking the next CLI slice, check the whole feature index:
   --radar-index $RADAR_HOME/data/feature-index.json \
   --feature "workflow report" \
   --limit 5 \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --json
 
 ./bin/agent-testbench.sh research gate \
@@ -226,7 +231,9 @@ patterns before writing the next CLI behavior or demo.
 `research live-check` is the last-mile drift guard for a feature's reference
 projects. It keeps the local radar index useful for fast search while verifying
 the specific slice references against current GitHub data before implementation
-or demo work depends on them.
+or demo work depends on them. The JSON report includes live/local stars,
+`starDelta`, live/local pushed dates, `pushedDeltaHours`, policy failure
+reasons, refresh reasons, and a `refreshNeeded` summary for automation.
 
 `research refresh-plan` combines freshness, audit, and coverage checks into a
 maintenance plan. It tells agents whether the radar needs refresh, why, which

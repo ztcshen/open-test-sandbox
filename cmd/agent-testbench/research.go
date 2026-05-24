@@ -208,6 +208,9 @@ type featureLiveCheckReport struct {
 	Feature           featureRadarFeature         `json:"feature,omitempty"`
 	CheckedAt         string                      `json:"checkedAt"`
 	CheckedCount      int                         `json:"checkedCount"`
+	FailedCount       int                         `json:"failedCount"`
+	RefreshNeeded     bool                        `json:"refreshNeeded"`
+	RefreshCount      int                         `json:"refreshCount"`
 	Policy            featureRadarPolicy          `json:"policy"`
 	SourceGeneratedAt string                      `json:"sourceGeneratedAt"`
 	References        []featureLiveCheckReference `json:"references"`
@@ -215,18 +218,22 @@ type featureLiveCheckReport struct {
 }
 
 type featureLiveCheckReference struct {
-	FullName      string   `json:"fullName"`
-	URL           string   `json:"url,omitempty"`
-	Status        string   `json:"status"`
-	OK            bool     `json:"ok"`
-	LocalStars    int      `json:"localStars"`
-	LiveStars     int      `json:"liveStars"`
-	LocalPushedAt string   `json:"localPushedAt,omitempty"`
-	LivePushedAt  string   `json:"livePushedAt,omitempty"`
-	Archived      bool     `json:"archived"`
-	Fork          bool     `json:"fork"`
-	Reasons       []string `json:"reasons,omitempty"`
-	Error         string   `json:"error,omitempty"`
+	FullName         string   `json:"fullName"`
+	URL              string   `json:"url,omitempty"`
+	Status           string   `json:"status"`
+	OK               bool     `json:"ok"`
+	LocalStars       int      `json:"localStars"`
+	LiveStars        int      `json:"liveStars"`
+	StarDelta        int      `json:"starDelta"`
+	LocalPushedAt    string   `json:"localPushedAt,omitempty"`
+	LivePushedAt     string   `json:"livePushedAt,omitempty"`
+	PushedDeltaHours int      `json:"pushedDeltaHours,omitempty"`
+	Archived         bool     `json:"archived"`
+	Fork             bool     `json:"fork"`
+	Reasons          []string `json:"reasons,omitempty"`
+	RefreshNeeded    bool     `json:"refreshNeeded,omitempty"`
+	RefreshReasons   []string `json:"refreshReasons,omitempty"`
+	Error            string   `json:"error,omitempty"`
 }
 
 type featureRefreshPlanReport struct {
@@ -658,6 +665,8 @@ func runResearchLiveCheck(args []string) error {
 	query := flags.String("query", "", "Alias for --feature")
 	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
 	limit := flags.Int("limit", 20, "Maximum reference projects to check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "Fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "Fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
 	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL")
 	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -688,14 +697,16 @@ func runResearchLiveCheck(args []string) error {
 		references = featureProjectIndexReferences(index, *limit)
 	}
 	report := buildFeatureLiveCheckReport(context.Background(), featureLiveCheckOptions{
-		Index:        index,
-		IndexPath:    resolvedIndexPath,
-		Query:        resolvedQuery,
-		Feature:      feature,
-		References:   references,
-		GitHubAPIURL: *githubAPIURL,
-		Token:        os.Getenv(strings.TrimSpace(*tokenEnv)),
-		CheckedAt:    time.Now().UTC(),
+		Index:               index,
+		IndexPath:           resolvedIndexPath,
+		Query:               resolvedQuery,
+		Feature:             feature,
+		References:          references,
+		GitHubAPIURL:        *githubAPIURL,
+		Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+		CheckedAt:           time.Now().UTC(),
+		MaxStarDrift:        *maxStarDrift,
+		MaxPushedDriftHours: *maxPushedDriftHours,
 	})
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
@@ -1533,14 +1544,16 @@ func featureReferenceCommands(query string, featureID string, indexPath string) 
 }
 
 type featureLiveCheckOptions struct {
-	Index        featureRadarIndex
-	IndexPath    string
-	Query        string
-	Feature      featureRadarFeature
-	References   []featureMatrixReference
-	GitHubAPIURL string
-	Token        string
-	CheckedAt    time.Time
+	Index               featureRadarIndex
+	IndexPath           string
+	Query               string
+	Feature             featureRadarFeature
+	References          []featureMatrixReference
+	GitHubAPIURL        string
+	Token               string
+	CheckedAt           time.Time
+	MaxStarDrift        int
+	MaxPushedDriftHours int
 }
 
 type githubRepositoryMetadata struct {
@@ -1586,20 +1599,32 @@ func buildFeatureLiveCheckReport(ctx context.Context, options featureLiveCheckOp
 			item.Reasons = []string{"request_failed"}
 			item.Error = err.Error()
 			report.OK = false
+			report.FailedCount++
 			report.References = append(report.References, item)
 			continue
 		}
 		item.URL = researchFirstNonEmpty(live.URL, item.URL)
 		item.LiveStars = live.StargazersCount
+		item.StarDelta = live.StargazersCount - item.LocalStars
 		item.LivePushedAt = live.PushedAt
+		item.PushedDeltaHours = pushedDeltaHours(item.LocalPushedAt, item.LivePushedAt)
 		item.Archived = live.Archived
 		item.Fork = live.Fork
 		item.Reasons = featureLivePolicyViolations(options.Index.Policy, live)
+		item.RefreshReasons = featureLiveRefreshReasons(options, item)
+		item.RefreshNeeded = len(item.RefreshReasons) > 0
 		item.OK = len(item.Reasons) == 0
 		item.Status = "passed"
 		if !item.OK {
 			item.Status = "failed"
 			report.OK = false
+			report.FailedCount++
+		} else if item.RefreshNeeded {
+			item.OK = false
+			item.Status = "refresh-needed"
+			report.OK = false
+			report.RefreshNeeded = true
+			report.RefreshCount++
 		}
 		report.References = append(report.References, item)
 	}
@@ -1667,6 +1692,47 @@ func featureLivePolicyViolations(policy featureRadarPolicy, metadata githubRepos
 		reasons = append(reasons, "fork")
 	}
 	return reasons
+}
+
+func featureLiveRefreshReasons(options featureLiveCheckOptions, item featureLiveCheckReference) []string {
+	reasons := []string{}
+	if options.MaxStarDrift > 0 && absInt(item.StarDelta) > options.MaxStarDrift {
+		reasons = append(reasons, "star_drift")
+	}
+	if options.MaxPushedDriftHours > 0 && item.PushedDeltaHours > options.MaxPushedDriftHours {
+		reasons = append(reasons, "pushed_at_drift")
+	}
+	return reasons
+}
+
+func pushedDeltaHours(localPushedAt string, livePushedAt string) int {
+	localTime, localOK := parseRadarTimestamp(localPushedAt)
+	liveTime, liveOK := parseRadarTimestamp(livePushedAt)
+	if !localOK || !liveOK || !liveTime.After(localTime) {
+		return 0
+	}
+	return int(liveTime.Sub(localTime).Hours())
+}
+
+func parseRadarTimestamp(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed, true
+	}
+	if parsed, err := time.Parse("2006-01-02", shortDate(value)); err == nil {
+		return parsed, true
+	}
+	return time.Time{}, false
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func featureLiveCheckCommands(query string, featureID string, indexPath string) []string {
@@ -3199,13 +3265,16 @@ func printFeatureLiveCheckReport(report featureLiveCheckReport) {
 		fmt.Printf("Feature: %s (%s)\n", report.Feature.Title, report.Feature.ID)
 	}
 	fmt.Printf("Status: %s\n", statusWord(report.OK))
+	if report.FailedCount > 0 || report.RefreshNeeded {
+		fmt.Printf("Failures: %d, refresh needed: %d\n", report.FailedCount, report.RefreshCount)
+	}
 	fmt.Printf("Checked: %d at %s\n", report.CheckedCount, report.CheckedAt)
 	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
 	if report.SourceGeneratedAt != "" {
 		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
 	}
 	for _, ref := range report.References {
-		fmt.Printf("- %s: %s (live %d stars, pushed %s; local %d stars, pushed %s)\n", ref.FullName, ref.Status, ref.LiveStars, shortDate(ref.LivePushedAt), ref.LocalStars, shortDate(ref.LocalPushedAt))
+		fmt.Printf("- %s: %s (live %d stars, pushed %s; local %d stars, pushed %s; star delta %+d)\n", ref.FullName, ref.Status, ref.LiveStars, shortDate(ref.LivePushedAt), ref.LocalStars, shortDate(ref.LocalPushedAt), ref.StarDelta)
 		if ref.URL != "" {
 			fmt.Printf("  %s\n", ref.URL)
 		}
@@ -3217,6 +3286,9 @@ func printFeatureLiveCheckReport(report featureLiveCheckReport) {
 		}
 		if len(ref.Reasons) > 0 {
 			fmt.Printf("  reasons: %s\n", strings.Join(ref.Reasons, "; "))
+		}
+		if len(ref.RefreshReasons) > 0 {
+			fmt.Printf("  refresh reasons: %s\n", strings.Join(ref.RefreshReasons, "; "))
 		}
 		if ref.Error != "" {
 			fmt.Printf("  error: %s\n", ref.Error)
