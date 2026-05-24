@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -27,8 +27,8 @@ function releaseCheckEnv(overrides = {}) {
   };
 }
 
-function runReleaseCheck(env) {
-  return spawnSync("bash", ["tools/release-check.sh"], {
+function runReleaseCheck(env, args = []) {
+  return spawnSync("bash", ["tools/release-check.sh", ...args], {
     cwd: rootDir,
     env,
     encoding: "utf8",
@@ -96,6 +96,47 @@ test("release-check blocks tracked private test assets before expensive gates", 
     assert.match(result.stderr, /generated or local-only paths are tracked/);
     assert.match(result.stderr, /test-private\/secret-profile\.json/);
     assert.doesNotMatch(result.stdout, /running Go tests/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("release-check scope ignores unrelated untracked source-domain matches", async () => {
+  const outsideDir = path.join(rootDir, ".scratch", "release-check-scope-test");
+  const outsideFile = path.join(outsideDir, "notes.md");
+  try {
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(outsideFile, ["s", "c", "f"].join(""));
+
+    const result = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-scope-test.sqlite",
+    }), ["--scope", "docs"]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /checking release scope/);
+    assert.match(result.stdout, /no scoped runtime tests selected/);
+    assert.doesNotMatch(result.stderr, /core contains source-domain terms/);
+    assert.doesNotMatch(result.stdout, /running Go tests/);
+  } finally {
+    await rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("release-check scope-file runs targeted example tests without full Go suite", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-scope-"));
+  const scopeFile = path.join(tempDir, "scope.txt");
+  try {
+    await writeFile(scopeFile, "tools/examples/demo-showcase.test.mjs\n");
+
+    const result = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-scope-file-test.sqlite",
+    }), ["--scope-file", scopeFile]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /running scoped Node tests/);
+    assert.match(result.stdout, /tools\/examples\/demo-showcase\.test\.mjs/);
+    assert.doesNotMatch(result.stdout, /running Go tests/);
+    assert.doesNotMatch(result.stdout, /running generic API case demo/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

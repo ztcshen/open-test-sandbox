@@ -17,6 +17,13 @@ if [[ ! -f "$DENYLIST" ]]; then
 fi
 
 existing=()
+scan_args=("$@")
+if [[ ${#scan_args[@]} -gt 0 ]]; then
+  git_files_cmd=(git ls-files --cached --others --exclude-standard -z -- "${scan_args[@]}")
+else
+  git_files_cmd=(git ls-files --cached --others --exclude-standard -z)
+fi
+
 while IFS= read -r -d '' path; do
   case "$path" in
     .git/*|.idea/*|.runtime/*|node_modules/*)
@@ -32,7 +39,7 @@ while IFS= read -r -d '' path; do
   if [[ -f "$path" ]]; then
     existing+=("$path")
   fi
-done < <(git ls-files --cached --others --exclude-standard -z)
+done < <("${git_files_cmd[@]}")
 
 if [[ ${#existing[@]} -eq 0 ]]; then
   echo "no core paths to scan"
