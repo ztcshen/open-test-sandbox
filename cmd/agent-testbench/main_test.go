@@ -785,6 +785,17 @@ func TestResearchRefreshPlanPrioritizesStaleCoverageAndAuditSignals(t *testing.T
 		t.Fatalf("refresh reasons = %#v", report.Reasons)
 	}
 
+	strictOut := runCLI(t, "research", "refresh-plan", "--radar-index", indexPath, "--min-references", "5", "--max-age-hours", "24", "--now", "2026-05-25T04:00:00Z", "--limit", "1", "--json")
+	var strictReport struct {
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(strictOut), &strictReport); err != nil {
+		t.Fatalf("decode strict refresh plan json: %v\n%s", err, strictOut)
+	}
+	if len(strictReport.NextCommands) < 2 || !strings.Contains(strictReport.NextCommands[1], "npm run status -- --max-age-hours 24 --min-references 5") {
+		t.Fatalf("strict refresh plan should preserve caller thresholds in status command: %#v", strictReport.NextCommands)
+	}
+
 	textOut := runCLI(t, "research", "refresh-plan", "--radar-index", indexPath, "--min-references", "3", "--max-age-hours", "72", "--now", "2026-05-25T04:00:00Z", "--limit", "1")
 	for _, want := range []string{"Research Refresh Plan", "Needs refresh: yes", "workflow-orchestration", "reference coverage below 3", "npm run refresh"} {
 		if !strings.Contains(textOut, want) {
@@ -882,7 +893,7 @@ func TestResearchStatusReportsFeatureIndexFreshness(t *testing.T) {
 	if report.Counts.Features != 2 || report.Counts.References != 2 || report.Counts.Projects != 3 || report.Counts.CachedResults != 1 || report.Counts.CachedFeatures != 1 {
 		t.Fatalf("status counts = %#v", report.Counts)
 	}
-	if len(report.NextRefreshCommands) < 4 || !strings.Contains(report.NextRefreshCommands[0], "npm run refresh") || !strings.Contains(report.NextRefreshCommands[1], "npm run status -- --max-age-hours 72 --min-references 3") || !strings.Contains(report.NextRefreshCommands[2], "npm run audit") || !strings.Contains(report.NextRefreshCommands[3], "npm run coverage -- --min-references 3") {
+	if len(report.NextRefreshCommands) < 4 || !strings.Contains(report.NextRefreshCommands[0], "npm run refresh") || !strings.Contains(report.NextRefreshCommands[1], "npm run status -- --max-age-hours 48 --min-references 3") || !strings.Contains(report.NextRefreshCommands[2], "npm run audit") || !strings.Contains(report.NextRefreshCommands[3], "npm run coverage -- --min-references 3") {
 		t.Fatalf("next refresh commands = %#v", report.NextRefreshCommands)
 	}
 
@@ -908,7 +919,7 @@ func TestResearchStatusReportsFeatureIndexFreshness(t *testing.T) {
 }
 
 func TestFeatureRadarRefreshCommandsQuoteShellPaths(t *testing.T) {
-	commands := featureRadarRefreshCommands("/tmp/radar work; rm -rf nope/data/feature-index.json")
+	commands := featureRadarRefreshCommands("/tmp/radar work; rm -rf nope/data/feature-index.json", 72, 3)
 	if len(commands) == 0 {
 		t.Fatalf("expected refresh commands")
 	}
@@ -918,7 +929,7 @@ func TestFeatureRadarRefreshCommandsQuoteShellPaths(t *testing.T) {
 		}
 	}
 
-	commands = featureRadarRefreshCommands("/tmp/radar-work/data/feature-index.json")
+	commands = featureRadarRefreshCommands("/tmp/radar-work/data/feature-index.json", 72, 3)
 	if !strings.HasPrefix(commands[0], "cd /tmp/radar-work && npm run refresh") {
 		t.Fatalf("safe refresh command should stay readable: %q", commands[0])
 	}
@@ -927,7 +938,7 @@ func TestFeatureRadarRefreshCommandsQuoteShellPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("user home: %v", err)
 	}
-	commands = featureRadarRefreshCommands("~/github-feature-radar/data/feature-index.json")
+	commands = featureRadarRefreshCommands("~/github-feature-radar/data/feature-index.json", 72, 3)
 	if !strings.HasPrefix(commands[0], "cd "+quoteShellPath(filepath.Join(home, "github-feature-radar"))+" && npm run refresh") {
 		t.Fatalf("tilde refresh command should expand home before quoting: %q", commands[0])
 	}

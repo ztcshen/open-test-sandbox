@@ -982,7 +982,7 @@ func buildFeatureStatusReport(index featureRadarIndex, indexPath string, maxAgeH
 		StaleReason:         staleReason,
 		Policy:              index.Policy,
 		Counts:              counts,
-		NextRefreshCommands: featureRadarRefreshCommands(indexPath),
+		NextRefreshCommands: featureRadarRefreshCommands(indexPath, maxAgeHours, 3),
 	}
 }
 
@@ -1056,7 +1056,7 @@ func buildFeatureRefreshPlanReport(index featureRadarIndex, indexPath string, mi
 	status := buildFeatureStatusReport(index, indexPath, maxAgeHours, checkedAt)
 	audit := buildFeatureAuditReport(index, minReferences)
 	coverage := buildFeatureCoverageReport(index, minReferences, 3)
-	nextCommands := featureRadarRefreshCommands(indexPath)
+	nextCommands := featureRadarRefreshCommands(indexPath, maxAgeHours, minReferences)
 	report := featureRefreshPlanReport{
 		OK:                true,
 		SourceGeneratedAt: index.SourceGeneratedAt,
@@ -1196,13 +1196,19 @@ func researchFirstNonEmpty(values ...string) string {
 	return ""
 }
 
-func featureRadarRefreshCommands(indexPath string) []string {
+func featureRadarRefreshCommands(indexPath string, maxAgeHours int, minReferences int) []string {
+	if maxAgeHours <= 0 {
+		maxAgeHours = 72
+	}
+	if minReferences <= 0 {
+		minReferences = 3
+	}
 	root := filepath.Dir(filepath.Dir(indexPath))
 	return []string{
 		fmt.Sprintf("cd %s && npm run refresh -- --limit 20", quoteShellPath(root)),
-		fmt.Sprintf("cd %s && npm run status -- --max-age-hours 72 --min-references 3", quoteShellPath(root)),
+		fmt.Sprintf("cd %s && npm run status -- --max-age-hours %d --min-references %d", quoteShellPath(root), maxAgeHours, minReferences),
 		fmt.Sprintf("cd %s && npm run audit", quoteShellPath(root)),
-		fmt.Sprintf("cd %s && npm run coverage -- --min-references 3", quoteShellPath(root)),
+		fmt.Sprintf("cd %s && npm run coverage -- --min-references %d", quoteShellPath(root), minReferences),
 		fmt.Sprintf("cd %s && npm run index", quoteShellPath(root)),
 	}
 }
