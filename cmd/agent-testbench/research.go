@@ -488,6 +488,9 @@ func runResearchSearch(args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(index.TokenIndex) == 0 {
+		return errors.New("research search requires a radar index with non-empty tokenIndex; regenerate the feature index before ranked search")
+	}
 	report := buildFeatureSearchReport(index, resolvedIndexPath, resolvedQuery, *limit, *referenceLimit, *minReferences)
 	if *jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(report)

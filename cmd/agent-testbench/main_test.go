@@ -465,6 +465,34 @@ func TestResearchSearchRanksCandidateFeaturesFromRadarIndex(t *testing.T) {
 	}
 }
 
+func TestResearchSearchRejectsIndexWithoutTokenIndex(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases with policy checks.",
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t, "research", "search", "--query", "gate", "--radar-index", indexPath)
+	if !strings.Contains(out, "research search requires a radar index with non-empty tokenIndex") {
+		t.Fatalf("missing token index failure = %q", out)
+	}
+}
+
 func TestResearchCoverageReportsFeatureReferenceGates(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{
