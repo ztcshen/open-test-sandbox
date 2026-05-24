@@ -60,7 +60,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
-          git diff --name-only --diff-filter=ACMRT "origin/${{ github.base_ref }}...HEAD" > .release-check-scope
+          git diff --name-only --diff-filter=ACMRT "origin/${{ github.base_ref }}" HEAD > .release-check-scope
           sed 's/^/release scope: /' .release-check-scope
 
       - name: Run release gate
