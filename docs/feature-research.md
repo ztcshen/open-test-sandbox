@@ -43,11 +43,23 @@ The radar policy is:
 List the available feature index before choosing the next CLI slice:
 
 ```sh
+./bin/agent-testbench.sh research search \
+  --radar-index $RADAR_HOME/data/feature-index.json \
+  --query "quality gate" \
+  --limit 5 \
+  --json
+
 ./bin/agent-testbench.sh research features \
   --radar-index $RADAR_HOME/data/feature-index.json \
   --filter "gate" \
   --json
 ```
+
+`research search` is the feature-search front door. It uses the generated
+token index to rank candidate features for a query, reports matched tokens,
+reference counts, top recent 3K+ star references, and a copyable
+`research plan` command for each candidate. Use it when the feature wording is
+still fuzzy and several maintained feature records may apply.
 
 `research features` returns the feature id, title, intent, aliases, reference
 count, and ranked reference projects. Use it as the local feature-search entry
@@ -239,6 +251,7 @@ Recommended pre-design gate:
 
 ```sh
 ./bin/agent-testbench.sh research features --filter "new cli capability"
+./bin/agent-testbench.sh research search --query "new cli capability" --limit 5
 ./bin/agent-testbench.sh research status --max-age-hours 72
 ./bin/agent-testbench.sh research audit --min-references 3
 ./bin/agent-testbench.sh research coverage --min-references 3

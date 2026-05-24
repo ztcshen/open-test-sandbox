@@ -329,6 +329,28 @@ type featureRadarCatalogItem struct {
 	TopMatches []featureRadarMatch `json:"topMatches"`
 }
 
+type featureSearchReport struct {
+	OK                bool                     `json:"ok"`
+	Query             string                   `json:"query"`
+	NormalizedQuery   string                   `json:"normalizedQuery"`
+	Count             int                      `json:"count"`
+	Policy            featureRadarPolicy       `json:"policy"`
+	SourceGeneratedAt string                   `json:"sourceGeneratedAt"`
+	Candidates        []featureSearchCandidate `json:"candidates"`
+}
+
+type featureSearchCandidate struct {
+	ID            string              `json:"id"`
+	Title         string              `json:"title"`
+	Intent        string              `json:"intent,omitempty"`
+	Score         int                 `json:"score"`
+	MatchedTokens []string            `json:"matchedTokens"`
+	References    int                 `json:"references"`
+	Gate          string              `json:"gate"`
+	PlanCommand   string              `json:"planCommand"`
+	TopReferences []featureRadarMatch `json:"topReferences"`
+}
+
 func runResearch(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing research command")
@@ -338,6 +360,8 @@ func runResearch(args []string) error {
 		return runResearchFeature(args[1:])
 	case "features":
 		return runResearchFeatures(args[1:])
+	case "search":
+		return runResearchSearch(args[1:])
 	case "plan":
 		return runResearchPlan(args[1:])
 	case "coverage":
@@ -433,6 +457,42 @@ func runResearchFeatures(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(report)
 	}
 	printFeatureRadarCatalogReport(report)
+	return nil
+}
+
+func runResearchSearch(args []string) error {
+	flags := flag.NewFlagSet("research search", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	query := flags.String("query", "", "Feature text to search")
+	featureQuery := flags.String("feature", "", "Alias for --query")
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	limit := flags.Int("limit", 5, "Maximum candidate features to show")
+	referenceLimit := flags.Int("reference-limit", 2, "Maximum top references per candidate to include")
+	minReferences := flags.Int("min-references", 3, "Reference gate shown for each candidate")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedQuery := researchFirstNonEmpty(*query, *featureQuery)
+	if strings.TrimSpace(resolvedQuery) == "" {
+		return errors.New("research search requires --query TEXT")
+	}
+	resolvedIndexPath := strings.TrimSpace(*indexPath)
+	if resolvedIndexPath == "" {
+		resolvedIndexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if resolvedIndexPath == "" {
+		return fmt.Errorf("research search requires --radar-index PATH or %s", featureRadarIndexEnv)
+	}
+	index, err := readFeatureRadarIndex(resolvedIndexPath)
+	if err != nil {
+		return err
+	}
+	report := buildFeatureSearchReport(index, resolvedIndexPath, resolvedQuery, *limit, *referenceLimit, *minReferences)
+	if *jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(report)
+	}
+	printFeatureSearchReport(report)
 	return nil
 }
 
@@ -1577,6 +1637,130 @@ func buildFeatureRadarCatalogReport(index featureRadarIndex, filter string) feat
 	return report
 }
 
+func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query string, limit int, referenceLimit int, minReferences int) featureSearchReport {
+	if limit <= 0 {
+		limit = 5
+	}
+	if referenceLimit < 0 {
+		referenceLimit = 0
+	}
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	normalizedQuery := normalizeFeatureRadarText(query)
+	queryTerms := strings.Fields(normalizedQuery)
+	scores := map[string]int{}
+	matchedTokens := map[string][]string{}
+	for token, ids := range index.TokenIndex {
+		score := featureSearchTokenScore(token, normalizedQuery, queryTerms)
+		if score <= 0 {
+			continue
+		}
+		for _, id := range ids {
+			if _, ok := index.Features[id]; !ok {
+				continue
+			}
+			scores[id] += score
+			if featureSearchDisplayToken(token) {
+				matchedTokens[id] = append(matchedTokens[id], token)
+			}
+		}
+	}
+
+	ids := make([]string, 0, len(scores))
+	for id := range scores {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		left := index.Features[ids[i]]
+		right := index.Features[ids[j]]
+		if scores[ids[i]] != scores[ids[j]] {
+			return scores[ids[i]] > scores[ids[j]]
+		}
+		if len(left.TopMatches) != len(right.TopMatches) {
+			return len(left.TopMatches) > len(right.TopMatches)
+		}
+		return ids[i] < ids[j]
+	})
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+
+	candidates := make([]featureSearchCandidate, 0, len(ids))
+	for _, id := range ids {
+		feature := index.Features[id]
+		references := len(feature.TopMatches)
+		tokens := uniqueSortedStrings(matchedTokens[id])
+		candidates = append(candidates, featureSearchCandidate{
+			ID:            feature.ID,
+			Title:         feature.Title,
+			Intent:        feature.Intent,
+			Score:         scores[id],
+			MatchedTokens: tokens,
+			References:    references,
+			Gate:          featureGateStatus(references, minReferences),
+			PlanCommand:   featurePlanCommand(feature.ID, minReferences, indexPath),
+			TopReferences: limitFeatureRadarMatches(feature.TopMatches, referenceLimit),
+		})
+	}
+
+	return featureSearchReport{
+		OK:                len(candidates) > 0,
+		Query:             strings.TrimSpace(query),
+		NormalizedQuery:   normalizedQuery,
+		Count:             len(candidates),
+		Policy:            index.Policy,
+		SourceGeneratedAt: index.SourceGeneratedAt,
+		Candidates:        candidates,
+	}
+}
+
+func featureSearchTokenScore(token string, normalizedQuery string, queryTerms []string) int {
+	token = normalizeFeatureRadarText(token)
+	if token == "" || normalizedQuery == "" {
+		return 0
+	}
+	if token == normalizedQuery {
+		return 8
+	}
+	if strings.Contains(token, normalizedQuery) || strings.Contains(normalizedQuery, token) {
+		return 4
+	}
+	score := 0
+	for _, term := range queryTerms {
+		if term != "" && strings.Contains(token, term) {
+			score++
+		}
+	}
+	return score
+}
+
+func featureSearchDisplayToken(token string) bool {
+	return len(strings.TrimSpace(token)) <= 48
+}
+
+func featureGateStatus(references int, minReferences int) string {
+	if references >= minReferences {
+		return "passed"
+	}
+	return "failed"
+}
+
+func uniqueSortedStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func readFeatureRadarIndex(path string) (featureRadarIndex, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -1698,11 +1882,13 @@ func featureNextCommands(featureID string) []featureNextCommand {
 		}
 	case "github-radar-generation":
 		commands = []featureNextCommand{
+			{Command: "agent-testbench research search --query TEXT --json", Purpose: "Rank candidate feature records from the external GitHub Feature Radar token index."},
 			{Command: "agent-testbench research features --filter TEXT --json", Purpose: "Search feature records from the external GitHub Feature Radar index."},
 			{Command: "agent-testbench research feature --feature TEXT --require-min-matches 3 --json", Purpose: "Gate a CLI design slice on enough qualifying open-source references."},
 		}
 	default:
 		commands = []featureNextCommand{
+			{Command: "agent-testbench research search --query TEXT --json", Purpose: "Rank candidate feature records before choosing the next CLI command."},
 			{Command: "agent-testbench research features --filter TEXT --json", Purpose: "Find the closest maintained feature record before choosing the next CLI command."},
 		}
 	}
@@ -1859,6 +2045,28 @@ func printFeatureRadarCatalogReport(report featureRadarCatalogReport) {
 		}
 		if len(feature.TopMatches) > 0 {
 			fmt.Printf("  Top reference: %s\n", feature.TopMatches[0].FullName)
+		}
+	}
+}
+
+func printFeatureSearchReport(report featureSearchReport) {
+	fmt.Println("Feature Search")
+	fmt.Printf("Query: %s\n", report.Query)
+	fmt.Printf("Candidates: %d\n", report.Count)
+	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
+	if report.SourceGeneratedAt != "" {
+		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
+	}
+	for _, candidate := range report.Candidates {
+		fmt.Printf("- %s (%s): score=%d references=%d gate=%s\n", candidate.Title, candidate.ID, candidate.Score, candidate.References, candidate.Gate)
+		if len(candidate.MatchedTokens) > 0 {
+			fmt.Printf("  matched: %s\n", strings.Join(candidate.MatchedTokens, ", "))
+		}
+		if candidate.PlanCommand != "" {
+			fmt.Printf("  Plan: %s\n", candidate.PlanCommand)
+		}
+		if len(candidate.TopReferences) > 0 {
+			fmt.Printf("  Top reference: %s\n", candidate.TopReferences[0].FullName)
 		}
 	}
 }

@@ -50,6 +50,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research features") {
 		t.Fatalf("top-level help should expose feature radar catalog discovery:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench research search") {
+		t.Fatalf("top-level help should expose ranked feature search:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench research coverage") {
 		t.Fatalf("top-level help should expose feature radar coverage gates:\n%s", out)
 	}
@@ -368,6 +371,97 @@ func TestResearchFeaturesListsAndFiltersRadarFeatureIndex(t *testing.T) {
 	textOut := runCLI(t, "research", "features", "--radar-index", indexPath)
 	if !strings.Contains(textOut, "CLI Command UX") || !strings.Contains(textOut, "Quality Gates") || !strings.Contains(textOut, "stars >= 3000") {
 		t.Fatalf("feature list text output = %q", textOut)
+	}
+}
+
+func TestResearchSearchRanksCandidateFeaturesFromRadarIndex(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"gate":          []string{"quality-gates", "workflow-orchestration"},
+			"quality gate":  []string{"quality-gates"},
+			"workflow gate": []string{"workflow-orchestration"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":      "quality-gates",
+				"title":   "Quality Gates",
+				"intent":  "Find projects that gate releases with policy checks.",
+				"aliases": []string{"quality report", "release gate"},
+				"topMatches": []map[string]any{
+					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z"},
+					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z"},
+				},
+			},
+			"workflow-orchestration": map[string]any{
+				"id":      "workflow-orchestration",
+				"title":   "Workflow Orchestration",
+				"intent":  "Find projects that model workflow automation.",
+				"aliases": []string{"workflow gate", "orchestration"},
+				"topMatches": []map[string]any{
+					{"fullName": "n8n-io/n8n", "url": "https://github.com/n8n-io/n8n", "stars": 189461, "pushedAt": "2026-05-24T09:05:35Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t, "research", "search", "--query", "gate", "--radar-index", indexPath, "--limit", "2", "--reference-limit", "1", "--min-references", "2", "--json")
+	var report struct {
+		OK              bool   `json:"ok"`
+		Query           string `json:"query"`
+		NormalizedQuery string `json:"normalizedQuery"`
+		Count           int    `json:"count"`
+		Candidates      []struct {
+			ID            string   `json:"id"`
+			Title         string   `json:"title"`
+			Score         int      `json:"score"`
+			MatchedTokens []string `json:"matchedTokens"`
+			References    int      `json:"references"`
+			Gate          string   `json:"gate"`
+			PlanCommand   string   `json:"planCommand"`
+			TopReferences []struct {
+				FullName string `json:"fullName"`
+				Stars    int    `json:"stars"`
+			} `json:"topReferences"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode research search json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Query != "gate" || report.NormalizedQuery != "gate" || report.Count != 2 {
+		t.Fatalf("search report identity = %#v", report)
+	}
+	if report.Candidates[0].ID != "quality-gates" || report.Candidates[0].Gate != "passed" || report.Candidates[0].References != 2 || report.Candidates[0].Score == 0 {
+		t.Fatalf("top candidate = %#v", report.Candidates[0])
+	}
+	if !stringSliceContains(report.Candidates[0].MatchedTokens, "gate") || !stringSliceContains(report.Candidates[0].MatchedTokens, "quality gate") {
+		t.Fatalf("matched tokens = %#v", report.Candidates[0].MatchedTokens)
+	}
+	if len(report.Candidates[0].TopReferences) != 1 || report.Candidates[0].TopReferences[0].FullName != "aquasecurity/trivy" || report.Candidates[0].TopReferences[0].Stars < 3000 {
+		t.Fatalf("top references = %#v", report.Candidates[0].TopReferences)
+	}
+	if !strings.Contains(report.Candidates[0].PlanCommand, "agent-testbench research plan --feature 'quality-gates'"+featureRadarIndexFlag(indexPath)+" --require-min-matches 2") {
+		t.Fatalf("plan command = %q", report.Candidates[0].PlanCommand)
+	}
+	if report.Candidates[1].ID != "workflow-orchestration" || report.Candidates[1].Gate != "failed" {
+		t.Fatalf("second candidate = %#v", report.Candidates[1])
+	}
+
+	textOut := runCLI(t, "research", "search", "--query", "gate", "--radar-index", indexPath, "--limit", "1", "--reference-limit", "1")
+	for _, want := range []string{"Feature Search", "Query: gate", "Quality Gates", "matched: gate, quality gate", "Top reference: aquasecurity/trivy"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("search text output missing %q:\n%s", want, textOut)
+		}
 	}
 }
 

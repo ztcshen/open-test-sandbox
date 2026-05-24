@@ -434,6 +434,7 @@ Usage:
   agent-testbench case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]
   agent-testbench research feature --feature TEXT --radar-index PATH [--limit N] [--require-min-matches N] [--json]
   agent-testbench research features --radar-index PATH [--filter TEXT] [--json]
+  agent-testbench research search --query TEXT --radar-index PATH [--limit N] [--reference-limit N] [--min-references N] [--json]
   agent-testbench research coverage --radar-index PATH [--min-references N] [--limit N] [--json]
   agent-testbench research audit --radar-index PATH [--min-references N] [--json]
   agent-testbench research status --radar-index PATH [--max-age-hours N] [--json]
