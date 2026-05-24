@@ -753,13 +753,15 @@ func TestResearchSyncPlansAndExecutesRadarMaintenanceWorkflow(t *testing.T) {
 		}
 		joinedCommands += step.Command + "\n"
 	}
+	radarJSONPath := filepath.Join(dataDir, "feature-radar.json")
+	radarIndexPath := filepath.Join(dataDir, "feature-index.json")
 	for _, want := range []string{
 		"npm test",
-		"npm run refresh -- --limit 10",
-		"npm run status -- --max-age-hours 24 --min-references 5",
-		"npm run audit",
-		"npm run coverage -- --min-references 5",
-		"npm run index",
+		"npm run refresh -- --limit 10 --out " + quoteShellArgIfNeeded(radarJSONPath) + " --index " + quoteShellArgIfNeeded(radarIndexPath),
+		"npm run status -- --out " + quoteShellArgIfNeeded(radarJSONPath) + " --max-age-hours 24 --min-references 5",
+		"npm run audit -- --out " + quoteShellArgIfNeeded(radarJSONPath),
+		"npm run coverage -- --out " + quoteShellArgIfNeeded(radarJSONPath) + " --min-references 5",
+		"npm run index -- --out " + quoteShellArgIfNeeded(radarJSONPath) + " --index " + quoteShellArgIfNeeded(radarIndexPath),
 	} {
 		if !strings.Contains(joinedCommands, want) {
 			t.Fatalf("sync commands missing %q:\n%s", want, joinedCommands)
@@ -767,7 +769,7 @@ func TestResearchSyncPlansAndExecutesRadarMaintenanceWorkflow(t *testing.T) {
 	}
 
 	textOut := runCLI(t, "research", "sync", "--radar-root", radarRoot, "--refresh-limit", "10", "--max-age-hours", "24", "--min-references", "5")
-	for _, want := range []string{"Feature Radar Sync", "Execute: false", "npm run refresh -- --limit 10", "npm run status -- --max-age-hours 24 --min-references 5"} {
+	for _, want := range []string{"Feature Radar Sync", "Execute: false", "npm run refresh -- --limit 10", "npm run status -- --out " + quoteShellArgIfNeeded(radarJSONPath) + " --max-age-hours 24 --min-references 5"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("research sync text missing %q:\n%s", want, textOut)
 		}
@@ -814,15 +816,62 @@ printf 'ran %s\n' "$*"
 	calls := string(callsRaw)
 	for _, want := range []string{
 		"test\n",
-		"run refresh -- --limit 7\n",
-		"run status -- --max-age-hours 12 --min-references 4\n",
-		"run audit\n",
-		"run coverage -- --min-references 4\n",
-		"run index\n",
+		"run refresh -- --limit 7 --out " + filepath.Join(dataDir, "feature-radar.json") + " --index " + filepath.Join(dataDir, "feature-index.json") + "\n",
+		"run status -- --out " + filepath.Join(dataDir, "feature-radar.json") + " --max-age-hours 12 --min-references 4\n",
+		"run audit -- --out " + filepath.Join(dataDir, "feature-radar.json") + "\n",
+		"run coverage -- --out " + filepath.Join(dataDir, "feature-radar.json") + " --min-references 4\n",
+		"run index -- --out " + filepath.Join(dataDir, "feature-radar.json") + " --index " + filepath.Join(dataDir, "feature-index.json") + "\n",
 	} {
 		if !strings.Contains(calls, want) {
 			t.Fatalf("fake npm calls missing %q:\n%s", want, calls)
 		}
+	}
+}
+
+func TestResearchSyncFailsPreflightWhenRadarIndexIsMissing(t *testing.T) {
+	radarRoot := t.TempDir()
+	writeFile(t, filepath.Join(radarRoot, "package.json"), `{"scripts":{"refresh":"node src/cli.mjs refresh"}}`)
+
+	out := runCLIFails(t, "research", "sync", "--radar-root", radarRoot, "--json")
+
+	if !strings.Contains(out, `"ok": false`) || !strings.Contains(out, "radar index does not exist") {
+		t.Fatalf("missing radar index should fail preflight:\n%s", out)
+	}
+}
+
+func TestResearchSyncExpandsNPMHomePathBeforeExecution(t *testing.T) {
+	radarRoot := t.TempDir()
+	dataDir := filepath.Join(radarRoot, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir radar data: %v", err)
+	}
+	writeFile(t, filepath.Join(radarRoot, "package.json"), `{"scripts":{"refresh":"node src/cli.mjs refresh"}}`)
+	writeFile(t, filepath.Join(dataDir, "feature-index.json"), `{"features":{}}`)
+
+	home := t.TempDir()
+	binDir := filepath.Join(home, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir fake home bin: %v", err)
+	}
+	callsPath := filepath.Join(home, "npm-calls.txt")
+	writeFile(t, filepath.Join(binDir, "npm"), `#!/bin/sh
+printf '%s\n' "$*" >> "$RADAR_NPM_CALLS"
+printf 'ran %s\n' "$*"
+`)
+	if err := os.Chmod(filepath.Join(binDir, "npm"), 0o755); err != nil {
+		t.Fatalf("chmod fake npm: %v", err)
+	}
+
+	out := runCLIWithEnv(t, []string{
+		"HOME=" + home,
+		"RADAR_NPM_CALLS=" + callsPath,
+	}, "research", "sync", "--radar-root", radarRoot, "--npm", "~/bin/npm", "--execute", "--json")
+
+	if !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("home-expanded npm command should execute:\n%s", out)
+	}
+	if _, err := os.ReadFile(callsPath); err != nil {
+		t.Fatalf("expected expanded ~/bin/npm to be executed: %v", err)
 	}
 }
 

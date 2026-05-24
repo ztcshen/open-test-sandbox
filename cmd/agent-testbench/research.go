@@ -1477,6 +1477,7 @@ func buildFeatureSyncReport(ctx context.Context, options featureSyncOptions) fea
 	if strings.TrimSpace(options.NPMCommand) == "" {
 		options.NPMCommand = "npm"
 	}
+	options.NPMCommand = expandUserHomePath(options.NPMCommand)
 	report := featureSyncReport{
 		Execute:       options.Execute,
 		RadarRoot:     options.RadarRoot,
@@ -1485,13 +1486,16 @@ func buildFeatureSyncReport(ctx context.Context, options featureSyncOptions) fea
 		MaxAgeHours:   options.MaxAgeHours,
 		MinReferences: options.MinReferences,
 		Checks:        featureSyncChecksFor(options.RadarRoot, options.RadarIndex),
-		Steps:         featureSyncSteps(options.RadarRoot, options.NPMCommand, options.RefreshLimit, options.MaxAgeHours, options.MinReferences),
+		Steps:         featureSyncSteps(options.RadarRoot, options.RadarIndex, options.NPMCommand, options.RefreshLimit, options.MaxAgeHours, options.MinReferences),
 	}
 	if !report.Checks.RootExists {
 		report.Reasons = append(report.Reasons, "radar root does not exist")
 	}
 	if !report.Checks.PackageJSON {
 		report.Reasons = append(report.Reasons, "radar root is missing package.json")
+	}
+	if !report.Checks.RadarIndex {
+		report.Reasons = append(report.Reasons, "radar index does not exist")
 	}
 	if len(report.Reasons) > 0 {
 		report.OK = false
@@ -1537,17 +1541,18 @@ func pathIsFile(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func featureSyncSteps(root string, npmCommand string, refreshLimit int, maxAgeHours int, minReferences int) []featureSyncStep {
+func featureSyncSteps(root string, indexPath string, npmCommand string, refreshLimit int, maxAgeHours int, minReferences int) []featureSyncStep {
+	jsonPath := featureSyncRadarJSONPath(indexPath)
 	definitions := []struct {
 		name string
 		args []string
 	}{
 		{name: "test", args: []string{"test"}},
-		{name: "refresh", args: []string{"run", "refresh", "--", "--limit", fmt.Sprintf("%d", refreshLimit)}},
-		{name: "status", args: []string{"run", "status", "--", "--max-age-hours", fmt.Sprintf("%d", maxAgeHours), "--min-references", fmt.Sprintf("%d", minReferences)}},
-		{name: "audit", args: []string{"run", "audit"}},
-		{name: "coverage", args: []string{"run", "coverage", "--", "--min-references", fmt.Sprintf("%d", minReferences)}},
-		{name: "index", args: []string{"run", "index"}},
+		{name: "refresh", args: []string{"run", "refresh", "--", "--limit", fmt.Sprintf("%d", refreshLimit), "--out", jsonPath, "--index", indexPath}},
+		{name: "status", args: []string{"run", "status", "--", "--out", jsonPath, "--max-age-hours", fmt.Sprintf("%d", maxAgeHours), "--min-references", fmt.Sprintf("%d", minReferences)}},
+		{name: "audit", args: []string{"run", "audit", "--", "--out", jsonPath}},
+		{name: "coverage", args: []string{"run", "coverage", "--", "--out", jsonPath, "--min-references", fmt.Sprintf("%d", minReferences)}},
+		{name: "index", args: []string{"run", "index", "--", "--out", jsonPath, "--index", indexPath}},
 	}
 	steps := make([]featureSyncStep, 0, len(definitions))
 	for _, item := range definitions {
@@ -1558,6 +1563,14 @@ func featureSyncSteps(root string, npmCommand string, refreshLimit int, maxAgeHo
 		})
 	}
 	return steps
+}
+
+func featureSyncRadarJSONPath(indexPath string) string {
+	indexPath = strings.TrimSpace(indexPath)
+	if indexPath == "" {
+		return filepath.Join("data", "feature-radar.json")
+	}
+	return filepath.Join(filepath.Dir(indexPath), "feature-radar.json")
 }
 
 func featureSyncShellCommand(root string, npmCommand string, args []string) string {
