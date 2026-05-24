@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -216,11 +217,13 @@ type featureLiveCheckReport struct {
 	Feature           featureRadarFeature         `json:"feature,omitempty"`
 	CheckedAt         string                      `json:"checkedAt"`
 	CheckedCount      int                         `json:"checkedCount"`
+	SkippedCount      int                         `json:"skippedCount,omitempty"`
 	FailedCount       int                         `json:"failedCount"`
 	RefreshNeeded     bool                        `json:"refreshNeeded"`
 	RefreshCount      int                         `json:"refreshCount"`
 	RateLimited       bool                        `json:"rateLimited,omitempty"`
 	AuthRequired      bool                        `json:"authRequired,omitempty"`
+	RateLimitResetAt  string                      `json:"rateLimitResetAt,omitempty"`
 	Diagnostics       []string                    `json:"diagnostics,omitempty"`
 	Policy            featureRadarPolicy          `json:"policy"`
 	SourceGeneratedAt string                      `json:"sourceGeneratedAt"`
@@ -245,6 +248,7 @@ type featureLiveCheckReference struct {
 	RefreshNeeded    bool     `json:"refreshNeeded,omitempty"`
 	RefreshReasons   []string `json:"refreshReasons,omitempty"`
 	RateLimited      bool     `json:"rateLimited,omitempty"`
+	RateLimitResetAt string   `json:"rateLimitResetAt,omitempty"`
 	Error            string   `json:"error,omitempty"`
 }
 
@@ -2209,7 +2213,7 @@ func buildFeatureLiveCheckReport(ctx context.Context, options featureLiveCheckOp
 		return report
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
-	for _, ref := range options.References {
+	for index, ref := range options.References {
 		item := featureLiveCheckReference{
 			FullName:      ref.FullName,
 			URL:           ref.URL,
@@ -2225,13 +2229,19 @@ func buildFeatureLiveCheckReport(ctx context.Context, options featureLiveCheckOp
 			var apiErr githubRepositoryAPIError
 			if errors.As(err, &apiErr) && apiErr.RateLimited {
 				item.RateLimited = true
+				item.RateLimitResetAt = apiErr.RateLimitResetAt
 				item.Reasons = []string{"github_rate_limited"}
 				report.RateLimited = true
 				report.AuthRequired = strings.TrimSpace(options.Token) == ""
+				report.RateLimitResetAt = apiErr.RateLimitResetAt
+				report.SkippedCount = len(options.References) - index - 1
 			}
 			report.OK = false
 			report.FailedCount++
 			report.References = append(report.References, item)
+			if item.RateLimited {
+				break
+			}
 			continue
 		}
 		item.URL = researchFirstNonEmpty(live.URL, item.URL)
@@ -2261,17 +2271,18 @@ func buildFeatureLiveCheckReport(ctx context.Context, options featureLiveCheckOp
 	}
 	report.CheckedCount = len(report.References)
 	if report.RateLimited {
-		report.Diagnostics = featureLiveRateLimitDiagnostics(report.AuthRequired, tokenEnv)
+		report.Diagnostics = featureLiveRateLimitDiagnostics(report.AuthRequired, tokenEnv, report.SkippedCount, report.RateLimitResetAt)
 		report.NextCommands = uniquePreserveOrder(append(featureLiveRateLimitCommands(options.Query, options.Feature.ID, options.IndexPath, tokenEnv), report.NextCommands...))
 	}
 	return report
 }
 
 type githubRepositoryAPIError struct {
-	FullName    string
-	StatusCode  int
-	Body        string
-	RateLimited bool
+	FullName         string
+	StatusCode       int
+	Body             string
+	RateLimited      bool
+	RateLimitResetAt string
 }
 
 func (err githubRepositoryAPIError) Error() string {
@@ -2301,10 +2312,11 @@ func fetchGitHubRepositoryMetadata(ctx context.Context, client *http.Client, api
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		body := strings.TrimSpace(string(raw))
 		return githubRepositoryMetadata{}, githubRepositoryAPIError{
-			FullName:    fullName,
-			StatusCode:  resp.StatusCode,
-			Body:        body,
-			RateLimited: githubResponseLooksRateLimited(resp, body),
+			FullName:         fullName,
+			StatusCode:       resp.StatusCode,
+			Body:             body,
+			RateLimited:      githubResponseLooksRateLimited(resp, body),
+			RateLimitResetAt: githubRateLimitResetAt(resp.Header.Get("X-RateLimit-Reset")),
 		}
 	}
 	var metadata githubRepositoryMetadata
@@ -2330,6 +2342,18 @@ func githubResponseLooksRateLimited(resp *http.Response, body string) bool {
 	}
 	body = strings.ToLower(body)
 	return strings.Contains(body, "rate limit") || strings.Contains(body, "secondary rate limit")
+}
+
+func githubRateLimitResetAt(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	seconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || seconds <= 0 {
+		return ""
+	}
+	return time.Unix(seconds, 0).UTC().Format(time.RFC3339)
 }
 
 func githubRepositoryURL(apiBaseURL string, fullName string) (string, error) {
@@ -2422,11 +2446,17 @@ func featureLiveCheckCommands(query string, featureID string, indexPath string) 
 	return commands
 }
 
-func featureLiveRateLimitDiagnostics(authRequired bool, tokenEnv string) []string {
+func featureLiveRateLimitDiagnostics(authRequired bool, tokenEnv string, skippedCount int, resetAt string) []string {
 	if strings.TrimSpace(tokenEnv) == "" {
 		tokenEnv = "GITHUB_TOKEN"
 	}
 	diagnostics := []string{"GitHub API rate limit reached while validating live reference metadata."}
+	if skippedCount > 0 {
+		diagnostics = append(diagnostics, fmt.Sprintf("%d reference(s) skipped after rate limit to avoid repeated failed GitHub requests.", skippedCount))
+	}
+	if strings.TrimSpace(resetAt) != "" {
+		diagnostics = append(diagnostics, "GitHub rate limit resets at "+resetAt+".")
+	}
 	if authRequired {
 		diagnostics = append(diagnostics, "Set "+tokenEnv+" to a GitHub token and rerun live-check for a higher API limit.")
 	}
@@ -5234,8 +5264,14 @@ func printFeatureLiveCheckReport(report featureLiveCheckReport) {
 	if report.FailedCount > 0 || report.RefreshNeeded {
 		fmt.Printf("Failures: %d, refresh needed: %d\n", report.FailedCount, report.RefreshCount)
 	}
+	if report.SkippedCount > 0 {
+		fmt.Printf("Skipped: %d\n", report.SkippedCount)
+	}
 	if report.RateLimited {
 		fmt.Println("Rate limited: yes")
+		if report.RateLimitResetAt != "" {
+			fmt.Printf("Rate limit reset: %s\n", report.RateLimitResetAt)
+		}
 		for _, diagnostic := range report.Diagnostics {
 			fmt.Printf("  %s\n", diagnostic)
 		}

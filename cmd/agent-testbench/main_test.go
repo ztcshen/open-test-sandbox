@@ -1024,9 +1024,13 @@ func TestResearchLiveCheckFlagsReferenceDriftBeforePolicyFails(t *testing.T) {
 }
 
 func TestResearchLiveCheckDiagnosesGitHubRateLimit(t *testing.T) {
+	requests := []string{}
+	resetAt := time.Unix(1779663600, 0).UTC()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", resetAt.Unix()))
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, `{"message":"API rate limit exceeded for 203.0.113.10."}`)
 	}))
@@ -1050,40 +1054,52 @@ func TestResearchLiveCheckDiagnosesGitHubRateLimit(t *testing.T) {
 				"title": "Quality Gates",
 				"topMatches": []map[string]any{
 					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "featureScore": 8},
+					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z", "featureScore": 7},
 				},
 			},
 		},
 		"projectIndex": map[string]any{
 			"aquasecurity/trivy": map[string]any{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "matchedFeatures": []string{"quality-gates"}},
+			"semgrep/semgrep":    map[string]any{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z", "matchedFeatures": []string{"quality-gates"}},
 		},
 	}
 	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
 		t.Fatalf("write radar index: %v", err)
 	}
 
-	out := runCLIFails(t, "research", "live-check", "--feature", "quality gate", "--radar-index", indexPath, "--github-api-url", server.URL, "--json")
+	out := runCLIFails(t, "research", "live-check", "--feature", "quality gate", "--radar-index", indexPath, "--github-api-url", server.URL, "--limit", "2", "--json")
 	out = firstJSONObject(t, out)
 	var report struct {
-		OK           bool     `json:"ok"`
-		RateLimited  bool     `json:"rateLimited"`
-		AuthRequired bool     `json:"authRequired"`
-		Diagnostics  []string `json:"diagnostics"`
-		References   []struct {
-			FullName    string   `json:"fullName"`
-			Status      string   `json:"status"`
-			RateLimited bool     `json:"rateLimited"`
-			Reasons     []string `json:"reasons"`
+		OK               bool     `json:"ok"`
+		CheckedCount     int      `json:"checkedCount"`
+		SkippedCount     int      `json:"skippedCount"`
+		RateLimited      bool     `json:"rateLimited"`
+		AuthRequired     bool     `json:"authRequired"`
+		RateLimitResetAt string   `json:"rateLimitResetAt"`
+		Diagnostics      []string `json:"diagnostics"`
+		References       []struct {
+			FullName         string   `json:"fullName"`
+			Status           string   `json:"status"`
+			RateLimited      bool     `json:"rateLimited"`
+			RateLimitResetAt string   `json:"rateLimitResetAt"`
+			Reasons          []string `json:"reasons"`
 		} `json:"references"`
 		NextCommands []string `json:"nextCommands"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode rate-limit report: %v\n%s", err, out)
 	}
-	if report.OK || !report.RateLimited || !report.AuthRequired || len(report.Diagnostics) == 0 {
+	if report.OK || report.CheckedCount != 1 || report.SkippedCount != 1 || !report.RateLimited || !report.AuthRequired || report.RateLimitResetAt != resetAt.Format(time.RFC3339) || len(report.Diagnostics) == 0 {
 		t.Fatalf("rate-limit summary = %#v", report)
 	}
-	if len(report.References) != 1 || report.References[0].FullName != "aquasecurity/trivy" || report.References[0].Status != "failed" || !report.References[0].RateLimited || !stringSliceContains(report.References[0].Reasons, "github_rate_limited") {
+	if len(requests) != 1 || requests[0] != "/repos/aquasecurity/trivy" {
+		t.Fatalf("rate-limit should stop after first limited request, got %#v", requests)
+	}
+	if len(report.References) != 1 || report.References[0].FullName != "aquasecurity/trivy" || report.References[0].Status != "failed" || !report.References[0].RateLimited || report.References[0].RateLimitResetAt != resetAt.Format(time.RFC3339) || !stringSliceContains(report.References[0].Reasons, "github_rate_limited") {
 		t.Fatalf("rate-limit reference = %#v", report.References)
+	}
+	if !strings.Contains(strings.Join(report.Diagnostics, "\n"), "1 reference(s) skipped") || !strings.Contains(strings.Join(report.Diagnostics, "\n"), resetAt.Format(time.RFC3339)) {
+		t.Fatalf("rate-limit diagnostics = %#v", report.Diagnostics)
 	}
 	joinedCommands := strings.Join(report.NextCommands, "\n")
 	if !strings.Contains(joinedCommands, "export GITHUB_TOKEN=") || !strings.Contains(joinedCommands, "research live-check --feature 'quality-gates'") || !strings.Contains(joinedCommands, "--token-env GITHUB_TOKEN") {
