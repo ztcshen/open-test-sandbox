@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "purpose": "Neutral showcase scenarios for explaining AgentTestBench CLI discovery, execution, Evidence, and Store-backed reports.",
+  "scenarios": [
+    {
+      "id": "retail-fulfillment-mesh",
+      "title": "Retail Fulfillment Mesh",
+      "summary": "A checkout-to-shipment workflow with inventory, payment, fraud review, warehouse allocation, and carrier booking.",
+      "services": [
+        "catalog-api",
+        "cart-api",
+        "payment-gateway",
+        "risk-rules",
+        "warehouse-orchestrator",
+        "carrier-adapter"
+      ],
+      "cliTour": [
+        "agent-testbench environment register --id retail-demo --service checkout --repo checkout=./examples/demo-services",
+        "agent-testbench case discover --filter retail --json",
+        "agent-testbench case run --case examples/demo-services/retail-fulfillment-mesh/create-order.json --base-url http://127.0.0.1:49190 --json",
+        "agent-testbench workflow report --workflow workflow.retail.fulfillment --base-url http://127.0.0.1:49190 --json",
+        "agent-testbench evidence list --run retail-demo-run --json"
+      ],
+      "evidence": [
+        "order request and response payloads",
+        "payment authorization timing",
+        "warehouse allocation decision",
+        "carrier booking artifact"
+      ],
+      "demoEndpoint": "POST /retail/orders"
+    },
+    {
+      "id": "iot-telemetry-control",
+      "title": "IoT Telemetry Control",
+      "summary": "A device telemetry path with ingest, anomaly scoring, rules evaluation, command dispatch, and audit trail review.",
+      "services": [
+        "device-ingest",
+        "stream-normalizer",
+        "anomaly-scorer",
+        "rules-engine",
+        "command-dispatch",
+        "audit-log"
+      ],
+      "cliTour": [
+        "agent-testbench environment register --id iot-demo --service telemetry --health-url http://127.0.0.1:49190/health",
+        "agent-testbench interface-node discover --filter telemetry --json",
+        "agent-testbench case run --case examples/demo-services/iot-telemetry-control/temperature-spike.json --base-url http://127.0.0.1:49190 --json",
+        "agent-testbench workflow report --workflow workflow.iot.telemetry-control --base-url http://127.0.0.1:49190 --json",
+        "agent-testbench case evidence --run iot-demo-run --json"
+      ],
+      "evidence": [
+        "raw telemetry sample",
+        "normalized event",
+        "anomaly score",
+        "device command and audit record"
+      ],
+      "demoEndpoint": "POST /iot/telemetry"
+    },
+    {
+      "id": "content-moderation-pipeline",
+      "title": "Content Moderation Pipeline",
+      "summary": "A publish review workflow with policy checks, model scoring, human escalation, notification, and appeal readiness.",
+      "services": [
+        "submission-api",
+        "policy-engine",
+        "model-scoring",
+        "review-queue",
+        "notification-service",
+        "appeal-ledger"
+      ],
+      "cliTour": [
+        "agent-testbench store use local-personal",
+        "agent-testbench case discover --filter moderation --json",
+        "agent-testbench case run --case examples/demo-services/content-moderation-pipeline/review-post.json --base-url http://127.0.0.1:49190 --json",
+        "agent-testbench case suite brief --filter moderation --base-url http://127.0.0.1:49190 --json",
+        "agent-testbench evidence tasks --run moderation-demo-run --json"
+      ],
+      "evidence": [
+        "submitted content excerpt",
+        "policy decision trace",
+        "model confidence and reason codes",
+        "review queue status"
+      ],
+      "demoEndpoint": "POST /moderation/reviews"
+    }
+  ]
+}

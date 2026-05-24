@@ -574,6 +574,7 @@ function SandboxWorkbenchApp() {
           <span className="console-status-pill" role="status">{message}</span>
           <a className="button-link primary-link" href="/workflows.html">Workflow 目录</a>
           <a className="button-link primary-link" href="/interface-nodes.html">接口节点</a>
+          <a className="button-link" href="/demo-gallery.html">Demo Gallery</a>
           <a className="button-link" href="/service-inventory.html">服务目录</a>
           <a className="button-link" href="/dashboard.html">环境大盘</a>
           <button type="button" title="刷新" onClick={refresh}><RefreshCw size={15} aria-hidden="true" /></button>

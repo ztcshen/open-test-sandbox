@@ -1,0 +1,25 @@
+{
+  "id": "case.content.review-post",
+  "title": "Review Submitted Content",
+  "request": {
+    "method": "POST",
+    "path": "/moderation/reviews",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "submissionId": "post-demo-204",
+      "authorId": "author-demo-9",
+      "text": "This demo post is long enough to exercise review queue routing and model scoring without containing private data."
+    }
+  },
+  "assertions": {
+    "expectedStatusCodes": [
+      202
+    ],
+    "responseContains": [
+      "workflow.content.moderation",
+      "review-queue"
+    ]
+  }
+}

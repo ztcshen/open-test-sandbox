@@ -177,6 +177,11 @@ func main() {
 		fmt.Printf("AgentTestBench %s\n", version)
 	case "help", "--help", "-h":
 		printHelp()
+	case "commands":
+		if err := runCommands(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "store":
 		if err := runStore(context.Background(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -252,6 +257,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "research":
+		if err := runResearch(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "serve":
 		if err := runServe(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -313,10 +323,15 @@ func isBoolFlagValue(value flag.Value) bool {
 }
 
 func printHelp() {
-	fmt.Println(`AgentTestBench
+	fmt.Println(helpText())
+}
+
+func helpText() string {
+	return `AgentTestBench
 
 Usage:
   agent-testbench version
+  agent-testbench commands [--filter TEXT] [--json]
   agent-testbench store config set NAME --url postgres://...
   agent-testbench store config set NAME --url mysql://...
   agent-testbench store config set NAME --url sqlite://PATH
@@ -380,6 +395,7 @@ Usage:
   agent-testbench workflow run --run ID [--store NAME_OR_DSN] [--json]
   agent-testbench workflow step --run ID --step ID [--store NAME_OR_DSN] [--json]
   agent-testbench workflow latest-step --workflow ID --step ID [--store NAME_OR_DSN] [--json]
+  agent-testbench workflow gate --run ID [--store NAME_OR_DSN] [--require-passed] [--require-steps] [--require-evidence] [--json]
   agent-testbench workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--json]
   agent-testbench workflow acceptance start --server-url URL --workflow ID --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   agent-testbench workflow acceptance report --server-url URL --run ID [--json]
@@ -413,14 +429,176 @@ Usage:
   agent-testbench case timing [--store NAME_OR_DSN] [--kind KIND] [--max-age-minutes N] [--json]
   agent-testbench case batch start --server-url URL [--case ID]... [--node ID]... [--workflow ID] [--suite NAME] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   agent-testbench case batch report --server-url URL --run ID [--json]
-  agent-testbench case run (--case PATH | --case-id ID) [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
+  agent-testbench case run --case PATH [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--run-id ID] [--dry-run] [--json]
+  agent-testbench case run --case-id ID [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
   agent-testbench case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]
+  agent-testbench research feature --feature TEXT --radar-index PATH [--limit N] [--require-min-matches N] [--json]
+  agent-testbench research features --radar-index PATH [--filter TEXT] [--json]
+  agent-testbench research coverage --radar-index PATH [--min-references N] [--limit N] [--json]
+  agent-testbench research audit --radar-index PATH [--min-references N] [--json]
+  agent-testbench research status --radar-index PATH [--max-age-hours N] [--json]
+  agent-testbench research matrix --radar-index PATH [--filter TEXT] [--limit N] [--json]
+  agent-testbench research refresh-plan --radar-index PATH [--min-references N] [--max-age-hours N] [--limit N] [--require-ready] [--json]
+  agent-testbench research roadmap --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--json]
+  agent-testbench research backlog --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--json]
+  agent-testbench research gate --feature TEXT --radar-index PATH [--require-min-matches N] [--require-command COMMAND] [--max-age-hours N] [--json]
+  agent-testbench research plan --feature TEXT --radar-index PATH [--limit N] [--require-min-matches N] [--format text|json|markdown] [--json]
+  agent-testbench case diagnose [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
+  agent-testbench case gate [--store NAME_OR_DSN] [--run ID] [--require-no-failures] [--require-evidence] [--min-passed N] [--json]
   agent-testbench serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
   agent-testbench help
 
 Serve reads profile catalog data from the local Store. When --profile is set,
 the external bundle is first published into the Store/read-model, then served
-from that indexed view.`)
+from that indexed view.`
+}
+
+type commandCatalogReport struct {
+	OK       bool                 `json:"ok"`
+	Filter   string               `json:"filter,omitempty"`
+	Count    int                  `json:"count"`
+	Commands []commandCatalogItem `json:"commands"`
+}
+
+type commandCatalogItem struct {
+	Command    string   `json:"command"`
+	Area       string   `json:"area"`
+	Path       []string `json:"path"`
+	Usage      string   `json:"usage"`
+	StoreAware bool     `json:"storeAware"`
+	Tags       []string `json:"tags"`
+}
+
+func runCommands(args []string) error {
+	flags := flag.NewFlagSet("commands", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	filter := flags.String("filter", "", "Filter command catalog by command, area, usage, or tag")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable command catalog")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report := commandCatalog(*filter)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCommandCatalog(report)
+	return nil
+}
+
+func commandCatalog(filter string) commandCatalogReport {
+	filter = strings.TrimSpace(filter)
+	report := commandCatalogReport{OK: true, Filter: filter, Commands: []commandCatalogItem{}}
+	for _, usage := range commandUsageLines() {
+		item := commandCatalogItemFromUsage(usage)
+		if len(item.Path) == 0 {
+			continue
+		}
+		if !commandCatalogMatches(item, filter) {
+			continue
+		}
+		report.Commands = append(report.Commands, item)
+	}
+	report.Count = len(report.Commands)
+	return report
+}
+
+func commandUsageLines() []string {
+	lines := strings.Split(helpText(), "\n")
+	out := []string{}
+	for _, line := range lines {
+		usage := strings.TrimSpace(line)
+		if strings.HasPrefix(usage, "agent-testbench ") {
+			out = append(out, usage)
+		}
+	}
+	return out
+}
+
+func commandCatalogItemFromUsage(usage string) commandCatalogItem {
+	rest := strings.TrimSpace(strings.TrimPrefix(usage, "agent-testbench "))
+	fields := strings.Fields(rest)
+	path := []string{}
+	for _, field := range fields {
+		if commandUsagePathStops(field) {
+			break
+		}
+		path = append(path, strings.Trim(field, ","))
+	}
+	area := ""
+	if len(path) > 0 {
+		area = path[0]
+	}
+	tags := commandCatalogTags(area, usage)
+	return commandCatalogItem{
+		Command:    strings.Join(path, " "),
+		Area:       area,
+		Path:       path,
+		Usage:      usage,
+		StoreAware: strings.Contains(usage, "--store NAME_OR_DSN"),
+		Tags:       tags,
+	}
+}
+
+func commandUsagePathStops(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" || strings.HasPrefix(token, "[") || strings.HasPrefix(token, "(") || strings.HasPrefix(token, "--") || strings.Contains(token, "|") {
+		return true
+	}
+	trimmed := strings.Trim(token, ".,")
+	if strings.Contains(trimmed, "=") || strings.Contains(trimmed, ":") || strings.Contains(trimmed, "/") {
+		return true
+	}
+	hasLetter := false
+	for _, item := range trimmed {
+		if item >= 'a' && item <= 'z' {
+			return false
+		}
+		if item >= 'A' && item <= 'Z' {
+			hasLetter = true
+		}
+	}
+	return hasLetter
+}
+
+func commandCatalogTags(area string, usage string) []string {
+	tags := []string{area}
+	if strings.Contains(usage, "--store NAME_OR_DSN") {
+		tags = append(tags, "store-first")
+	}
+	if strings.Contains(usage, "--json") {
+		tags = append(tags, "json")
+	}
+	if strings.Contains(usage, "gate") || strings.Contains(usage, "verify") || strings.Contains(usage, "acceptance") {
+		tags = append(tags, "quality-gate")
+	}
+	if strings.Contains(usage, "diagnose") || strings.Contains(usage, "evidence") || strings.Contains(usage, "trace") {
+		tags = append(tags, "evidence")
+	}
+	if strings.Contains(usage, "workflow") {
+		tags = append(tags, "workflow")
+	}
+	return normalizeStringList(tags)
+}
+
+func commandCatalogMatches(item commandCatalogItem, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	needle := normalizedDiscoveryText(filter)
+	haystack := normalizedDiscoveryText(strings.Join(append([]string{item.Command, item.Area, item.Usage}, item.Tags...), " "))
+	return strings.Contains(haystack, needle)
+}
+
+func printCommandCatalog(report commandCatalogReport) {
+	fmt.Println("Commands")
+	fmt.Printf("Total: %d\n", report.Count)
+	if report.Filter != "" {
+		fmt.Printf("Filter: %s\n", report.Filter)
+	}
+	for _, item := range report.Commands {
+		fmt.Printf("- %s [%s]\n", item.Command, item.Area)
+		fmt.Printf("  %s\n", item.Usage)
+	}
 }
 
 func runStore(ctx context.Context, args []string) error {
@@ -9823,6 +10001,8 @@ func runWorkflow(args []string) error {
 		return runWorkflowStep(context.Background(), args[1:])
 	case "latest-step":
 		return runWorkflowLatestStep(context.Background(), args[1:])
+	case "gate":
+		return runWorkflowGate(context.Background(), args[1:])
 	case "report":
 		return runWorkflowReport(context.Background(), args[1:])
 	case "acceptance":
@@ -10152,6 +10332,253 @@ func printWorkflowRun(payload map[string]any) {
 		fmt.Printf("Steps: %s\n", count)
 	} else if steps, ok := summary["steps"].([]any); ok {
 		fmt.Printf("Steps: %d\n", len(steps))
+	}
+}
+
+type workflowGateReport struct {
+	OK              bool               `json:"ok"`
+	RunID           string             `json:"runId"`
+	WorkflowID      string             `json:"workflowId,omitempty"`
+	Status          string             `json:"status"`
+	Counts          workflowGateCounts `json:"counts"`
+	Gates           workflowGateGates  `json:"gates"`
+	FailedSteps     []workflowGateStep `json:"failedSteps"`
+	MissingEvidence []workflowGateStep `json:"missingEvidence"`
+	NextActions     []string           `json:"nextActions"`
+	Warnings        []string           `json:"warnings"`
+}
+
+type workflowGateCounts struct {
+	Steps            int `json:"steps"`
+	PassedSteps      int `json:"passedSteps"`
+	FailedSteps      int `json:"failedSteps"`
+	OtherSteps       int `json:"otherSteps"`
+	CaseRuns         int `json:"caseRuns"`
+	EvidenceComplete int `json:"evidenceComplete"`
+}
+
+type workflowGateGates struct {
+	RunPassed        bool `json:"runPassed"`
+	StepsPresent     bool `json:"stepsPresent"`
+	StepsPassed      bool `json:"stepsPassed"`
+	EvidenceComplete bool `json:"evidenceComplete"`
+}
+
+type workflowGateStep struct {
+	StepID        string `json:"stepId,omitempty"`
+	CaseID        string `json:"caseId,omitempty"`
+	CaseRunID     string `json:"caseRunId,omitempty"`
+	Status        string `json:"status,omitempty"`
+	EvidenceCount int    `json:"evidenceCount"`
+}
+
+type workflowGateOptions struct {
+	RunID           string
+	RequirePassed   bool
+	RequireSteps    bool
+	RequireEvidence bool
+}
+
+func runWorkflowGate(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow gate", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	runID := flags.String("run", "", "Workflow run id")
+	requirePassed := flags.Bool("require-passed", false, "Fail unless the workflow run status is passed")
+	requireSteps := flags.Bool("require-steps", false, "Fail unless workflow steps exist and every step passed")
+	requireEvidence := flags.Bool("require-evidence", false, "Fail unless every step case run has indexed Evidence")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*runID) == "" {
+		return errors.New("--run is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	report, err := buildWorkflowGateReport(ctx, runtime, workflowGateOptions{
+		RunID:           *runID,
+		RequirePassed:   *requirePassed,
+		RequireSteps:    *requireSteps,
+		RequireEvidence: *requireEvidence,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printWorkflowGate(report)
+	}
+	if !report.OK {
+		return errors.New("workflow gate failed")
+	}
+	return nil
+}
+
+func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options workflowGateOptions) (workflowGateReport, error) {
+	run, err := runtime.GetRun(ctx, strings.TrimSpace(options.RunID))
+	if err != nil {
+		return workflowGateReport{}, err
+	}
+	caseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
+	if err != nil {
+		return workflowGateReport{}, err
+	}
+	evidence, err := runtime.ListEvidence(ctx, run.ID)
+	if err != nil {
+		return workflowGateReport{}, err
+	}
+	caseRunByID := map[string]store.APICaseRun{}
+	caseRunsByCase := map[string][]store.APICaseRun{}
+	for _, item := range caseRuns {
+		caseRunByID[item.ID] = item
+		caseRunsByCase[item.CaseID] = append(caseRunsByCase[item.CaseID], item)
+	}
+	evidenceCountByCaseRun := map[string]int{}
+	for _, record := range evidence {
+		if strings.TrimSpace(record.CaseRunID) != "" {
+			evidenceCountByCaseRun[record.CaseRunID]++
+		}
+	}
+
+	report := workflowGateReport{
+		RunID:           run.ID,
+		WorkflowID:      run.WorkflowID,
+		Status:          run.Status,
+		FailedSteps:     []workflowGateStep{},
+		MissingEvidence: []workflowGateStep{},
+		NextActions:     []string{},
+		Warnings:        []string{},
+	}
+	steps := workflowGateSteps(run.SummaryJSON)
+	report.Counts.Steps = len(steps)
+	report.Counts.CaseRuns = len(caseRuns)
+	for _, rawStep := range steps {
+		step := workflowGateStepFrom(rawStep, caseRunByID, caseRunsByCase, evidenceCountByCaseRun)
+		switch {
+		case strings.EqualFold(step.Status, store.StatusPassed):
+			report.Counts.PassedSteps++
+		case strings.EqualFold(step.Status, store.StatusFailed):
+			report.Counts.FailedSteps++
+			report.FailedSteps = append(report.FailedSteps, step)
+		default:
+			report.Counts.OtherSteps++
+			report.FailedSteps = append(report.FailedSteps, step)
+		}
+		if step.EvidenceCount > 0 {
+			report.Counts.EvidenceComplete++
+		} else {
+			report.MissingEvidence = append(report.MissingEvidence, step)
+		}
+	}
+	report.Gates = workflowGateGates{
+		RunPassed:        strings.EqualFold(run.Status, store.StatusPassed),
+		StepsPresent:     report.Counts.Steps > 0,
+		StepsPassed:      report.Counts.Steps > 0 && report.Counts.FailedSteps == 0 && report.Counts.OtherSteps == 0,
+		EvidenceComplete: report.Counts.Steps > 0 && len(report.MissingEvidence) == 0,
+	}
+	report.OK = (!options.RequirePassed || report.Gates.RunPassed) &&
+		(!options.RequireSteps || (report.Gates.StepsPresent && report.Gates.StepsPassed)) &&
+		(!options.RequireEvidence || report.Gates.EvidenceComplete)
+	report.NextActions = workflowGateNextActions(report, options)
+	return report, nil
+}
+
+func workflowGateSteps(summaryJSON string) []map[string]any {
+	summary := rawJSONObject(summaryJSON)
+	steps := listFromReportAny(summary["steps"])
+	out := make([]map[string]any, 0, len(steps))
+	for _, raw := range steps {
+		step := mapFromReportAny(raw)
+		if len(step) > 0 {
+			out = append(out, step)
+		}
+	}
+	return out
+}
+
+func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APICaseRun, caseRunsByCase map[string][]store.APICaseRun, evidenceCountByCaseRun map[string]int) workflowGateStep {
+	out := workflowGateStep{
+		StepID:    firstNonEmpty(valueString(step["stepId"]), valueString(step["id"])),
+		CaseID:    valueString(step["caseId"]),
+		CaseRunID: valueString(step["caseRunId"]),
+		Status:    valueString(step["status"]),
+	}
+	if out.CaseRunID != "" {
+		if item, ok := caseRunByID[out.CaseRunID]; ok {
+			out.CaseID = firstNonEmpty(out.CaseID, item.CaseID)
+			out.Status = firstNonEmpty(out.Status, item.Status)
+		}
+	}
+	if out.CaseRunID == "" && out.CaseID != "" {
+		if items := caseRunsByCase[out.CaseID]; len(items) > 0 {
+			item := items[len(items)-1]
+			out.CaseRunID = item.ID
+			out.Status = firstNonEmpty(out.Status, item.Status)
+		}
+	}
+	if out.Status == "" {
+		out.Status = "unknown"
+	}
+	out.EvidenceCount = evidenceCountByCaseRun[out.CaseRunID]
+	return out
+}
+
+func workflowGateNextActions(report workflowGateReport, options workflowGateOptions) []string {
+	actions := []string{}
+	if !report.Gates.StepsPresent {
+		return []string{"agent-testbench workflow run --run " + report.RunID + " --json"}
+	}
+	for index, item := range report.FailedSteps {
+		if index >= 3 {
+			break
+		}
+		if item.StepID != "" {
+			actions = append(actions, "agent-testbench workflow step --run "+report.RunID+" --step "+item.StepID+" --json")
+		}
+		if item.CaseRunID != "" {
+			actions = append(actions, "agent-testbench case diagnose --case-run "+item.CaseRunID+" --json")
+		}
+	}
+	if options.RequireEvidence {
+		for index, item := range report.MissingEvidence {
+			if index >= 3 {
+				break
+			}
+			if item.CaseRunID != "" {
+				actions = append(actions, "agent-testbench case evidence --case-run "+item.CaseRunID+" --json")
+			}
+		}
+	}
+	if len(actions) == 0 {
+		actions = append(actions, "Workflow gate passed; no action needed")
+	}
+	return actions
+}
+
+func printWorkflowGate(report workflowGateReport) {
+	fmt.Println("Workflow Gate")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Run: %s\n", report.RunID)
+	fmt.Printf("Workflow: %s\n", report.WorkflowID)
+	fmt.Printf("Status: %s\n", report.Status)
+	fmt.Printf("Steps: %d Passed: %d Failed: %d Other: %d CaseRuns: %d EvidenceComplete: %d\n", report.Counts.Steps, report.Counts.PassedSteps, report.Counts.FailedSteps, report.Counts.OtherSteps, report.Counts.CaseRuns, report.Counts.EvidenceComplete)
+	fmt.Printf("Gates: runPassed=%t stepsPresent=%t stepsPassed=%t evidenceComplete=%t\n", report.Gates.RunPassed, report.Gates.StepsPresent, report.Gates.StepsPassed, report.Gates.EvidenceComplete)
+	for _, item := range report.FailedSteps {
+		fmt.Printf("Failed Step: %s %s %s %s\n", item.StepID, item.CaseID, item.CaseRunID, item.Status)
+	}
+	for _, item := range report.MissingEvidence {
+		fmt.Printf("Missing Evidence: %s %s %s\n", item.StepID, item.CaseID, item.CaseRunID)
+	}
+	for _, action := range report.NextActions {
+		fmt.Printf("Next: %s\n", action)
 	}
 }
 
@@ -11343,6 +11770,10 @@ func runCase(ctx context.Context, args []string) error {
 		return runCaseRuns(ctx, args[1:])
 	case "evidence":
 		return runCaseEvidence(ctx, args[1:])
+	case "diagnose":
+		return runCaseDiagnose(ctx, args[1:])
+	case "gate":
+		return runCaseGate(ctx, args[1:])
 	case "timing":
 		return runCaseTiming(ctx, args[1:])
 	case "batch":
@@ -11648,6 +12079,229 @@ func printCaseEvidence(payload map[string]any) {
 	}
 }
 
+type caseDiagnosisReport struct {
+	OK              bool                  `json:"ok"`
+	CaseRunID       string                `json:"caseRunId"`
+	RunID           string                `json:"runId"`
+	CaseID          string                `json:"caseId"`
+	Status          string                `json:"status"`
+	Operation       string                `json:"operation,omitempty"`
+	Category        string                `json:"category"`
+	PrimaryFinding  string                `json:"primaryFinding"`
+	EvidencePath    string                `json:"evidencePath,omitempty"`
+	AssertionErrors []string              `json:"assertionErrors"`
+	Signals         []caseDiagnosisSignal `json:"signals"`
+	NextActions     []string              `json:"nextActions"`
+	Warnings        []string              `json:"warnings"`
+}
+
+type caseDiagnosisSignal struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type caseDiagnosisArtifacts struct {
+	AssertionErrors []string
+	HTTPStatus      int
+	Warnings        []string
+}
+
+func runCaseDiagnose(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case diagnose", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	caseRunID := flags.String("case-run", "", "Case run id")
+	runID := flags.String("run", "", "Run id")
+	caseID := flags.String("case-id", "", "Case id within the run")
+	stepID := flags.String("step-id", "", "Workflow step id within the run")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	report, err := diagnoseCaseEvidence(ctx, runtime, *caseRunID, *runID, *caseID, *stepID)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseDiagnosis(report)
+	return nil
+}
+
+func diagnoseCaseEvidence(ctx context.Context, runtime store.Store, caseRunID string, runID string, caseID string, stepID string) (caseDiagnosisReport, error) {
+	payload, err := readCaseEvidence(ctx, runtime, caseRunID, runID, caseID, stepID)
+	if err != nil {
+		return caseDiagnosisReport{}, err
+	}
+	evidence := mapFromReportAny(payload["evidence"])
+	summary := mapFromReportAny(evidence["summary"])
+	assertions := mapFromReportAny(evidence["assertions"])
+	response := mapFromReportAny(evidence["response"])
+	request := mapFromReportAny(evidence["request"])
+
+	report := caseDiagnosisReport{
+		CaseRunID:       valueString(summary["case_run_id"]),
+		RunID:           valueString(summary["run_id"]),
+		CaseID:          valueString(summary["case_id"]),
+		Status:          valueString(summary["status"]),
+		Operation:       firstNonEmpty(valueString(summary["operation"]), caseRunOperationFromRequest(request, valueString(summary["case_id"]))),
+		EvidencePath:    valueString(summary["evidence_path"]),
+		AssertionErrors: []string{},
+		Signals:         []caseDiagnosisSignal{},
+		NextActions:     []string{},
+		Warnings:        []string{},
+	}
+	report.OK = strings.EqualFold(report.Status, store.StatusPassed)
+
+	artifacts, err := readCaseDiagnosisArtifacts(ctx, runtime, report.RunID, report.CaseRunID)
+	if err != nil {
+		return caseDiagnosisReport{}, err
+	}
+	report.AssertionErrors = artifacts.AssertionErrors
+	report.Warnings = append(report.Warnings, artifacts.Warnings...)
+	httpStatus := firstPositiveInt(artifacts.HTTPStatus, intFromReportAny(response["http_code"]), intFromReportAny(summary["actual_http_code"]))
+	assertionStatus := valueString(assertions["status"])
+	errorCount := firstPositiveInt(len(report.AssertionErrors), intFromReportAny(assertions["errorCount"]))
+
+	report.Category = caseDiagnosisCategory(report.Status, assertionStatus, errorCount, httpStatus)
+	report.PrimaryFinding = caseDiagnosisPrimaryFinding(report.Category, report.AssertionErrors, httpStatus, report.Status)
+	report.Signals = caseDiagnosisSignals(report, assertionStatus, errorCount, httpStatus)
+	report.NextActions = caseDiagnosisNextActions(report, httpStatus, errorCount)
+	return report, nil
+}
+
+func readCaseDiagnosisArtifacts(ctx context.Context, runtime store.Store, runID string, caseRunID string) (caseDiagnosisArtifacts, error) {
+	out := caseDiagnosisArtifacts{AssertionErrors: []string{}, Warnings: []string{}}
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(caseRunID) == "" {
+		out.Warnings = append(out.Warnings, "case run evidence identity is incomplete")
+		return out, nil
+	}
+	records, err := runtime.ListEvidence(ctx, runID)
+	if err != nil {
+		return caseDiagnosisArtifacts{}, err
+	}
+	for _, record := range records {
+		if record.CaseRunID != caseRunID {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(record.Kind)) {
+		case "assertions":
+			var assertions apicase.AssertionEvidence
+			if err := readJSONFile(record.URI, &assertions); err != nil {
+				out.Warnings = append(out.Warnings, "could not read assertions evidence: "+err.Error())
+				continue
+			}
+			out.AssertionErrors = append(out.AssertionErrors, assertions.Errors...)
+		case "response":
+			var response apicase.ResponseEvidence
+			if err := readJSONFile(record.URI, &response); err != nil {
+				out.Warnings = append(out.Warnings, "could not read response evidence: "+err.Error())
+				continue
+			}
+			out.HTTPStatus = response.StatusCode
+		}
+	}
+	return out, nil
+}
+
+func caseDiagnosisCategory(status string, assertionStatus string, errorCount int, httpStatus int) string {
+	if strings.EqualFold(status, store.StatusPassed) {
+		return "passed"
+	}
+	if strings.EqualFold(assertionStatus, store.StatusFailed) || errorCount > 0 {
+		return "assertion-mismatch"
+	}
+	if httpStatus >= 500 {
+		return "server-error"
+	}
+	if httpStatus >= 400 {
+		return "client-error"
+	}
+	if httpStatus == 0 {
+		return "missing-response-evidence"
+	}
+	return "case-failure"
+}
+
+func caseDiagnosisPrimaryFinding(category string, assertionErrors []string, httpStatus int, status string) string {
+	if len(assertionErrors) > 0 {
+		return "Assertion mismatch: " + assertionErrors[0]
+	}
+	switch category {
+	case "passed":
+		return "Case run passed"
+	case "server-error":
+		return fmt.Sprintf("Target returned HTTP %d", httpStatus)
+	case "client-error":
+		return fmt.Sprintf("Target rejected the request with HTTP %d", httpStatus)
+	case "missing-response-evidence":
+		return "Response evidence is missing"
+	default:
+		return "Case run finished with status " + firstNonEmpty(status, "unknown")
+	}
+}
+
+func caseDiagnosisSignals(report caseDiagnosisReport, assertionStatus string, errorCount int, httpStatus int) []caseDiagnosisSignal {
+	signals := []caseDiagnosisSignal{
+		{Name: "case.status", Value: report.Status},
+	}
+	if report.Operation != "" {
+		signals = append(signals, caseDiagnosisSignal{Name: "operation", Value: report.Operation})
+	}
+	if httpStatus > 0 {
+		signals = append(signals, caseDiagnosisSignal{Name: "http.status", Value: strconv.Itoa(httpStatus)})
+	}
+	if assertionStatus != "" {
+		signals = append(signals, caseDiagnosisSignal{Name: "assertion.status", Value: assertionStatus})
+	}
+	if errorCount > 0 {
+		signals = append(signals, caseDiagnosisSignal{Name: "assertion.error_count", Value: strconv.Itoa(errorCount)})
+	}
+	return signals
+}
+
+func caseDiagnosisNextActions(report caseDiagnosisReport, httpStatus int, errorCount int) []string {
+	actions := []string{}
+	if report.CaseRunID != "" {
+		actions = append(actions, "agent-testbench case evidence --case-run "+report.CaseRunID+" --json")
+	}
+	if errorCount > 0 {
+		actions = append(actions, "Inspect request.json, response.json, and assertions.json under "+firstNonEmpty(report.EvidencePath, "the Evidence directory"))
+	}
+	if httpStatus >= 400 {
+		actions = append(actions, "Compare the planned request with the target service contract and expected status codes")
+	}
+	if len(actions) == 0 {
+		actions = append(actions, "No failure action needed")
+	}
+	return actions
+}
+
+func printCaseDiagnosis(report caseDiagnosisReport) {
+	fmt.Println("Case Diagnosis")
+	fmt.Printf("Case Run: %s\n", report.CaseRunID)
+	fmt.Printf("Case: %s\n", report.CaseID)
+	fmt.Printf("Status: %s\n", report.Status)
+	fmt.Printf("Category: %s\n", report.Category)
+	fmt.Printf("Finding: %s\n", report.PrimaryFinding)
+	for _, signal := range report.Signals {
+		fmt.Printf("Signal: %s=%s\n", signal.Name, signal.Value)
+	}
+	for _, action := range report.NextActions {
+		fmt.Printf("Next: %s\n", action)
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
 type caseRunsCLIReport struct {
 	OK       bool              `json:"ok"`
 	CaseRuns []caseRunsCLIItem `json:"caseRuns"`
@@ -11663,6 +12317,173 @@ type caseRunsCLIItem struct {
 	EvidencePath  string    `json:"evidencePath"`
 	EvidenceCount int       `json:"evidenceCount"`
 	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type caseGateReport struct {
+	OK              bool              `json:"ok"`
+	RunID           string            `json:"runId,omitempty"`
+	Counts          caseGateCounts    `json:"counts"`
+	Gates           caseGateGates     `json:"gates"`
+	FailedCaseRuns  []caseRunsCLIItem `json:"failedCaseRuns"`
+	MissingEvidence []caseRunsCLIItem `json:"missingEvidence"`
+	NextActions     []string          `json:"nextActions"`
+	Warnings        []string          `json:"warnings"`
+}
+
+type caseGateCounts struct {
+	Total            int `json:"total"`
+	Passed           int `json:"passed"`
+	Failed           int `json:"failed"`
+	Other            int `json:"other"`
+	EvidenceComplete int `json:"evidenceComplete"`
+}
+
+type caseGateGates struct {
+	HasCaseRuns      bool `json:"hasCaseRuns"`
+	NoFailures       bool `json:"noFailures"`
+	MinPassed        bool `json:"minPassed"`
+	EvidenceComplete bool `json:"evidenceComplete"`
+}
+
+type caseGateOptions struct {
+	RunID             string
+	RequireNoFailures bool
+	RequireEvidence   bool
+	MinPassed         int
+}
+
+func runCaseGate(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case gate", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	runFilter := flags.String("run", "", "Only gate case runs for one run id")
+	requireNoFailures := flags.Bool("require-no-failures", false, "Fail when any selected case run is not passed")
+	requireEvidence := flags.Bool("require-evidence", false, "Fail when any selected case run has no indexed Evidence")
+	minPassed := flags.Int("min-passed", 0, "Fail unless at least this many selected case runs passed")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	report, err := buildCaseGateReport(ctx, runtime, caseGateOptions{
+		RunID:             *runFilter,
+		RequireNoFailures: *requireNoFailures,
+		RequireEvidence:   *requireEvidence,
+		MinPassed:         *minPassed,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printCaseGate(report)
+	}
+	if !report.OK {
+		return errors.New("case gate failed")
+	}
+	return nil
+}
+
+func buildCaseGateReport(ctx context.Context, runtime store.Store, options caseGateOptions) (caseGateReport, error) {
+	items, err := listCaseRunsFromStore(ctx, runtime, options.RunID)
+	if err != nil {
+		return caseGateReport{}, err
+	}
+	report := caseGateReport{
+		RunID:           strings.TrimSpace(options.RunID),
+		FailedCaseRuns:  []caseRunsCLIItem{},
+		MissingEvidence: []caseRunsCLIItem{},
+		NextActions:     []string{},
+		Warnings:        []string{},
+	}
+	for _, item := range items.CaseRuns {
+		report.Counts.Total++
+		if strings.EqualFold(item.Status, store.StatusPassed) {
+			report.Counts.Passed++
+		} else if strings.EqualFold(item.Status, store.StatusFailed) {
+			report.Counts.Failed++
+			report.FailedCaseRuns = append(report.FailedCaseRuns, item)
+		} else {
+			report.Counts.Other++
+			report.FailedCaseRuns = append(report.FailedCaseRuns, item)
+		}
+		if item.EvidenceCount > 0 {
+			report.Counts.EvidenceComplete++
+		} else {
+			report.MissingEvidence = append(report.MissingEvidence, item)
+		}
+	}
+	report.Gates = caseGateGates{
+		HasCaseRuns:      report.Counts.Total > 0,
+		NoFailures:       report.Counts.Failed == 0 && report.Counts.Other == 0,
+		MinPassed:        report.Counts.Passed >= options.MinPassed,
+		EvidenceComplete: len(report.MissingEvidence) == 0,
+	}
+	report.OK = report.Gates.HasCaseRuns &&
+		(!options.RequireNoFailures || report.Gates.NoFailures) &&
+		(!options.RequireEvidence || report.Gates.EvidenceComplete) &&
+		report.Gates.MinPassed
+	report.NextActions = caseGateNextActions(report, options)
+	return report, nil
+}
+
+func caseGateNextActions(report caseGateReport, options caseGateOptions) []string {
+	actions := []string{}
+	if !report.Gates.HasCaseRuns {
+		base := "agent-testbench case runs --json"
+		if report.RunID != "" {
+			base = "agent-testbench case runs --run " + report.RunID + " --json"
+		}
+		return []string{base}
+	}
+	for index, item := range report.FailedCaseRuns {
+		if index >= 3 {
+			break
+		}
+		actions = append(actions, "agent-testbench case diagnose --case-run "+item.ID+" --json")
+	}
+	if options.RequireEvidence {
+		for index, item := range report.MissingEvidence {
+			if index >= 3 {
+				break
+			}
+			actions = append(actions, "agent-testbench case evidence --case-run "+item.ID+" --json")
+		}
+	}
+	if options.MinPassed > 0 && !report.Gates.MinPassed {
+		actions = append(actions, fmt.Sprintf("Run or repair enough cases to reach min-passed=%d", options.MinPassed))
+	}
+	if len(actions) == 0 {
+		actions = append(actions, "Case gate passed; no action needed")
+	}
+	return actions
+}
+
+func printCaseGate(report caseGateReport) {
+	fmt.Println("Case Gate")
+	fmt.Printf("OK: %t\n", report.OK)
+	if report.RunID != "" {
+		fmt.Printf("Run: %s\n", report.RunID)
+	}
+	fmt.Printf("Total: %d Passed: %d Failed: %d Other: %d EvidenceComplete: %d\n", report.Counts.Total, report.Counts.Passed, report.Counts.Failed, report.Counts.Other, report.Counts.EvidenceComplete)
+	fmt.Printf("Gates: hasCaseRuns=%t noFailures=%t minPassed=%t evidenceComplete=%t\n", report.Gates.HasCaseRuns, report.Gates.NoFailures, report.Gates.MinPassed, report.Gates.EvidenceComplete)
+	for _, item := range report.FailedCaseRuns {
+		fmt.Printf("Failed: %s %s %s\n", item.ID, item.CaseID, item.Status)
+	}
+	for _, item := range report.MissingEvidence {
+		fmt.Printf("Missing Evidence: %s %s\n", item.ID, item.CaseID)
+	}
+	for _, action := range report.NextActions {
+		fmt.Printf("Next: %s\n", action)
+	}
 }
 
 func runCaseRuns(ctx context.Context, args []string) error {
@@ -13433,10 +14254,34 @@ func runCaseRun(ctx context.Context, args []string) error {
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	profileID := flags.String("profile", "default", "Profile id for store records")
 	timeoutSeconds := flags.Int("timeout-seconds", 0, "Request timeout in seconds for Store catalog case execution")
+	dryRun := flags.Bool("dry-run", false, "Preview the file-backed case run without sending HTTP, writing Evidence, or indexing Store records")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	flags.Var(&overrides, "override", "Request body override as key=value; repeat for multiple values")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *dryRun {
+		if strings.TrimSpace(*caseID) != "" {
+			return errors.New("case run --dry-run currently supports --case PATH")
+		}
+		if strings.TrimSpace(*casePath) == "" {
+			return errors.New("case run --dry-run requires --case PATH")
+		}
+		plan, err := apicase.Plan(apicase.RunOptions{
+			CasePath:    *casePath,
+			BaseURL:     *baseURL,
+			EvidenceDir: *evidenceDir,
+			RunID:       *runID,
+			Overrides:   overrides.Values(),
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return writeIndentedJSON(plan)
+		}
+		printCaseRunDryRun(plan)
+		return nil
 	}
 	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
@@ -13477,6 +14322,42 @@ func runCaseRun(ctx context.Context, args []string) error {
 	fmt.Printf("Status: %s\n", result.Status)
 	fmt.Printf("Evidence: %s\n", result.EvidencePath)
 	return nil
+}
+
+func printCaseRunDryRun(plan apicase.DryRunPlan) {
+	fmt.Printf("Case Run Dry Run: %s\n", plan.RunID)
+	fmt.Printf("Case: %s\n", plan.CaseID)
+	fmt.Printf("Request: %s %s\n", plan.Request.Method, plan.Request.Path)
+	if plan.Request.URL != "" {
+		fmt.Printf("URL: %s\n", plan.Request.URL)
+	}
+	fmt.Printf("Headers: %d\n", len(plan.Request.HeaderKeys))
+	fmt.Printf("Body: %t", plan.Request.HasBody)
+	if len(plan.Request.BodyKeys) > 0 {
+		fmt.Printf(" keys=%s", strings.Join(plan.Request.BodyKeys, ","))
+	}
+	fmt.Println()
+	if len(plan.Assertions.ExpectedStatusCodes) > 0 {
+		fmt.Printf("Expected Status: %s\n", intListString(plan.Assertions.ExpectedStatusCodes))
+	}
+	if plan.Assertions.ResponseContainsCount > 0 {
+		fmt.Printf("Response Contains Checks: %d\n", plan.Assertions.ResponseContainsCount)
+	}
+	fmt.Printf("Will Send HTTP: %t\n", plan.Effects.HTTPRequest)
+	fmt.Printf("Will Write Evidence: %t\n", plan.Effects.WritesEvidence)
+	fmt.Printf("Will Write Store: %t\n", plan.Effects.WritesStore)
+	fmt.Printf("Planned Evidence: %s\n", plan.Effects.PlannedEvidencePath)
+	for _, warning := range plan.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+func intListString(values []int) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strconv.Itoa(value))
+	}
+	return strings.Join(parts, ",")
 }
 
 func runStoreCatalogCase(ctx context.Context, storeURL string, profileID string, caseID string, baseURL string, evidenceDir string, runID string, timeoutSeconds int, overrides map[string]any) (map[string]any, error) {
