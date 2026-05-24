@@ -107,6 +107,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research gate") {
 		t.Fatalf("top-level help should expose feature-backed CLI capability gates:\n%s", out)
 	}
+	if !strings.Contains(out, "research gate --feature TEXT") || !strings.Contains(out, "[--scope PATH] [--scope-file PATH] [--write-scope-file PATH]") {
+		t.Fatalf("top-level help should expose scoped feature gates:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench research plan") {
 		t.Fatalf("top-level help should expose feature research plans:\n%s", out)
 	}
@@ -3911,6 +3914,110 @@ func TestResearchGateApprovesFreshAuditedFeatureWithRequiredCommand(t *testing.T
 		"--now", "2026-05-24T10:00:00Z",
 	)
 	for _, want := range []string{"Research Gate", "Workflow Orchestration", "Checks: fresh=ok audit=ok references=ok command=ok", "Command gate: ok required=workflow report matched=workflow report", "n8n-io/n8n"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("text research gate output missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
+func TestResearchGateCanAttachScopedReleaseCheckCommand(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"generatedAt":       "2026-05-24T08:30:45Z",
+		"sourceGeneratedAt": "2026-05-24T04:38:55Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"quality gate": []string{"quality-gates"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":      "quality-gates",
+				"title":   "Quality Gates",
+				"intent":  "Find projects that gate releases.",
+				"aliases": []string{"quality gate"},
+				"topMatches": []map[string]any{
+					{"fullName": "SonarSource/sonarqube", "url": "https://github.com/SonarSource/sonarqube", "stars": 10586, "pushedAt": "2026-05-22T21:31:52Z", "featureScore": 6},
+					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15257, "pushedAt": "2026-05-22T19:22:29Z", "featureScore": 5},
+					{"fullName": "ossf/scorecard", "url": "https://github.com/ossf/scorecard", "stars": 5455, "pushedAt": "2026-05-19T15:54:29Z", "featureScore": 4},
+				},
+			},
+		},
+		"projectIndex": map[string]any{
+			"SonarSource/sonarqube": map[string]any{"fullName": "SonarSource/sonarqube", "url": "https://github.com/SonarSource/sonarqube", "stars": 10586, "pushedAt": "2026-05-22T21:31:52Z", "matchedFeatures": []string{"quality-gates"}},
+			"semgrep/semgrep":       map[string]any{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15257, "pushedAt": "2026-05-22T19:22:29Z", "matchedFeatures": []string{"quality-gates"}},
+			"ossf/scorecard":        map[string]any{"fullName": "ossf/scorecard", "url": "https://github.com/ossf/scorecard", "stars": 5455, "pushedAt": "2026-05-19T15:54:29Z", "matchedFeatures": []string{"quality-gates"}},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+	repo := t.TempDir()
+	scopeFile := filepath.Join(repo, "input.scope")
+	writeFile(t, scopeFile, "./cmd/agent-testbench/research.go\ndocs/feature-research.md\n")
+	outFile := filepath.Join(repo, ".release-check-scope")
+
+	out := runCLI(t,
+		"research", "gate",
+		"--feature", "quality gate",
+		"--radar-index", indexPath,
+		"--require-min-matches", "3",
+		"--scope-file", scopeFile,
+		"--write-scope-file", outFile,
+		"--max-age-hours", "24",
+		"--now", "2026-05-24T10:00:00Z",
+		"--json",
+	)
+	var report struct {
+		OK     bool `json:"ok"`
+		Checks struct {
+			ReleaseCheckScoped bool `json:"releaseCheckScoped"`
+		} `json:"checks"`
+		ReleaseCheck struct {
+			Scoped    bool     `json:"scoped"`
+			Scopes    []string `json:"scopes"`
+			ScopeFile string   `json:"scopeFile"`
+			Command   string   `json:"command"`
+		} `json:"releaseCheck"`
+		VerificationCommands []string `json:"verificationCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode scoped research gate json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Checks.ReleaseCheckScoped || !report.ReleaseCheck.Scoped {
+		t.Fatalf("scoped gate checks = %#v", report)
+	}
+	if fmt.Sprint(report.ReleaseCheck.Scopes) != "[cmd/agent-testbench/research.go docs/feature-research.md]" {
+		t.Fatalf("scoped gate normalized scopes = %#v", report.ReleaseCheck.Scopes)
+	}
+	raw, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("read generated gate scope file: %v", err)
+	}
+	if string(raw) != "cmd/agent-testbench/research.go\ndocs/feature-research.md\n" {
+		t.Fatalf("generated gate scope file = %q", raw)
+	}
+	if report.ReleaseCheck.ScopeFile != outFile || !strings.Contains(report.ReleaseCheck.Command, "npm run release-check -- --scope-file "+quoteCommandValue(outFile)) {
+		t.Fatalf("scoped gate release check = %#v", report.ReleaseCheck)
+	}
+	if !strings.Contains(strings.Join(report.VerificationCommands, "\n"), "npm run release-check -- --scope-file "+quoteCommandValue(outFile)) {
+		t.Fatalf("scoped gate verification commands = %#v", report.VerificationCommands)
+	}
+
+	textOut := runCLI(t,
+		"research", "gate",
+		"--feature", "quality gate",
+		"--radar-index", indexPath,
+		"--require-min-matches", "3",
+		"--scope-file", outFile,
+		"--max-age-hours", "24",
+		"--now", "2026-05-24T10:00:00Z",
+	)
+	for _, want := range []string{"release-check=ok", "Release check:", "npm run release-check -- --scope-file " + quoteCommandValue(outFile)} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("text research gate output missing %q:\n%s", want, textOut)
 		}

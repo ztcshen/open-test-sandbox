@@ -344,10 +344,14 @@ loads the external feature index, verifies freshness, runs the radar audit,
 checks that the matched feature has enough recent 3K+ star references, and can
 require a concrete AgentTestBench command path such as `workflow report` or
 `case gate`. The JSON report returns `checks`, `referenceGate`, `commandGate`,
-optional `liveCheck`, ranked references, and verification commands; the command
-exits non-zero when any gate fails. Add `--live-check` when the implementation
-slice must prove its references still pass live GitHub policy and have not
-drifted beyond the configured star or pushed-at thresholds.
+optional `releaseCheck`, optional `liveCheck`, ranked references, and
+verification commands; the command exits non-zero when any gate fails. Pass
+`--scope`, `--scope-file`, or `--changed-since REF` when the feature gate should
+also carry the scoped release-check boundary, and add `--write-scope-file
+.release-check-scope` when the normalized scope should be reusable by CI or a PR
+checklist. Add `--live-check` when the implementation slice must prove its
+references still pass live GitHub policy and have not drifted beyond the
+configured star or pushed-at thresholds.
 
 To choose the next implementation or demo slice, ask the CLI to rank roadmap
 candidates:
@@ -473,6 +477,8 @@ Recommended pre-design gate:
   --feature "new cli capability" \
   --require-min-matches 3 \
   --require-command "target command" \
+  --changed-since HEAD \
+  --write-scope-file .release-check-scope \
   --live-check \
   --max-star-drift 100 \
   --max-pushed-drift-hours 72

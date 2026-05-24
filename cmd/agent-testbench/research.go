@@ -360,26 +360,28 @@ type featureBacklogItem struct {
 }
 
 type featureGateReport struct {
-	OK                   bool                    `json:"ok"`
-	Feature              featureRadarFeature     `json:"feature"`
-	Policy               featureRadarPolicy      `json:"policy"`
-	SourceGeneratedAt    string                  `json:"sourceGeneratedAt"`
-	Checks               featureGateChecks       `json:"checks"`
-	ReferenceGate        featureReferenceGate    `json:"referenceGate"`
-	CommandGate          featureCommandGate      `json:"commandGate"`
-	LiveCheck            *featureLiveCheckReport `json:"liveCheck,omitempty"`
-	References           []featureRadarMatch     `json:"references"`
-	NextCommands         []featureNextCommand    `json:"nextCommands"`
-	VerificationCommands []string                `json:"verificationCommands"`
-	Reasons              []string                `json:"reasons,omitempty"`
+	OK                   bool                      `json:"ok"`
+	Feature              featureRadarFeature       `json:"feature"`
+	Policy               featureRadarPolicy        `json:"policy"`
+	SourceGeneratedAt    string                    `json:"sourceGeneratedAt"`
+	Checks               featureGateChecks         `json:"checks"`
+	ReferenceGate        featureReferenceGate      `json:"referenceGate"`
+	CommandGate          featureCommandGate        `json:"commandGate"`
+	ReleaseCheck         *featureScopeReleaseCheck `json:"releaseCheck,omitempty"`
+	LiveCheck            *featureLiveCheckReport   `json:"liveCheck,omitempty"`
+	References           []featureRadarMatch       `json:"references"`
+	NextCommands         []featureNextCommand      `json:"nextCommands"`
+	VerificationCommands []string                  `json:"verificationCommands"`
+	Reasons              []string                  `json:"reasons,omitempty"`
 }
 
 type featureGateChecks struct {
-	Fresh           bool `json:"fresh"`
-	AuditOK         bool `json:"auditOk"`
-	ReferenceGateOK bool `json:"referenceGateOk"`
-	CommandGateOK   bool `json:"commandGateOk"`
-	LiveCheckOK     bool `json:"liveCheckOk,omitempty"`
+	Fresh              bool `json:"fresh"`
+	AuditOK            bool `json:"auditOk"`
+	ReferenceGateOK    bool `json:"referenceGateOk"`
+	CommandGateOK      bool `json:"commandGateOk"`
+	ReleaseCheckScoped bool `json:"releaseCheckScoped,omitempty"`
+	LiveCheckOK        bool `json:"liveCheckOk,omitempty"`
 }
 
 type featureCommandGate struct {
@@ -1673,6 +1675,12 @@ func runResearchGate(args []string) error {
 	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
 	requireMinMatches := flags.Int("require-min-matches", 3, "Fail when fewer than this many reference projects are available")
 	requireCommand := flags.String("require-command", "", "Require a matching AgentTestBench command path, for example 'workflow report'")
+	var scopesFlag stringListFlag
+	flags.Var(&scopesFlag, "scope", "Touched file or directory to include in the release-check gate")
+	scopeFile := flags.String("scope-file", "", "File containing release-check scope paths, one per line")
+	writeScopeFile := flags.String("write-scope-file", "", "Write normalized release-check scopes to PATH")
+	changedSince := flags.String("changed-since", "", "Git revision or base ref to derive release-check directory scopes from")
+	includeUntracked := flags.Bool("include-untracked", false, "Include untracked Git files when deriving release-check scopes with --changed-since")
 	maxAgeHours := flags.Int("max-age-hours", 72, "Fail when the feature index is older than this many hours")
 	liveCheck := flags.Bool("live-check", false, "Also verify selected references against live GitHub repository metadata")
 	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
@@ -1708,6 +1716,30 @@ func runResearchGate(args []string) error {
 		return err
 	}
 	report := buildFeatureGateReport(index, resolvedIndexPath, feature, *featureQuery, *requireMinMatches, *requireCommand, *maxAgeHours, checkedAt, *limit)
+	scopeRequested := len(scopesFlag.Values()) > 0 || strings.TrimSpace(*scopeFile) != "" || strings.TrimSpace(*changedSince) != "" || strings.TrimSpace(*writeScopeFile) != ""
+	if scopeRequested {
+		scopes, err := featureResearchScopes(scopesFlag.Values(), *scopeFile, featureScopeGitOptions{
+			ChangedSince:     *changedSince,
+			IncludeUntracked: *includeUntracked,
+		})
+		if err != nil {
+			return err
+		}
+		if len(scopes) == 0 {
+			return errors.New("research gate scope requires --scope PATH, --scope-file PATH, or --changed-since REF")
+		}
+		scopeOutputFile := strings.TrimSpace(*writeScopeFile)
+		commandScopeFile := scopeOutputFile
+		if commandScopeFile == "" && len(scopesFlag.Values()) == 0 && strings.TrimSpace(*changedSince) == "" {
+			commandScopeFile = strings.TrimSpace(*scopeFile)
+		}
+		attachFeatureGateReleaseCheck(&report, scopes, commandScopeFile)
+		if scopeOutputFile != "" {
+			if err := writeFeatureScopeFile(scopeOutputFile, scopes); err != nil {
+				return err
+			}
+		}
+	}
 	if *liveCheck {
 		liveReport := buildFeatureLiveCheckReport(context.Background(), featureLiveCheckOptions{
 			Index:               index,
@@ -3382,6 +3414,24 @@ func attachFeatureGateLiveCheck(report *featureGateReport, liveReport featureLiv
 	if liveReport.FailedCount == 0 && liveReport.RefreshCount == 0 {
 		report.Reasons = append(report.Reasons, "live-check did not pass")
 	}
+	report.OK = false
+}
+
+func attachFeatureGateReleaseCheck(report *featureGateReport, scopes []string, scopeFile string) {
+	releaseCheck := featureScopeReleaseCheck{
+		Scoped:    len(scopes) > 0,
+		Scopes:    scopes,
+		ScopeFile: strings.TrimSpace(scopeFile),
+		Command:   featureScopedReleaseCheckCommand(scopes, scopeFile),
+	}
+	report.ReleaseCheck = &releaseCheck
+	report.Checks.ReleaseCheckScoped = releaseCheck.Scoped
+	if releaseCheck.Scoped {
+		report.VerificationCommands = append([]string{releaseCheck.Command}, report.VerificationCommands...)
+		report.OK = len(report.Reasons) == 0
+		return
+	}
+	report.Reasons = append(report.Reasons, "release-check scope is empty")
 	report.OK = false
 }
 
@@ -5474,6 +5524,9 @@ func printFeatureGateReport(report featureGateReport) {
 	fmt.Println("Research Gate")
 	fmt.Printf("Feature: %s (%s)\n", report.Feature.Title, report.Feature.ID)
 	checks := fmt.Sprintf("Checks: fresh=%s audit=%s references=%s command=%s", statusWord(report.Checks.Fresh), statusWord(report.Checks.AuditOK), statusWord(report.Checks.ReferenceGateOK), statusWord(report.Checks.CommandGateOK))
+	if report.ReleaseCheck != nil {
+		checks += " release-check=" + statusWord(report.Checks.ReleaseCheckScoped)
+	}
 	if report.LiveCheck != nil {
 		checks += " live=" + statusWord(report.Checks.LiveCheckOK)
 	}
@@ -5490,6 +5543,9 @@ func printFeatureGateReport(report featureGateReport) {
 	}
 	if report.LiveCheck != nil {
 		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
+	if report.ReleaseCheck != nil {
+		fmt.Printf("Release check: %s\n", report.ReleaseCheck.Command)
 	}
 	if len(report.Reasons) > 0 {
 		fmt.Println("Reasons:")

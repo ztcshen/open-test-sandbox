@@ -98,9 +98,10 @@ What to point out:
   ranks feature candidates, explains matched tokens, verifies candidate
   references against live GitHub metadata, and prints copyable compare, brief,
   references, plan, and live-check follow-up commands.
-- `agent-testbench research gate --feature "workflow report" --live-check`
+- `agent-testbench research gate --feature "workflow report" --scope-file .release-check-scope --live-check`
   combines freshness, audit, reference coverage, command availability, and live
-  reference checks into one pre-implementation CLI gate.
+  reference checks with the scoped release-check boundary in one
+  pre-implementation CLI gate.
 - `agent-testbench research plan --feature "case run" --live-check`
   turns the chosen feature into a reviewable implementation plan while carrying
   live GitHub policy/drift evidence into the plan's verification commands.
@@ -203,9 +204,9 @@ What to point out:
 - `agent-testbench research search --query "workflow failure analysis" --live-check`
   会排序 feature 候选、解释 matched tokens，使用 GitHub 实时元数据复核候选
   reference，并直接打印 compare、brief、references、plan 和 live-check 后续命令。
-- `agent-testbench research gate --feature "workflow report" --live-check`
-  会把 freshness、audit、reference coverage、命令可用性和实时 reference
-  校验合成一个 CLI 实现前置门禁。
+- `agent-testbench research gate --feature "workflow report" --scope-file .release-check-scope --live-check`
+  会把 freshness、audit、reference coverage、命令可用性、scoped
+  release-check 边界和实时 reference 校验合成一个 CLI 实现前置门禁。
 - `agent-testbench research plan --feature "case run" --live-check`
   会把选定 feature 变成可评审的实现计划，并把 GitHub 实时 policy/drift
   证据带入计划里的验证命令。
