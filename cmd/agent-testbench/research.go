@@ -587,9 +587,10 @@ type featureScopeChecks struct {
 }
 
 type featureScopeReleaseCheck struct {
-	Scoped  bool     `json:"scoped"`
-	Scopes  []string `json:"scopes"`
-	Command string   `json:"command"`
+	Scoped    bool     `json:"scoped"`
+	Scopes    []string `json:"scopes"`
+	ScopeFile string   `json:"scopeFile,omitempty"`
+	Command   string   `json:"command"`
 }
 
 type featureSyncReport struct {
@@ -1129,6 +1130,7 @@ func runResearchScope(args []string) error {
 	var scopesFlag stringListFlag
 	flags.Var(&scopesFlag, "scope", "Touched file or directory to include in the research and release-check scope")
 	scopeFile := flags.String("scope-file", "", "File containing touched paths, one per line")
+	writeScopeFile := flags.String("write-scope-file", "", "Write normalized release-check scopes to PATH")
 	changedSince := flags.String("changed-since", "", "Git revision or base ref to derive touched directory scopes from")
 	includeUntracked := flags.Bool("include-untracked", false, "Include untracked Git files when deriving scopes with --changed-since")
 	query := flags.String("query", "", "Additional feature query text to combine with touched scope signals")
@@ -1166,7 +1168,8 @@ func runResearchScope(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildFeatureScopeReport(index, resolvedIndexPath, scopes, *query, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+	scopeOutputFile := strings.TrimSpace(*writeScopeFile)
+	report := buildFeatureScopeReport(index, resolvedIndexPath, scopes, scopeOutputFile, *query, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
 	if *liveCheck {
 		compare := featureCompareReport{
 			OK:                report.OK,
@@ -1197,6 +1200,11 @@ func runResearchScope(args []string) error {
 		report.Items = compare.Items
 		report.Reasons = compare.Reasons
 		report.NextCommands = featureScopeNextCommands(report, resolvedIndexPath, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+	}
+	if scopeOutputFile != "" {
+		if err := writeFeatureScopeFile(scopeOutputFile, scopes); err != nil {
+			return err
+		}
 	}
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
@@ -4206,7 +4214,7 @@ func rankFeatureCommandItems(items []featureCommandItem) {
 	}
 }
 
-func buildFeatureScopeReport(index featureRadarIndex, indexPath string, scopes []string, extraQuery string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) featureScopeReport {
+func buildFeatureScopeReport(index featureRadarIndex, indexPath string, scopes []string, scopeFile string, extraQuery string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) featureScopeReport {
 	if minReferences <= 0 {
 		minReferences = 3
 	}
@@ -4225,9 +4233,10 @@ func buildFeatureScopeReport(index featureRadarIndex, indexPath string, scopes [
 		compare.Recommended = compare.Items[0]
 	}
 	releaseCheck := featureScopeReleaseCheck{
-		Scoped:  len(scopes) > 0,
-		Scopes:  scopes,
-		Command: featureScopedReleaseCheckCommand(scopes),
+		Scoped:    len(scopes) > 0,
+		Scopes:    scopes,
+		ScopeFile: strings.TrimSpace(scopeFile),
+		Command:   featureScopedReleaseCheckCommand(scopes, scopeFile),
 	}
 	report := featureScopeReport{
 		OK:                len(scopes) > 0 && compare.OK && releaseCheck.Scoped,
@@ -4296,6 +4305,26 @@ func featureResearchScopes(values []string, scopeFile string, gitOptions feature
 	}
 	scopes = append(scopes, gitScopes...)
 	return normalizeResearchScopes(scopes), nil
+}
+
+func writeFeatureScopeFile(scopeFile string, scopes []string) error {
+	scopeFile = strings.TrimSpace(scopeFile)
+	if scopeFile == "" {
+		return nil
+	}
+	if strings.HasPrefix(scopeFile, "-") {
+		return fmt.Errorf("invalid --write-scope-file path %q", scopeFile)
+	}
+	normalized := normalizeResearchScopes(scopes)
+	if len(normalized) == 0 {
+		return errors.New("write research scope file requires at least one normalized scope")
+	}
+	body := strings.Join(normalized, "\n") + "\n"
+	path := expandUserHomePath(scopeFile)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write research scope file: %w", err)
+	}
+	return nil
 }
 
 func featureGitChangedDirectoryScopes(options featureScopeGitOptions) ([]string, error) {
@@ -4443,8 +4472,12 @@ func uniqueNormalizedFeatureQueryParts(values []string) []string {
 	return out
 }
 
-func featureScopedReleaseCheckCommand(scopes []string) string {
+func featureScopedReleaseCheckCommand(scopes []string, scopeFile string) string {
 	command := "AGENT_TESTBENCH_SMOKE_STORE_DSN=" + quoteCommandValue("sqlite:///tmp/agent-testbench-scope-smoke.sqlite") + " npm run release-check --"
+	scopeFile = strings.TrimSpace(scopeFile)
+	if scopeFile != "" {
+		return command + " --scope-file " + quoteCommandValue(scopeFile)
+	}
 	for _, scope := range scopes {
 		command += " --scope " + quoteCommandValue(scope)
 	}

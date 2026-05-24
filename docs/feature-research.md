@@ -181,6 +181,10 @@ derive directory scopes from Git with `--changed-since REF`, plus untracked file
 with `--include-untracked`, so a slice can start from the actual changed paths
 without hand-copying every file. Use it before or after editing so feature
 research, OSS references, and release validation share the same scoped boundary.
+Add `--write-scope-file .release-check-scope` when the next step should reuse a
+stable release-check scope file in CI, a PR checklist, or a local handoff; the
+JSON report's `releaseCheck.scopeFile` and `releaseCheck.command` then point to
+`npm run release-check -- --scope-file .release-check-scope`.
 
 `research sync` keeps radar maintenance visible from the AgentTestBench side
 without moving the crawler into the core repository. Dry-run mode emits the
@@ -453,6 +457,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research command --command "target command" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research scope --scope cmd/agent-testbench --scope docs/feature-research.md --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research scope --changed-since HEAD --include-untracked --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
+./bin/agent-testbench.sh research scope --changed-since HEAD --include-untracked --write-scope-file .release-check-scope --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --format markdown
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72 --format markdown
 ./bin/agent-testbench.sh research status --max-age-hours 72
