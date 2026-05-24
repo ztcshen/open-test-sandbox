@@ -339,7 +339,19 @@ type featureSearchReport struct {
 	Count             int                      `json:"count"`
 	Policy            featureRadarPolicy       `json:"policy"`
 	SourceGeneratedAt string                   `json:"sourceGeneratedAt"`
+	Stats             featureSearchStats       `json:"stats"`
 	Candidates        []featureSearchCandidate `json:"candidates"`
+	NextCommands      []string                 `json:"nextCommands,omitempty"`
+}
+
+type featureSearchStats struct {
+	IndexedTokens     int      `json:"indexedTokens"`
+	ScannedTokens     int      `json:"scannedTokens"`
+	MatchedTokens     int      `json:"matchedTokens"`
+	CandidateFeatures int      `json:"candidateFeatures"`
+	QueryTerms        []string `json:"queryTerms,omitempty"`
+	MissingTerms      []string `json:"missingTerms,omitempty"`
+	StarterTokens     []string `json:"starterTokens,omitempty"`
 }
 
 type featureSearchCandidate struct {
@@ -2026,11 +2038,15 @@ func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query s
 	queryTerms := strings.Fields(normalizedQuery)
 	scores := map[string]int{}
 	matchedTokens := map[string][]string{}
+	matchedTokenSet := map[string]bool{}
+	scannedTokens := 0
 	for token, ids := range index.TokenIndex {
+		scannedTokens++
 		score := featureSearchTokenScore(token, normalizedQuery, queryTerms)
 		if score <= 0 {
 			continue
 		}
+		matchedTokenSet[token] = true
 		for _, id := range ids {
 			if _, ok := index.Features[id]; !ok {
 				continue
@@ -2079,6 +2095,21 @@ func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query s
 		})
 	}
 
+	stats := featureSearchStats{
+		IndexedTokens:     len(index.TokenIndex),
+		ScannedTokens:     scannedTokens,
+		MatchedTokens:     len(matchedTokenSet),
+		CandidateFeatures: len(scores),
+		QueryTerms:        uniqueSortedStrings(queryTerms),
+		MissingTerms:      featureSearchMissingTerms(queryTerms, matchedTokenSet),
+	}
+	if len(candidates) == 0 {
+		stats.StarterTokens = featureSearchStarterTokens(index.TokenIndex, 8)
+	}
+	nextCommands := []string(nil)
+	if len(candidates) == 0 {
+		nextCommands = featureSearchNoMatchCommands(indexPath, minReferences)
+	}
 	return featureSearchReport{
 		OK:                len(candidates) > 0,
 		Query:             strings.TrimSpace(query),
@@ -2086,7 +2117,69 @@ func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query s
 		Count:             len(candidates),
 		Policy:            index.Policy,
 		SourceGeneratedAt: index.SourceGeneratedAt,
+		Stats:             stats,
 		Candidates:        candidates,
+		NextCommands:      nextCommands,
+	}
+}
+
+func featureSearchMissingTerms(queryTerms []string, matchedTokens map[string]bool) []string {
+	missing := []string{}
+	for _, term := range uniqueSortedStrings(queryTerms) {
+		found := false
+		for token := range matchedTokens {
+			if strings.Contains(token, term) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, term)
+		}
+	}
+	return missing
+}
+
+func featureSearchStarterTokens(tokenIndex map[string][]string, limit int) []string {
+	if limit <= 0 {
+		limit = 8
+	}
+	type scoredToken struct {
+		Token string
+		Refs  int
+	}
+	items := []scoredToken{}
+	for token, ids := range tokenIndex {
+		token = strings.TrimSpace(token)
+		if token == "" || !featureSearchDisplayToken(token) {
+			continue
+		}
+		items = append(items, scoredToken{Token: token, Refs: len(ids)})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Refs != items[j].Refs {
+			return items[i].Refs > items[j].Refs
+		}
+		return items[i].Token < items[j].Token
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.Token)
+	}
+	return out
+}
+
+func featureSearchNoMatchCommands(indexPath string, minReferences int) []string {
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	return []string{
+		"agent-testbench research features" + featureRadarIndexFlag(indexPath) + " --json",
+		"agent-testbench research matrix" + featureRadarIndexFlag(indexPath) + " --limit 5 --json",
+		fmt.Sprintf("agent-testbench research refresh-plan%s --min-references %d --max-age-hours 72 --json", featureRadarIndexFlag(indexPath), minReferences),
 	}
 }
 
@@ -2529,9 +2622,26 @@ func printFeatureSearchReport(report featureSearchReport) {
 	fmt.Println("Feature Search")
 	fmt.Printf("Query: %s\n", report.Query)
 	fmt.Printf("Candidates: %d\n", report.Count)
+	fmt.Printf("Search diagnostics: indexed=%d scanned=%d matched=%d candidate-features=%d\n", report.Stats.IndexedTokens, report.Stats.ScannedTokens, report.Stats.MatchedTokens, report.Stats.CandidateFeatures)
 	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
 	if report.SourceGeneratedAt != "" {
 		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
+	}
+	if report.Count == 0 {
+		fmt.Println("No candidates")
+		if len(report.Stats.MissingTerms) > 0 {
+			fmt.Printf("missing terms: %s\n", strings.Join(report.Stats.MissingTerms, ", "))
+		}
+		if len(report.Stats.StarterTokens) > 0 {
+			fmt.Printf("starter tokens: %s\n", strings.Join(report.Stats.StarterTokens, ", "))
+		}
+		if len(report.NextCommands) > 0 {
+			fmt.Println("Next commands:")
+			for _, command := range report.NextCommands {
+				fmt.Printf("- %s\n", command)
+			}
+		}
+		return
 	}
 	for _, candidate := range report.Candidates {
 		fmt.Printf("- %s (%s): score=%d references=%d gate=%s\n", candidate.Title, candidate.ID, candidate.Score, candidate.References, candidate.Gate)

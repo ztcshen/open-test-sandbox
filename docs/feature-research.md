@@ -85,7 +85,10 @@ List the available feature index before choosing the next CLI slice:
 token index to rank candidate features for a query, reports matched tokens,
 reference counts, top recent 3K+ star references, and a copyable
 `research plan` command for each candidate. Use it when the feature wording is
-still fuzzy and several maintained feature records may apply.
+still fuzzy and several maintained feature records may apply. Its JSON also
+includes search diagnostics: indexed/scanned token counts, matched token count,
+candidate feature count, missing query terms, and starter tokens plus next
+commands when the query has no candidates.
 
 `research brief` is the one-shot pre-design runbook. It starts from a fuzzy
 query, selects the highest-ranked feature candidate, runs the same freshness,

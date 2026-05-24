@@ -427,7 +427,15 @@ func TestResearchSearchRanksCandidateFeaturesFromRadarIndex(t *testing.T) {
 		Query           string `json:"query"`
 		NormalizedQuery string `json:"normalizedQuery"`
 		Count           int    `json:"count"`
-		Candidates      []struct {
+		Stats           struct {
+			IndexedTokens     int      `json:"indexedTokens"`
+			ScannedTokens     int      `json:"scannedTokens"`
+			MatchedTokens     int      `json:"matchedTokens"`
+			CandidateFeatures int      `json:"candidateFeatures"`
+			QueryTerms        []string `json:"queryTerms"`
+			MissingTerms      []string `json:"missingTerms"`
+		} `json:"stats"`
+		Candidates []struct {
 			ID            string   `json:"id"`
 			Title         string   `json:"title"`
 			Score         int      `json:"score"`
@@ -446,6 +454,9 @@ func TestResearchSearchRanksCandidateFeaturesFromRadarIndex(t *testing.T) {
 	}
 	if !report.OK || report.Query != "gate" || report.NormalizedQuery != "gate" || report.Count != 2 {
 		t.Fatalf("search report identity = %#v", report)
+	}
+	if report.Stats.IndexedTokens != 3 || report.Stats.ScannedTokens != 3 || report.Stats.MatchedTokens != 3 || report.Stats.CandidateFeatures != 2 || !stringSliceContains(report.Stats.QueryTerms, "gate") || len(report.Stats.MissingTerms) != 0 {
+		t.Fatalf("search stats = %#v", report.Stats)
 	}
 	if report.Candidates[0].ID != "quality-gates" || report.Candidates[0].Gate != "passed" || report.Candidates[0].References != 2 || report.Candidates[0].Score == 0 {
 		t.Fatalf("top candidate = %#v", report.Candidates[0])
@@ -467,6 +478,80 @@ func TestResearchSearchRanksCandidateFeaturesFromRadarIndex(t *testing.T) {
 	for _, want := range []string{"Feature Search", "Query: gate", "Quality Gates", "matched: gate, quality gate", "Top reference: aquasecurity/trivy"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("search text output missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
+func TestResearchSearchExplainsZeroMatchQueries(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"quality gate":    []string{"quality-gates"},
+			"workflow runner": []string{"workflow-orchestration"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases with policy checks.",
+			},
+			"workflow-orchestration": map[string]any{
+				"id":     "workflow-orchestration",
+				"title":  "Workflow Orchestration",
+				"intent": "Find projects that model workflow automation.",
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t, "research", "search", "--query", "feature search performance", "--radar-index", indexPath, "--json")
+	var report struct {
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
+		Stats struct {
+			IndexedTokens     int      `json:"indexedTokens"`
+			ScannedTokens     int      `json:"scannedTokens"`
+			MatchedTokens     int      `json:"matchedTokens"`
+			CandidateFeatures int      `json:"candidateFeatures"`
+			MissingTerms      []string `json:"missingTerms"`
+			StarterTokens     []string `json:"starterTokens"`
+		} `json:"stats"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode zero-match search json: %v\n%s", err, out)
+	}
+	if report.OK || report.Count != 0 || report.Stats.IndexedTokens != 2 || report.Stats.ScannedTokens != 2 || report.Stats.MatchedTokens != 0 || report.Stats.CandidateFeatures != 0 {
+		t.Fatalf("zero-match report = %#v", report)
+	}
+	for _, want := range []string{"feature", "search", "performance"} {
+		if !stringSliceContains(report.Stats.MissingTerms, want) {
+			t.Fatalf("missing terms should include %q: %#v", want, report.Stats.MissingTerms)
+		}
+	}
+	if len(report.Stats.StarterTokens) == 0 || !stringSliceContains(report.Stats.StarterTokens, "quality gate") {
+		t.Fatalf("starter tokens = %#v", report.Stats.StarterTokens)
+	}
+	joinedCommands := strings.Join(report.NextCommands, "\n")
+	for _, want := range []string{"research features", "research matrix", "research refresh-plan"} {
+		if !strings.Contains(joinedCommands, want) {
+			t.Fatalf("next commands missing %q:\n%s", want, joinedCommands)
+		}
+	}
+
+	textOut := runCLI(t, "research", "search", "--query", "feature search performance", "--radar-index", indexPath)
+	for _, want := range []string{"No candidates", "Search diagnostics", "missing terms: feature, performance, search", "Next commands:"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("zero-match text missing %q:\n%s", want, textOut)
 		}
 	}
 }
