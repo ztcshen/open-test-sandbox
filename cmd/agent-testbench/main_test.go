@@ -466,6 +466,7 @@ func TestResearchSearchRanksCandidateFeaturesFromRadarIndex(t *testing.T) {
 				Stars    int    `json:"stars"`
 			} `json:"topReferences"`
 		} `json:"candidates"`
+		NextCommands []string `json:"nextCommands"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode research search json: %v\n%s", err, out)
@@ -491,9 +492,21 @@ func TestResearchSearchRanksCandidateFeaturesFromRadarIndex(t *testing.T) {
 	if report.Candidates[1].ID != "workflow-orchestration" || report.Candidates[1].Gate != "failed" {
 		t.Fatalf("second candidate = %#v", report.Candidates[1])
 	}
+	joinedNext := strings.Join(report.NextCommands, "\n")
+	for _, want := range []string{
+		"research compare --query 'gate'",
+		"research brief --query 'gate'",
+		"research references --feature 'quality-gates'",
+		"research plan --feature 'quality-gates'",
+		"research live-check --feature 'quality-gates'",
+	} {
+		if !strings.Contains(joinedNext, want) {
+			t.Fatalf("search follow-up commands missing %q:\n%s", want, joinedNext)
+		}
+	}
 
 	textOut := runCLI(t, "research", "search", "--query", "gate", "--radar-index", indexPath, "--limit", "1", "--reference-limit", "1")
-	for _, want := range []string{"Feature Search", "Query: gate", "Quality Gates", "matched: gate, quality gate", "Top reference: aquasecurity/trivy"} {
+	for _, want := range []string{"Feature Search", "Query: gate", "Quality Gates", "matched: gate, quality gate", "Top reference: aquasecurity/trivy", "Next commands:", "research compare --query 'gate'"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("search text output missing %q:\n%s", want, textOut)
 		}

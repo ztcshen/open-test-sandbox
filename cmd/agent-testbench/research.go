@@ -3617,6 +3617,8 @@ func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query s
 	nextCommands := []string(nil)
 	if len(candidates) == 0 {
 		nextCommands = featureSearchNoMatchCommands(indexPath, minReferences)
+	} else {
+		nextCommands = featureSearchFollowUpCommands(query, candidates[0].ID, indexPath, minReferences, limit, referenceLimit)
 	}
 	return featureSearchReport{
 		OK:                len(candidates) > 0,
@@ -3688,6 +3690,25 @@ func featureSearchNoMatchCommands(indexPath string, minReferences int) []string 
 		"agent-testbench research features" + featureRadarIndexFlag(indexPath) + " --json",
 		"agent-testbench research matrix" + featureRadarIndexFlag(indexPath) + " --limit 5 --json",
 		fmt.Sprintf("agent-testbench research refresh-plan%s --min-references %d --max-age-hours 72 --json", featureRadarIndexFlag(indexPath), minReferences),
+	}
+}
+
+func featureSearchFollowUpCommands(query string, featureID string, indexPath string, minReferences int, limit int, referenceLimit int) []string {
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	if referenceLimit < 0 {
+		referenceLimit = 0
+	}
+	return []string{
+		fmt.Sprintf("agent-testbench research compare --query %s%s --min-references %d --limit %d --reference-limit %d --json", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences, limit, referenceLimit),
+		fmt.Sprintf("agent-testbench research brief --query %s%s --min-references %d --format markdown", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences),
+		"agent-testbench research references --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --limit 10 --json",
+		"agent-testbench research plan --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences) + " --format markdown",
+		"agent-testbench research live-check --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --json",
 	}
 }
 
@@ -4717,6 +4738,12 @@ func printFeatureSearchReport(report featureSearchReport) {
 		}
 		if len(candidate.TopReferences) > 0 {
 			fmt.Printf("  Top reference: %s\n", candidate.TopReferences[0].FullName)
+		}
+	}
+	if len(report.NextCommands) > 0 {
+		fmt.Println("Next commands:")
+		for _, command := range report.NextCommands {
+			fmt.Printf("- %s\n", command)
 		}
 	}
 }

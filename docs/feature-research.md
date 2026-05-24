@@ -128,10 +128,13 @@ List the available feature index before choosing the next CLI slice:
 `research search` is the feature-search front door. It uses the generated
 token index to rank candidate features for a query, reports matched tokens,
 reference counts, top recent 3K+ star references, and a copyable
-`research plan` command for each candidate. Use it when the feature wording is
-still fuzzy and several maintained feature records may apply. Its JSON also
-includes search diagnostics: indexed/scanned token counts, matched token count,
-candidate feature count, missing query terms, and starter tokens plus next
+`research plan` command for each candidate. Successful searches also return
+copyable `compare`, `brief`, `references`, `plan`, and `live-check` follow-up
+commands for the best candidate so the fuzzy search can move directly into
+design or live reference validation. Use it when the feature wording is still
+fuzzy and several maintained feature records may apply. Its JSON also includes
+search diagnostics: indexed/scanned token counts, matched token count,
+candidate feature count, missing query terms, and starter tokens plus recovery
 commands when the query has no candidates.
 
 `research brief` is the one-shot pre-design runbook. It starts from a fuzzy
