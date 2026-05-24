@@ -283,27 +283,47 @@ type featureRefreshFocus struct {
 }
 
 type featureRoadmapReport struct {
-	OK                bool                 `json:"ok"`
-	Policy            featureRadarPolicy   `json:"policy"`
-	SourceGeneratedAt string               `json:"sourceGeneratedAt"`
-	ReferenceGate     featureCoverageGate  `json:"referenceGate"`
-	Count             int                  `json:"count"`
-	Items             []featureRoadmapItem `json:"items"`
+	OK                bool                       `json:"ok"`
+	Policy            featureRadarPolicy         `json:"policy"`
+	SourceGeneratedAt string                     `json:"sourceGeneratedAt"`
+	Checks            featureRoadmapChecks       `json:"checks"`
+	ReferenceGate     featureCoverageGate        `json:"referenceGate"`
+	LiveCheck         *featureRoadmapLiveSummary `json:"liveCheck,omitempty"`
+	Count             int                        `json:"count"`
+	Items             []featureRoadmapItem       `json:"items"`
+}
+
+type featureRoadmapChecks struct {
+	ReferenceGateOK bool `json:"referenceGateOk"`
+	LiveCheckOK     bool `json:"liveCheckOk,omitempty"`
+}
+
+type featureRoadmapLiveSummary struct {
+	OK                bool `json:"ok"`
+	CheckedCount      int  `json:"checkedCount"`
+	CheckedCandidates int  `json:"checkedCandidates"`
+	FailedCount       int  `json:"failedCount"`
+	FailedCandidates  int  `json:"failedCandidates"`
+	RefreshNeeded     bool `json:"refreshNeeded"`
+	RefreshCount      int  `json:"refreshCount"`
+	RefreshCandidates int  `json:"refreshCandidates"`
 }
 
 type featureRoadmapItem struct {
-	ID                     string               `json:"id"`
-	Title                  string               `json:"title"`
-	Intent                 string               `json:"intent,omitempty"`
-	References             int                  `json:"references"`
-	Gate                   string               `json:"gate"`
-	ReadinessScore         int                  `json:"readinessScore"`
-	AvailableCommands      int                  `json:"availableCommands"`
-	ImplementationCommands int                  `json:"implementationCommands"`
-	TotalStars             int                  `json:"totalStars"`
-	PlanCommand            string               `json:"planCommand"`
-	TopReferences          []featureRadarMatch  `json:"topReferences"`
-	NextCommands           []featureNextCommand `json:"nextCommands"`
+	ID                     string                  `json:"id"`
+	Title                  string                  `json:"title"`
+	Intent                 string                  `json:"intent,omitempty"`
+	References             int                     `json:"references"`
+	Gate                   string                  `json:"gate"`
+	ReadinessScore         int                     `json:"readinessScore"`
+	AvailableCommands      int                     `json:"availableCommands"`
+	ImplementationCommands int                     `json:"implementationCommands"`
+	TotalStars             int                     `json:"totalStars"`
+	PlanCommand            string                  `json:"planCommand"`
+	TopReferences          []featureRadarMatch     `json:"topReferences"`
+	NextCommands           []featureNextCommand    `json:"nextCommands"`
+	LiveCheck              *featureLiveCheckReport `json:"liveCheck,omitempty"`
+	Reasons                []string                `json:"reasons,omitempty"`
 }
 
 type featureBacklogReport struct {
@@ -1053,6 +1073,11 @@ func runResearchRoadmap(args []string) error {
 	minReferences := flags.Int("min-references", 3, "Require this many reference projects for a feature to be roadmap-ready")
 	limit := flags.Int("limit", 5, "Maximum roadmap candidates to show")
 	referenceLimit := flags.Int("reference-limit", 2, "Maximum top references per roadmap candidate to include")
+	liveCheck := flags.Bool("live-check", false, "Also verify roadmap references against live GitHub repository metadata before ranking")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token for --live-check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "With --live-check, fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "With --live-check, fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -1068,11 +1093,33 @@ func runResearchRoadmap(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildFeatureRoadmapReport(index, resolvedIndexPath, *minReferences, *limit, *referenceLimit)
-	if *jsonOutput {
-		return writeIndentedJSON(report)
+	roadmapLimit := *limit
+	if *liveCheck {
+		roadmapLimit = 0
 	}
-	printFeatureRoadmapReport(report)
+	report := buildFeatureRoadmapReport(index, resolvedIndexPath, *minReferences, roadmapLimit, *referenceLimit)
+	if *liveCheck {
+		attachFeatureRoadmapLiveChecks(context.Background(), &report, featureRoadmapLiveOptions{
+			Index:               index,
+			IndexPath:           resolvedIndexPath,
+			ReferenceLimit:      *referenceLimit,
+			Limit:               *limit,
+			GitHubAPIURL:        *githubAPIURL,
+			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			MaxStarDrift:        *maxStarDrift,
+			MaxPushedDriftHours: *maxPushedDriftHours,
+		})
+	}
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printFeatureRoadmapReport(report)
+	}
+	if *liveCheck && !report.OK {
+		return errors.New("feature research roadmap live-check failed")
+	}
 	return nil
 }
 
@@ -2309,9 +2356,87 @@ func buildFeatureRoadmapReport(index featureRadarIndex, indexPath string, minRef
 		}
 		items = append(items, item)
 	}
+	sortFeatureRoadmapItems(items)
+	items = limitFeatureRoadmapItems(items, limit)
+	return featureRoadmapReport{
+		OK:                coverage.OK,
+		Policy:            index.Policy,
+		SourceGeneratedAt: index.SourceGeneratedAt,
+		Checks:            featureRoadmapChecks{ReferenceGateOK: coverage.OK},
+		ReferenceGate:     coverage.ReferenceGate,
+		Count:             len(items),
+		Items:             items,
+	}
+}
+
+type featureRoadmapLiveOptions struct {
+	Index               featureRadarIndex
+	IndexPath           string
+	ReferenceLimit      int
+	Limit               int
+	GitHubAPIURL        string
+	Token               string
+	MaxStarDrift        int
+	MaxPushedDriftHours int
+}
+
+func attachFeatureRoadmapLiveChecks(ctx context.Context, report *featureRoadmapReport, options featureRoadmapLiveOptions) {
+	summary := featureRoadmapLiveSummary{OK: true}
+	for index := range report.Items {
+		feature := options.Index.Features[report.Items[index].ID]
+		liveReport := buildFeatureLiveCheckReport(ctx, featureLiveCheckOptions{
+			Index:               options.Index,
+			IndexPath:           options.IndexPath,
+			Query:               feature.ID,
+			Feature:             feature,
+			References:          featureProjectReferences(options.Index, feature, options.ReferenceLimit),
+			GitHubAPIURL:        options.GitHubAPIURL,
+			Token:               options.Token,
+			MaxStarDrift:        options.MaxStarDrift,
+			MaxPushedDriftHours: options.MaxPushedDriftHours,
+		})
+		report.Items[index].LiveCheck = &liveReport
+		summary.CheckedCandidates++
+		summary.CheckedCount += liveReport.CheckedCount
+		if liveReport.OK {
+			continue
+		}
+		summary.OK = false
+		if liveReport.FailedCount > 0 {
+			summary.FailedCount += liveReport.FailedCount
+			summary.FailedCandidates++
+			report.Items[index].Gate = "live-failed"
+			report.Items[index].Reasons = append(report.Items[index].Reasons, fmt.Sprintf("live-check has %d failed reference(s)", liveReport.FailedCount))
+		}
+		if liveReport.RefreshCount > 0 {
+			summary.RefreshNeeded = true
+			summary.RefreshCount += liveReport.RefreshCount
+			summary.RefreshCandidates++
+			if liveReport.FailedCount == 0 {
+				report.Items[index].Gate = "needs-refresh"
+			}
+			report.Items[index].Reasons = append(report.Items[index].Reasons, fmt.Sprintf("live-check needs refresh for %d reference(s)", liveReport.RefreshCount))
+		}
+		if liveReport.FailedCount == 0 && liveReport.RefreshCount == 0 {
+			report.Items[index].Gate = "live-failed"
+			report.Items[index].Reasons = append(report.Items[index].Reasons, "live-check did not pass")
+		}
+	}
+	report.LiveCheck = &summary
+	report.Checks.LiveCheckOK = summary.OK
+	report.OK = report.OK && summary.OK
+	for index := range report.Items {
+		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, report.ReferenceGate.Required, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
+	}
+	sortFeatureRoadmapItems(report.Items)
+	report.Items = limitFeatureRoadmapItems(report.Items, options.Limit)
+	report.Count = len(report.Items)
+}
+
+func sortFeatureRoadmapItems(items []featureRoadmapItem) {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Gate != items[j].Gate {
-			return items[i].Gate == "passed"
+			return featureRoadmapGateRank(items[i].Gate) < featureRoadmapGateRank(items[j].Gate)
 		}
 		if items[i].ReadinessScore != items[j].ReadinessScore {
 			return items[i].ReadinessScore > items[j].ReadinessScore
@@ -2324,17 +2449,26 @@ func buildFeatureRoadmapReport(index featureRadarIndex, indexPath string, minRef
 		}
 		return items[i].ID < items[j].ID
 	})
+}
+
+func featureRoadmapGateRank(gate string) int {
+	switch gate {
+	case "passed":
+		return 0
+	case "needs-refresh":
+		return 1
+	case "live-failed":
+		return 2
+	default:
+		return 3
+	}
+}
+
+func limitFeatureRoadmapItems(items []featureRoadmapItem, limit int) []featureRoadmapItem {
 	if limit > 0 && limit < len(items) {
-		items = items[:limit]
+		return items[:limit]
 	}
-	return featureRoadmapReport{
-		OK:                coverage.OK,
-		Policy:            index.Policy,
-		SourceGeneratedAt: index.SourceGeneratedAt,
-		ReferenceGate:     coverage.ReferenceGate,
-		Count:             len(items),
-		Items:             items,
-	}
+	return items
 }
 
 func buildFeatureBacklogReport(index featureRadarIndex, indexPath string, minReferences int, limit int, referenceLimit int) featureBacklogReport {
@@ -2448,7 +2582,21 @@ func featureReadinessScore(references int, availableCommands int, implementation
 }
 
 func featurePlanCommand(featureID string, minReferences int, indexPath string) string {
-	return "agent-testbench research plan --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences) + " --format markdown"
+	return featurePlanCommandWithLiveCheck(featureID, minReferences, indexPath, false, 0, 0)
+}
+
+func featurePlanCommandWithLiveCheck(featureID string, minReferences int, indexPath string, liveCheck bool, maxStarDrift int, maxPushedDriftHours int) string {
+	command := "agent-testbench research plan --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences)
+	if liveCheck {
+		command += " --live-check"
+		if maxStarDrift > 0 {
+			command += fmt.Sprintf(" --max-star-drift %d", maxStarDrift)
+		}
+		if maxPushedDriftHours > 0 {
+			command += fmt.Sprintf(" --max-pushed-drift-hours %d", maxPushedDriftHours)
+		}
+	}
+	return command + " --format markdown"
 }
 
 func buildFeatureResearchPlan(index featureRadarIndex, indexPath string, feature featureRadarFeature, featureQuery string, limit int, requireMinMatches int) featureResearchPlanReport {
@@ -3675,9 +3823,15 @@ func printFeatureRefreshPlanReport(report featureRefreshPlanReport) {
 func printFeatureRoadmapReport(report featureRoadmapReport) {
 	fmt.Println("Research Roadmap")
 	fmt.Printf("Reference gate: %s required=%d passed=%d failed=%d\n", statusWord(report.OK), report.ReferenceGate.Required, report.ReferenceGate.Passed, report.ReferenceGate.Failed)
+	if report.LiveCheck != nil {
+		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
 	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
 	for _, item := range report.Items {
 		fmt.Printf("- %s (%s): %s score=%d references=%d commands=%d\n", item.Title, item.ID, item.Gate, item.ReadinessScore, item.References, item.AvailableCommands)
+		for _, reason := range item.Reasons {
+			fmt.Printf("  Reason: %s\n", reason)
+		}
 		if len(item.TopReferences) > 0 {
 			fmt.Printf("  Top reference: %s\n", item.TopReferences[0].FullName)
 		}

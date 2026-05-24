@@ -268,13 +268,20 @@ candidates:
   --min-references 3 \
   --limit 5 \
   --reference-limit 2 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --json
 ```
 
 `research roadmap` reuses the same feature coverage gate, then ranks features
 by enough references, catalog-verified next commands, implementation-facing
-commands, and reference star signal. It outputs a `planCommand` for each
-candidate so the next step can immediately become a reviewable `research plan`.
+commands, and reference star signal. Add `--live-check` to verify each
+candidate's selected references against current GitHub metadata before the final
+ranking; candidates with policy failures or refresh-needed drift are marked and
+ranked after live-passing candidates, and their `planCommand` keeps the same
+live-check flags. The command exits non-zero when the live roadmap shows stale
+or failing references so automation can refresh the radar before picking work.
 
 When the next slice should become an execution queue, use `research backlog`:
 
@@ -358,7 +365,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research coverage --min-references 3
 ./bin/agent-testbench.sh research matrix --filter "new cli capability" --limit 3
 ./bin/agent-testbench.sh research refresh-plan --min-references 3 --max-age-hours 72
-./bin/agent-testbench.sh research roadmap --min-references 3 --limit 5
+./bin/agent-testbench.sh research roadmap --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research backlog --min-references 3 --limit 5
 ./bin/agent-testbench.sh research gate \
   --feature "new cli capability" \

@@ -111,6 +111,9 @@ What to point out:
 - `agent-testbench research roadmap --min-references 3` ranks the next feature
   candidates by reference coverage, catalog-verified next commands, and star
   signal, then prints a ready-to-run `research plan` command for each item.
+- `agent-testbench research roadmap --min-references 3 --live-check`
+  verifies candidate references against live GitHub metadata before final
+  ranking, so stale or refresh-needed candidates do not lead the next CLI slice.
 - `agent-testbench research backlog --min-references 3` turns the roadmap into
   stateless prioritized tasks with references, implementation commands,
   verification commands, and acceptance criteria.
@@ -188,6 +191,8 @@ What to point out:
 - `agent-testbench research roadmap --min-references 3` 会按引用覆盖、命令目录已校验的
   next commands 和 star 信号排序下一批 feature 候选，并为每一项输出可直接执行的
   `research plan` 命令。
+- `agent-testbench research roadmap --min-references 3 --live-check`
+  会在最终排序前用 GitHub 实时 metadata 复核候选引用，让 stale 或需要 refresh 的候选不会排在下一轮 CLI 切片前面。
 - `agent-testbench research backlog --min-references 3` 会把 roadmap 转成无状态
   优先级任务，包含参考项目、实现命令、验证命令和验收条件。
 - `agent-testbench research plan --feature "case run" --require-min-matches 3`
