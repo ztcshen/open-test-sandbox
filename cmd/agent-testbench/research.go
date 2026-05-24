@@ -351,6 +351,25 @@ type featureSearchCandidate struct {
 	TopReferences []featureRadarMatch `json:"topReferences"`
 }
 
+type featureBriefReport struct {
+	OK                   bool                     `json:"ok"`
+	Query                string                   `json:"query"`
+	Selected             featureSearchCandidate   `json:"selected"`
+	Alternatives         []featureSearchCandidate `json:"alternatives,omitempty"`
+	Policy               featureRadarPolicy       `json:"policy"`
+	SourceGeneratedAt    string                   `json:"sourceGeneratedAt"`
+	Checks               featureGateChecks        `json:"checks"`
+	ReferenceGate        featureReferenceGate     `json:"referenceGate"`
+	CommandGate          featureCommandGate       `json:"commandGate"`
+	References           []featureRadarMatch      `json:"references"`
+	NextCommands         []featureNextCommand     `json:"nextCommands"`
+	PlanCommand          string                   `json:"planCommand"`
+	MatrixCommand        string                   `json:"matrixCommand"`
+	GateCommand          string                   `json:"gateCommand"`
+	VerificationCommands []string                 `json:"verificationCommands"`
+	Reasons              []string                 `json:"reasons,omitempty"`
+}
+
 func runResearch(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing research command")
@@ -362,6 +381,8 @@ func runResearch(args []string) error {
 		return runResearchFeatures(args[1:])
 	case "search":
 		return runResearchSearch(args[1:])
+	case "brief":
+		return runResearchBrief(args[1:])
 	case "plan":
 		return runResearchPlan(args[1:])
 	case "coverage":
@@ -496,6 +517,71 @@ func runResearchSearch(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(report)
 	}
 	printFeatureSearchReport(report)
+	return nil
+}
+
+func runResearchBrief(args []string) error {
+	flags := flag.NewFlagSet("research brief", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	query := flags.String("query", "", "Feature text to search and brief")
+	featureQuery := flags.String("feature", "", "Alias for --query")
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	minReferences := flags.Int("min-references", 3, "Require this many references for the selected feature")
+	requireCommand := flags.String("require-command", "", "Require a matching AgentTestBench command path")
+	maxAgeHours := flags.Int("max-age-hours", 72, "Fail when the feature index is older than this many hours")
+	nowValue := flags.String("now", "", "Override current time for deterministic checks (RFC3339)")
+	referenceLimit := flags.Int("reference-limit", 3, "Maximum selected feature references to include")
+	searchLimit := flags.Int("search-limit", 5, "Maximum candidate features to consider")
+	outputFormat := flags.String("format", "text", "Output format: text, json, or markdown")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON brief")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedQuery := researchFirstNonEmpty(*query, *featureQuery)
+	if strings.TrimSpace(resolvedQuery) == "" {
+		return errors.New("research brief requires --query TEXT")
+	}
+	resolvedIndexPath := strings.TrimSpace(*indexPath)
+	if resolvedIndexPath == "" {
+		resolvedIndexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if resolvedIndexPath == "" {
+		return fmt.Errorf("research brief requires --radar-index PATH or %s", featureRadarIndexEnv)
+	}
+	checkedAt, err := parseResearchStatusNow(*nowValue)
+	if err != nil {
+		return err
+	}
+	index, err := readFeatureRadarIndex(resolvedIndexPath)
+	if err != nil {
+		return err
+	}
+	if len(index.TokenIndex) == 0 {
+		return errors.New("research brief requires a radar index with non-empty tokenIndex; regenerate the feature index before creating a brief")
+	}
+	report, err := buildFeatureBriefReport(index, resolvedIndexPath, resolvedQuery, *minReferences, *requireCommand, *maxAgeHours, checkedAt, *searchLimit, *referenceLimit)
+	if err != nil {
+		return err
+	}
+	format := strings.ToLower(strings.TrimSpace(*outputFormat))
+	if *jsonOutput {
+		format = "json"
+	}
+	switch format {
+	case "", "text":
+		printFeatureBriefReport(report)
+	case "json":
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			return err
+		}
+	case "markdown", "md":
+		printFeatureBriefMarkdown(report)
+	default:
+		return fmt.Errorf("unsupported research brief format %q", *outputFormat)
+	}
+	if !report.OK {
+		return errors.New("feature research brief gate failed")
+	}
 	return nil
 }
 
@@ -1718,6 +1804,86 @@ func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query s
 	}
 }
 
+func buildFeatureBriefReport(index featureRadarIndex, indexPath string, query string, minReferences int, requireCommand string, maxAgeHours int, checkedAt time.Time, searchLimit int, referenceLimit int) (featureBriefReport, error) {
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	if searchLimit <= 0 {
+		searchLimit = 5
+	}
+	if referenceLimit <= 0 {
+		referenceLimit = 3
+	}
+	search := buildFeatureSearchReport(index, indexPath, query, searchLimit, referenceLimit, minReferences)
+	if len(search.Candidates) == 0 {
+		return featureBriefReport{}, fmt.Errorf("research brief found no feature candidates for %q", query)
+	}
+	selected := search.Candidates[0]
+	feature, err := featureRadarFeatureByID(index, selected.ID)
+	if err != nil {
+		return featureBriefReport{}, err
+	}
+	gate := buildFeatureGateReport(index, indexPath, feature, feature.ID, minReferences, requireCommand, maxAgeHours, checkedAt, referenceLimit)
+	report := featureBriefReport{
+		OK:                   gate.OK,
+		Query:                strings.TrimSpace(query),
+		Selected:             selected,
+		Alternatives:         remainingFeatureSearchCandidates(search.Candidates),
+		Policy:               index.Policy,
+		SourceGeneratedAt:    index.SourceGeneratedAt,
+		Checks:               gate.Checks,
+		ReferenceGate:        gate.ReferenceGate,
+		CommandGate:          gate.CommandGate,
+		References:           gate.References,
+		NextCommands:         gate.NextCommands,
+		PlanCommand:          selected.PlanCommand,
+		MatrixCommand:        featureMatrixCommand(feature.ID, referenceLimit, indexPath),
+		GateCommand:          featureGateCommand(feature.ID, minReferences, requireCommand, maxAgeHours, indexPath),
+		VerificationCommands: featureBriefVerificationCommands(query, selected.PlanCommand, feature.ID, minReferences, requireCommand, maxAgeHours, referenceLimit, indexPath, gate.NextCommands),
+		Reasons:              gate.Reasons,
+	}
+	return report, nil
+}
+
+func remainingFeatureSearchCandidates(candidates []featureSearchCandidate) []featureSearchCandidate {
+	if len(candidates) <= 1 {
+		return nil
+	}
+	return candidates[1:]
+}
+
+func featureMatrixCommand(featureID string, limit int, indexPath string) string {
+	if limit <= 0 {
+		limit = 3
+	}
+	return fmt.Sprintf("agent-testbench research matrix --filter %s%s --limit %d --json", quoteCommandValue(featureID), featureRadarIndexFlag(indexPath), limit)
+}
+
+func featureGateCommand(featureID string, minReferences int, requireCommand string, maxAgeHours int, indexPath string) string {
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	if maxAgeHours <= 0 {
+		maxAgeHours = 72
+	}
+	return "agent-testbench research gate --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences) + featureRequireCommandFlag(requireCommand) + fmt.Sprintf(" --max-age-hours %d --json", maxAgeHours)
+}
+
+func featureBriefVerificationCommands(query string, planCommand string, featureID string, minReferences int, requireCommand string, maxAgeHours int, referenceLimit int, indexPath string, nextCommands []featureNextCommand) []string {
+	commands := []string{
+		"agent-testbench research search --query " + quoteCommandValue(query) + featureRadarIndexFlag(indexPath) + featureMinReferencesFlag(minReferences) + " --json",
+		featureMatrixCommand(featureID, referenceLimit, indexPath),
+		featureGateCommand(featureID, minReferences, requireCommand, maxAgeHours, indexPath),
+		planCommand,
+	}
+	for _, item := range nextCommands {
+		if item.Available {
+			commands = append(commands, item.Command)
+		}
+	}
+	return uniquePreserveOrder(commands)
+}
+
 func featureSearchTokenScore(token string, normalizedQuery string, queryTerms []string) int {
 	token = normalizeFeatureRadarText(token)
 	if token == "" || normalizedQuery == "" {
@@ -1761,6 +1927,19 @@ func uniqueSortedStrings(values []string) []string {
 		out = append(out, value)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func uniquePreserveOrder(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
 	return out
 }
 
@@ -1951,6 +2130,13 @@ func featureRequireMinFlag(value int) string {
 	return fmt.Sprintf(" --require-min-matches %d", value)
 }
 
+func featureMinReferencesFlag(value int) string {
+	if value <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" --min-references %d", value)
+}
+
 func quoteCommandValue(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -2071,6 +2257,40 @@ func printFeatureSearchReport(report featureSearchReport) {
 		if len(candidate.TopReferences) > 0 {
 			fmt.Printf("  Top reference: %s\n", candidate.TopReferences[0].FullName)
 		}
+	}
+}
+
+func printFeatureBriefReport(report featureBriefReport) {
+	fmt.Println("Research Brief")
+	fmt.Printf("Query: %s\n", report.Query)
+	fmt.Printf("Selected: %s (%s)\n", report.Selected.Title, report.Selected.ID)
+	fmt.Printf("Checks: fresh=%s audit=%s references=%s command=%s\n", statusWord(report.Checks.Fresh), statusWord(report.Checks.AuditOK), statusWord(report.Checks.ReferenceGateOK), statusWord(report.Checks.CommandGateOK))
+	fmt.Printf("Reference gate: %s required=%d found=%d\n", statusWord(report.ReferenceGate.OK), report.ReferenceGate.Required, report.ReferenceGate.Found)
+	matched := report.CommandGate.Matched.CatalogCommand
+	if matched == "" {
+		matched = "-"
+	}
+	fmt.Printf("Command gate: %s required=%s matched=%s\n", statusWord(report.CommandGate.OK), report.CommandGate.Required, matched)
+	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
+	if report.SourceGeneratedAt != "" {
+		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
+	}
+	if len(report.Reasons) > 0 {
+		fmt.Println("Reasons:")
+		for _, reason := range report.Reasons {
+			fmt.Printf("- %s\n", reason)
+		}
+	}
+	fmt.Println("References:")
+	for _, match := range report.References {
+		fmt.Printf("- %s (%d stars, pushed %s)\n", match.FullName, match.Stars, shortDate(match.PushedAt))
+	}
+	fmt.Printf("Plan: %s\n", report.PlanCommand)
+	fmt.Printf("Matrix: %s\n", report.MatrixCommand)
+	fmt.Printf("Gate: %s\n", report.GateCommand)
+	fmt.Println("Verification commands:")
+	for _, command := range report.VerificationCommands {
+		fmt.Printf("- %s\n", command)
 	}
 }
 
@@ -2297,6 +2517,45 @@ func printFeatureResearchPlanMarkdown(report featureResearchPlanReport) {
 			fmt.Printf("  - %s\n", command.Purpose)
 		}
 	}
+	fmt.Println()
+	fmt.Println("## Verification Commands")
+	fmt.Println()
+	for _, command := range report.VerificationCommands {
+		fmt.Printf("- `%s`\n", command)
+	}
+}
+
+func printFeatureBriefMarkdown(report featureBriefReport) {
+	fmt.Printf("# Research Brief: %s\n\n", report.Selected.Title)
+	if report.Selected.Intent != "" {
+		fmt.Printf("%s\n\n", report.Selected.Intent)
+	}
+	fmt.Printf("Query: `%s`\n\n", report.Query)
+	fmt.Println("## Gates")
+	fmt.Println()
+	fmt.Println("| Gate | Status | Detail |")
+	fmt.Println("| --- | --- | --- |")
+	fmt.Printf("| Freshness | %s | generated `%s` |\n", statusWord(report.Checks.Fresh), report.SourceGeneratedAt)
+	fmt.Printf("| Audit | %s | policy stars >= %d, pushed >= %s |\n", statusWord(report.Checks.AuditOK), report.Policy.MinStars, report.Policy.PushedAfter)
+	fmt.Printf("| References | %s | required %d, found %d |\n", statusWord(report.ReferenceGate.OK), report.ReferenceGate.Required, report.ReferenceGate.Found)
+	fmt.Printf("| Command | %s | required `%s` |\n\n", statusWord(report.CommandGate.OK), report.CommandGate.Required)
+	fmt.Println("## References")
+	fmt.Println()
+	fmt.Println("| Project | Stars | Pushed | Score |")
+	fmt.Println("| --- | ---: | --- | ---: |")
+	for _, match := range report.References {
+		project := match.FullName
+		if match.URL != "" {
+			project = "[" + match.FullName + "](" + match.URL + ")"
+		}
+		fmt.Printf("| %s | %d | %s | %d |\n", project, match.Stars, shortDate(match.PushedAt), match.FeatureScore)
+	}
+	fmt.Println()
+	fmt.Println("## Commands")
+	fmt.Println()
+	fmt.Printf("- Plan: `%s`\n", report.PlanCommand)
+	fmt.Printf("- Matrix: `%s`\n", report.MatrixCommand)
+	fmt.Printf("- Gate: `%s`\n", report.GateCommand)
 	fmt.Println()
 	fmt.Println("## Verification Commands")
 	fmt.Println()

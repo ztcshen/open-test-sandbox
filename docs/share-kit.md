@@ -70,6 +70,10 @@ What to point out:
   bundling crawler data into core. Its `nextCommands` field then points the
   demo or implementation back to runnable AgentTestBench CLI surfaces and marks
   whether each recommendation still exists in the current command catalog.
+- `agent-testbench research brief --query "quality gate" --min-references 3`
+  turns fuzzy feature wording into a reviewable pre-design brief: selected
+  feature, freshness/audit/reference/command gates, top references, and
+  copyable `search`, `matrix`, `gate`, and `plan` commands.
 - `agent-testbench research status --max-age-hours 72` checks whether the
   external feature index is fresh enough to trust, reports feature/reference
   and project-index counts, and prints the refresh, audit, coverage, and index
@@ -131,6 +135,10 @@ What to point out:
   会读取外部 GitHub Feature Radar 索引，让新的 CLI 能力先对标近期活跃且
   3K+ star 的开源项目，但核心仓库不内置爬虫数据；返回的 `nextCommands`
   会继续指向可执行的 AgentTestBench CLI 验证入口，并标记推荐命令是否仍存在于当前命令目录。
+- `agent-testbench research brief --query "quality gate" --min-references 3`
+  会把模糊 feature 描述整理成可评审的设计前置 brief：选中的 feature、新鲜度、
+  审计、引用数与命令门禁、top references，以及可复制的 `search`、`matrix`、
+  `gate` 和 `plan` 命令。
 - `agent-testbench research status --max-age-hours 72` 会先检查外部 feature
   index 是否足够新鲜可信，报告 feature/reference 与项目索引数量；如果过期，
   会打印 refresh、audit、coverage 和 index 的恢复命令。

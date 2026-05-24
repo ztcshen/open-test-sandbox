@@ -49,6 +49,12 @@ List the available feature index before choosing the next CLI slice:
   --limit 5 \
   --json
 
+./bin/agent-testbench.sh research brief \
+  --radar-index $RADAR_HOME/data/feature-index.json \
+  --query "quality gate" \
+  --min-references 3 \
+  --format markdown
+
 ./bin/agent-testbench.sh research features \
   --radar-index $RADAR_HOME/data/feature-index.json \
   --filter "gate" \
@@ -60,6 +66,13 @@ token index to rank candidate features for a query, reports matched tokens,
 reference counts, top recent 3K+ star references, and a copyable
 `research plan` command for each candidate. Use it when the feature wording is
 still fuzzy and several maintained feature records may apply.
+
+`research brief` is the one-shot pre-design runbook. It starts from a fuzzy
+query, selects the highest-ranked feature candidate, runs the same freshness,
+audit, reference, and optional command-path gates used by `research gate`, then
+returns the selected references plus copyable `search`, `matrix`, `gate`, and
+`plan` commands. Use it before changing a CLI capability so the implementation
+starts from the maintained feature radar instead of ad hoc repository lookup.
 
 `research features` returns the feature id, title, intent, aliases, reference
 count, and ranked reference projects. Use it as the local feature-search entry
@@ -252,6 +265,7 @@ Recommended pre-design gate:
 ```sh
 ./bin/agent-testbench.sh research features --filter "new cli capability"
 ./bin/agent-testbench.sh research search --query "new cli capability" --limit 5
+./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --format markdown
 ./bin/agent-testbench.sh research status --max-age-hours 72
 ./bin/agent-testbench.sh research audit --min-references 3
 ./bin/agent-testbench.sh research coverage --min-references 3
