@@ -10437,9 +10437,13 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	}
 	caseRunByID := map[string]store.APICaseRun{}
 	caseRunsByCase := map[string][]store.APICaseRun{}
+	caseRunsByStep := map[string][]store.APICaseRun{}
 	for _, item := range caseRuns {
 		caseRunByID[item.ID] = item
 		caseRunsByCase[item.CaseID] = append(caseRunsByCase[item.CaseID], item)
+		if stepID := apiCaseRunStepID(item); stepID != "" {
+			caseRunsByStep[stepID] = append(caseRunsByStep[stepID], item)
+		}
 	}
 	evidenceCountByCaseRun := map[string]int{}
 	for _, record := range evidence {
@@ -10461,7 +10465,7 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	report.Counts.Steps = len(steps)
 	report.Counts.CaseRuns = len(caseRuns)
 	for _, rawStep := range steps {
-		step := workflowGateStepFrom(rawStep, caseRunByID, caseRunsByCase, evidenceCountByCaseRun)
+		step := workflowGateStepFrom(rawStep, caseRunByID, caseRunsByStep, caseRunsByCase, evidenceCountByCaseRun)
 		switch {
 		case strings.EqualFold(step.Status, store.StatusPassed):
 			report.Counts.PassedSteps++
@@ -10504,7 +10508,7 @@ func workflowGateSteps(summaryJSON string) []map[string]any {
 	return out
 }
 
-func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APICaseRun, caseRunsByCase map[string][]store.APICaseRun, evidenceCountByCaseRun map[string]int) workflowGateStep {
+func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APICaseRun, caseRunsByStep map[string][]store.APICaseRun, caseRunsByCase map[string][]store.APICaseRun, evidenceCountByCaseRun map[string]int) workflowGateStep {
 	out := workflowGateStep{
 		StepID:    firstNonEmpty(valueString(step["stepId"]), valueString(step["id"])),
 		CaseID:    valueString(step["caseId"]),
@@ -10517,9 +10521,17 @@ func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APIC
 			out.Status = firstNonEmpty(out.Status, item.Status)
 		}
 	}
+	if out.CaseRunID == "" && out.StepID != "" {
+		if items := caseRunsByStep[out.StepID]; len(items) == 1 {
+			item := items[0]
+			out.CaseID = firstNonEmpty(out.CaseID, item.CaseID)
+			out.CaseRunID = item.ID
+			out.Status = firstNonEmpty(out.Status, item.Status)
+		}
+	}
 	if out.CaseRunID == "" && out.CaseID != "" {
-		if items := caseRunsByCase[out.CaseID]; len(items) > 0 {
-			item := items[len(items)-1]
+		if items := caseRunsByCase[out.CaseID]; len(items) == 1 {
+			item := items[0]
 			out.CaseRunID = item.ID
 			out.Status = firstNonEmpty(out.Status, item.Status)
 		}
@@ -10531,20 +10543,24 @@ func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APIC
 	return out
 }
 
+func apiCaseRunStepID(item store.APICaseRun) string {
+	return strings.TrimSpace(valueString(jsonObjectString(item.RequestSummaryJSON)["stepId"]))
+}
+
 func workflowGateNextActions(report workflowGateReport, options workflowGateOptions) []string {
 	actions := []string{}
 	if !report.Gates.StepsPresent {
-		return []string{"agent-testbench workflow run --run " + report.RunID + " --json"}
+		return []string{"agent-testbench workflow run --run " + quoteCommandValue(report.RunID) + " --json"}
 	}
 	for index, item := range report.FailedSteps {
 		if index >= 3 {
 			break
 		}
 		if item.StepID != "" {
-			actions = append(actions, "agent-testbench workflow step --run "+report.RunID+" --step "+item.StepID+" --json")
+			actions = append(actions, "agent-testbench workflow step --run "+quoteCommandValue(report.RunID)+" --step "+quoteCommandValue(item.StepID)+" --json")
 		}
 		if item.CaseRunID != "" {
-			actions = append(actions, "agent-testbench case diagnose --case-run "+item.CaseRunID+" --json")
+			actions = append(actions, "agent-testbench case diagnose --case-run "+quoteCommandValue(item.CaseRunID)+" --json")
 		}
 	}
 	if options.RequireEvidence {
@@ -10553,7 +10569,7 @@ func workflowGateNextActions(report workflowGateReport, options workflowGateOpti
 				break
 			}
 			if item.CaseRunID != "" {
-				actions = append(actions, "agent-testbench case evidence --case-run "+item.CaseRunID+" --json")
+				actions = append(actions, "agent-testbench case evidence --case-run "+quoteCommandValue(item.CaseRunID)+" --json")
 			}
 		}
 	}

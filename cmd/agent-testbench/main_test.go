@@ -775,7 +775,7 @@ func TestResearchRefreshPlanPrioritizesStaleCoverageAndAuditSignals(t *testing.T
 	if len(report.FocusFeatures) == 0 || report.FocusFeatures[0].ID != "workflow-orchestration" || report.FocusFeatures[0].References != 1 || report.FocusFeatures[0].Gate != "failed" {
 		t.Fatalf("focus features = %#v", report.FocusFeatures)
 	}
-	if !stringSliceContains(report.FocusFeatures[0].Reasons, "reference coverage below 3") || !strings.Contains(report.FocusFeatures[0].MatrixCommand, "research matrix --filter \"workflow-orchestration\"") || !strings.Contains(report.FocusFeatures[0].PlanCommand, "research plan --feature \"workflow-orchestration\"") || !strings.Contains(report.FocusFeatures[0].RefreshCommand, "npm run refresh") {
+	if !stringSliceContains(report.FocusFeatures[0].Reasons, "reference coverage below 3") || !strings.Contains(report.FocusFeatures[0].MatrixCommand, "research matrix --filter 'workflow-orchestration'"+featureRadarIndexFlag(indexPath)) || !strings.Contains(report.FocusFeatures[0].PlanCommand, "research plan --feature 'workflow-orchestration'"+featureRadarIndexFlag(indexPath)) || !strings.Contains(report.FocusFeatures[0].RefreshCommand, "npm run refresh") {
 		t.Fatalf("focus feature commands = %#v", report.FocusFeatures[0])
 	}
 	if len(report.NextCommands) < 5 || !strings.Contains(report.NextCommands[0], "npm run refresh") || !strings.Contains(report.NextCommands[1], "npm run status -- --max-age-hours 72 --min-references 3") || !strings.Contains(report.NextCommands[2], "npm run audit") || !strings.Contains(report.NextCommands[3], "npm run coverage -- --min-references 3") || !strings.Contains(report.NextCommands[4], "npm run index") {
@@ -921,6 +921,23 @@ func TestFeatureRadarRefreshCommandsQuoteShellPaths(t *testing.T) {
 	commands = featureRadarRefreshCommands("/tmp/radar-work/data/feature-index.json")
 	if !strings.HasPrefix(commands[0], "cd /tmp/radar-work && npm run refresh") {
 		t.Fatalf("safe refresh command should stay readable: %q", commands[0])
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("user home: %v", err)
+	}
+	commands = featureRadarRefreshCommands("~/github-feature-radar/data/feature-index.json")
+	if !strings.HasPrefix(commands[0], "cd "+quoteShellPath(filepath.Join(home, "github-feature-radar"))+" && npm run refresh") {
+		t.Fatalf("tilde refresh command should expand home before quoting: %q", commands[0])
+	}
+}
+
+func TestQuoteCommandValueEscapesShellMetacharacters(t *testing.T) {
+	got := quoteCommandValue("case $(touch nope) 'quoted' $HOME")
+	want := `'case $(touch nope) '\''quoted'\'' $HOME'`
+	if got != want {
+		t.Fatalf("quoteCommandValue() = %q, want %q", got, want)
 	}
 }
 
@@ -1170,7 +1187,7 @@ func TestResearchRoadmapRanksActionableFeatureCandidates(t *testing.T) {
 	if len(report.Items[0].TopReferences) != 1 || report.Items[0].TopReferences[0].FullName != "aquasecurity/trivy" {
 		t.Fatalf("roadmap top references = %#v", report.Items[0].TopReferences)
 	}
-	if !strings.Contains(report.Items[0].PlanCommand, "agent-testbench research plan --feature \"quality-gates\" --require-min-matches 2") {
+	if !strings.Contains(report.Items[0].PlanCommand, "agent-testbench research plan --feature 'quality-gates'"+featureRadarIndexFlag(indexPath)+" --require-min-matches 2") {
 		t.Fatalf("plan command = %q", report.Items[0].PlanCommand)
 	}
 	if len(report.Items[0].NextCommands) != 2 || !report.Items[0].NextCommands[0].Available || report.Items[0].NextCommands[0].CatalogCommand != "case gate" {
@@ -1256,10 +1273,10 @@ func TestResearchBacklogTurnsRoadmapIntoImplementationTasks(t *testing.T) {
 	if len(report.Items) != 2 || report.Items[0].TaskID != "research-backlog-001-quality-gates" || report.Items[0].Priority != 1 || report.Items[0].FeatureID != "quality-gates" || report.Items[0].Status != "ready" {
 		t.Fatalf("first backlog item = %#v", report.Items)
 	}
-	if !strings.Contains(report.Items[0].PlanCommand, "agent-testbench research plan --feature \"quality-gates\" --require-min-matches 2") {
+	if !strings.Contains(report.Items[0].PlanCommand, "agent-testbench research plan --feature 'quality-gates'"+featureRadarIndexFlag(indexPath)+" --require-min-matches 2") {
 		t.Fatalf("plan command = %q", report.Items[0].PlanCommand)
 	}
-	if len(report.Items[0].VerificationCommands) < 2 || !strings.Contains(report.Items[0].VerificationCommands[0], "agent-testbench research coverage --min-references 2 --json") || !strings.Contains(report.Items[0].VerificationCommands[1], "agent-testbench research plan --feature \"quality-gates\"") {
+	if len(report.Items[0].VerificationCommands) < 2 || !strings.Contains(report.Items[0].VerificationCommands[0], "agent-testbench research coverage"+featureRadarIndexFlag(indexPath)+" --min-references 2 --json") || !strings.Contains(report.Items[0].VerificationCommands[1], "agent-testbench research plan --feature 'quality-gates'"+featureRadarIndexFlag(indexPath)) {
 		t.Fatalf("verification commands = %#v", report.Items[0].VerificationCommands)
 	}
 	if len(report.Items[0].AcceptanceCriteria) < 3 || !strings.Contains(strings.Join(report.Items[0].AcceptanceCriteria, "\n"), "reference gate passes") {
@@ -1351,7 +1368,7 @@ func TestResearchPlanConnectsFeatureReferencesToVerificationCommands(t *testing.
 		t.Fatalf("next commands = %#v", report.NextCommands)
 	}
 	joinedVerification := strings.Join(report.VerificationCommands, "\n")
-	if !strings.Contains(joinedVerification, "agent-testbench research feature --feature \"case run\"") || !strings.Contains(joinedVerification, "agent-testbench case run --case PATH") {
+	if !strings.Contains(joinedVerification, "agent-testbench research feature --feature 'case run'"+featureRadarIndexFlag(indexPath)) || !strings.Contains(joinedVerification, "agent-testbench case run --case PATH") {
 		t.Fatalf("verification commands = %#v", report.VerificationCommands)
 	}
 
@@ -1375,6 +1392,49 @@ func TestResearchPlanConnectsFeatureReferencesToVerificationCommands(t *testing.
 		if !strings.Contains(markdownOut, want) {
 			t.Fatalf("markdown research plan output missing %q:\n%s", want, markdownOut)
 		}
+	}
+}
+
+func TestResearchPlanGeneratedCommandsIncludeRadarIndex(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "radar index $HOME")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("make radar dir: %v", err)
+	}
+	indexPath := filepath.Join(dir, "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"tokenIndex": map[string]any{
+			"case run": []string{"api-test-runner"},
+		},
+		"features": map[string]any{
+			"api-test-runner": map[string]any{
+				"id":    "api-test-runner",
+				"title": "API Test Runner",
+				"topMatches": []map[string]any{
+					{"fullName": "microsoft/playwright", "url": "https://github.com/microsoft/playwright", "stars": 89295, "pushedAt": "2026-05-24T01:19:02Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t, "research", "plan", "--feature", "case run", "--radar-index", indexPath, "--require-min-matches", "1", "--json")
+	var report struct {
+		VerificationCommands []string `json:"verificationCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode research plan json: %v\n%s", err, out)
+	}
+	joined := strings.Join(report.VerificationCommands, "\n")
+	wantIndex := "--radar-index " + quoteCommandValue(indexPath)
+	if !strings.Contains(joined, wantIndex) {
+		t.Fatalf("verification commands should carry radar index %q:\n%s", wantIndex, joined)
+	}
+	if strings.Contains(joined, "$HOME --json") || strings.Contains(joined, "\""+indexPath+"\"") {
+		t.Fatalf("verification commands should shell-quote the radar index safely:\n%s", joined)
 	}
 }
 
@@ -1473,7 +1533,7 @@ func TestResearchGateApprovesFreshAuditedFeatureWithRequiredCommand(t *testing.T
 		t.Fatalf("references = %#v", report.References)
 	}
 	joinedVerification := strings.Join(report.VerificationCommands, "\n")
-	if !strings.Contains(joinedVerification, "agent-testbench research refresh-plan --require-ready") || !strings.Contains(joinedVerification, "agent-testbench workflow report --workflow ID") {
+	if !strings.Contains(joinedVerification, "agent-testbench research refresh-plan"+featureRadarIndexFlag(indexPath)+" --require-ready") || !strings.Contains(joinedVerification, "agent-testbench workflow report --workflow ID") {
 		t.Fatalf("verification commands = %#v", report.VerificationCommands)
 	}
 
@@ -8893,8 +8953,173 @@ func TestWorkflowGateFailsWithFailedStepAndActionableReport(t *testing.T) {
 		t.Fatalf("workflow gate failed steps = %#v", report.FailedSteps)
 	}
 	next := strings.Join(report.NextActions, "\n")
-	if !strings.Contains(next, "agent-testbench workflow step --run "+runID+" --step step.submit") || !strings.Contains(next, "agent-testbench case diagnose --case-run run.workflow-gate.submit") {
+	if !strings.Contains(next, "agent-testbench workflow step --run "+quoteCommandValue(runID)+" --step 'step.submit'") || !strings.Contains(next, "agent-testbench case diagnose --case-run 'run.workflow-gate.submit'") {
 		t.Fatalf("workflow gate next actions = %#v", report.NextActions)
+	}
+}
+
+func TestWorkflowGateCorrelatesCaseRunByStepIDWhenCaseIDRepeats(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	started := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
+	runID := "run.workflow-gate-duplicate-case"
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:           runID,
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.duplicate-case",
+		Status:       store.StatusFailed,
+		EvidenceRoot: filepath.Join(dir, "evidence", runID),
+		SummaryJSON: `{
+			"steps":[
+				{"stepId":"step.prepare","caseId":"case.shared","status":"passed"},
+				{"stepId":"step.submit","caseId":"case.shared","status":"failed"}
+			]
+		}`,
+		StartedAt:  started,
+		FinishedAt: started.Add(2 * time.Second),
+		CreatedAt:  started,
+		UpdatedAt:  started.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for _, item := range []struct {
+		id     string
+		stepID string
+		status string
+	}{
+		{id: "z.prepare.case", stepID: "step.prepare", status: store.StatusPassed},
+		{id: "a.submit.case", stepID: "step.submit", status: store.StatusFailed},
+	} {
+		if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+			ID:                   item.id,
+			RunID:                runID,
+			CaseID:               "case.shared",
+			Status:               item.status,
+			RequestSummaryJSON:   `{"method":"POST","path":"/workflow","stepId":"` + item.stepID + `"}`,
+			AssertionSummaryJSON: `{"status":"` + item.status + `"}`,
+			StartedAt:            started,
+			FinishedAt:           started.Add(time.Second),
+			CreatedAt:            started,
+		}); err != nil {
+			t.Fatalf("record case run %s: %v", item.id, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLIFails(t, "workflow", "gate", "--store", "sqlite://"+storePath, "--run", runID, "--require-passed", "--require-steps", "--json")
+	var report struct {
+		FailedSteps []struct {
+			StepID    string `json:"stepId"`
+			CaseRunID string `json:"caseRunId"`
+		} `json:"failedSteps"`
+		NextActions []string `json:"nextActions"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode workflow gate json: %v\n%s", err, out)
+	}
+	if len(report.FailedSteps) != 1 || report.FailedSteps[0].StepID != "step.submit" || report.FailedSteps[0].CaseRunID != "a.submit.case" {
+		t.Fatalf("workflow gate should select case run by step id, got %#v", report.FailedSteps)
+	}
+	next := strings.Join(report.NextActions, "\n")
+	if !strings.Contains(next, "agent-testbench case diagnose --case-run 'a.submit.case' --json") {
+		t.Fatalf("workflow gate next actions should use step-correlated case run: %#v", report.NextActions)
+	}
+}
+
+func TestWorkflowGateDoesNotPickArbitraryCaseRunWhenCaseIDIsAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	started := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
+	runID := "run.workflow-gate-ambiguous-case"
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         runID,
+		ProfileID:  "sample",
+		WorkflowID: "workflow.ambiguous-case",
+		Status:     store.StatusFailed,
+		SummaryJSON: `{
+			"steps":[{"stepId":"step.submit","caseId":"case.shared","status":"failed"}]
+		}`,
+		StartedAt:  started,
+		FinishedAt: started.Add(2 * time.Second),
+		CreatedAt:  started,
+		UpdatedAt:  started.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	for _, id := range []string{"a.first.case", "z.second.case"} {
+		if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+			ID:                   id,
+			RunID:                runID,
+			CaseID:               "case.shared",
+			Status:               store.StatusPassed,
+			RequestSummaryJSON:   `{"method":"POST","path":"/workflow"}`,
+			AssertionSummaryJSON: `{"status":"passed"}`,
+			StartedAt:            started,
+			FinishedAt:           started.Add(time.Second),
+			CreatedAt:            started,
+		}); err != nil {
+			t.Fatalf("record case run %s: %v", id, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLIFails(t, "workflow", "gate", "--store", "sqlite://"+storePath, "--run", runID, "--require-passed", "--require-steps", "--json")
+	var report struct {
+		FailedSteps []struct {
+			CaseRunID string `json:"caseRunId"`
+			Status    string `json:"status"`
+		} `json:"failedSteps"`
+		NextActions []string `json:"nextActions"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode workflow gate json: %v\n%s", err, out)
+	}
+	if len(report.FailedSteps) != 1 || report.FailedSteps[0].CaseRunID != "" || report.FailedSteps[0].Status != store.StatusFailed {
+		t.Fatalf("workflow gate should leave ambiguous case run unresolved, got %#v", report.FailedSteps)
+	}
+	if strings.Contains(strings.Join(report.NextActions, "\n"), "--case-run") {
+		t.Fatalf("workflow gate should not emit case-run actions for ambiguous case selection: %#v", report.NextActions)
+	}
+}
+
+func TestWorkflowGateNextActionsQuoteDynamicIDs(t *testing.T) {
+	report := workflowGateReport{
+		RunID: "run $(touch nope)",
+		Gates: workflowGateGates{
+			StepsPresent: true,
+		},
+		FailedSteps: []workflowGateStep{
+			{StepID: "step 'submit'", CaseRunID: "case-run $HOME"},
+		},
+		MissingEvidence: []workflowGateStep{
+			{CaseRunID: "case-run `uname`"},
+		},
+	}
+
+	actions := workflowGateNextActions(report, workflowGateOptions{RequireEvidence: true})
+	joined := strings.Join(actions, "\n")
+	for _, want := range []string{
+		"--run 'run $(touch nope)' --step 'step '\\''submit'\\''' --json",
+		"--case-run 'case-run $HOME' --json",
+		"--case-run 'case-run `uname`' --json",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("workflow gate action missing %q:\n%s", want, joined)
+		}
 	}
 }
 

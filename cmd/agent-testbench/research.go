@@ -637,7 +637,7 @@ func runResearchRoadmap(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildFeatureRoadmapReport(index, *minReferences, *limit, *referenceLimit)
+	report := buildFeatureRoadmapReport(index, resolvedIndexPath, *minReferences, *limit, *referenceLimit)
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
@@ -667,7 +667,7 @@ func runResearchBacklog(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildFeatureBacklogReport(index, *minReferences, *limit, *referenceLimit)
+	report := buildFeatureBacklogReport(index, resolvedIndexPath, *minReferences, *limit, *referenceLimit)
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
@@ -705,7 +705,7 @@ func runResearchPlan(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildFeatureResearchPlan(index, feature, *featureQuery, *limit, *requireMinMatches)
+	report := buildFeatureResearchPlan(index, resolvedIndexPath, feature, *featureQuery, *limit, *requireMinMatches)
 	if *requireMinMatches > 0 && !report.ReferenceGate.OK {
 		return fmt.Errorf("feature %q requires at least %d reference projects, found %d", feature.ID, *requireMinMatches, len(feature.TopMatches))
 	}
@@ -1085,7 +1085,7 @@ func buildFeatureRefreshPlanReport(index featureRadarIndex, indexPath string, mi
 		report.Reasons = append(report.Reasons, fmt.Sprintf("coverage has %d feature(s) below %d references", coverage.ReferenceGate.Failed, minReferences))
 	}
 	report.NeedsRefresh = len(report.Reasons) > 0
-	report.FocusFeatures = buildFeatureRefreshFocus(index, coverage, audit, minReferences, limit, firstFeatureRefreshCommand(nextCommands))
+	report.FocusFeatures = buildFeatureRefreshFocus(index, indexPath, coverage, audit, minReferences, limit, firstFeatureRefreshCommand(nextCommands))
 	return report
 }
 
@@ -1106,7 +1106,7 @@ func countProjectAuditViolations(violations []featureAuditViolation) int {
 	return count
 }
 
-func buildFeatureRefreshFocus(index featureRadarIndex, coverage featureCoverageReport, audit featureAuditReport, minReferences int, limit int, refreshCommand string) []featureRefreshFocus {
+func buildFeatureRefreshFocus(index featureRadarIndex, indexPath string, coverage featureCoverageReport, audit featureAuditReport, minReferences int, limit int, refreshCommand string) []featureRefreshFocus {
 	violationsByFeature := map[string]int{}
 	for _, violation := range audit.Violations {
 		if violation.FeatureID == "" || violation.FeatureID == "project-index" {
@@ -1132,8 +1132,8 @@ func buildFeatureRefreshFocus(index featureRadarIndex, coverage featureCoverageR
 			References:      feature.References,
 			Gate:            feature.Gate,
 			Reasons:         reasons,
-			MatrixCommand:   "agent-testbench research matrix --filter " + quoteCommandValue(feature.ID) + " --limit 3 --json",
-			PlanCommand:     featurePlanCommand(feature.ID, minReferences),
+			MatrixCommand:   "agent-testbench research matrix --filter " + quoteCommandValue(feature.ID) + featureRadarIndexFlag(indexPath) + " --limit 3 --json",
+			PlanCommand:     featurePlanCommand(feature.ID, minReferences, indexPath),
 			RefreshCommand:  refreshCommand,
 			TopProjectNames: featureRefreshProjectNames(index.Features[feature.ID].TopMatches),
 		})
@@ -1208,13 +1208,28 @@ func featureRadarRefreshCommands(indexPath string) []string {
 }
 
 func quoteShellPath(path string) string {
+	path = expandUserHomePath(strings.TrimSpace(path))
 	if path == "" {
 		return "."
 	}
 	if shellPathNeedsQuoting(path) {
-		return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+		return quoteShellValue(path)
 	}
 	return path
+}
+
+func expandUserHomePath(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~/"))
 }
 
 func shellPathNeedsQuoting(path string) bool {
@@ -1238,7 +1253,7 @@ func shellPathNeedsQuoting(path string) bool {
 	return false
 }
 
-func buildFeatureRoadmapReport(index featureRadarIndex, minReferences int, limit int, referenceLimit int) featureRoadmapReport {
+func buildFeatureRoadmapReport(index featureRadarIndex, indexPath string, minReferences int, limit int, referenceLimit int) featureRoadmapReport {
 	coverage := buildFeatureCoverageReport(index, minReferences, referenceLimit)
 	items := make([]featureRoadmapItem, 0, len(coverage.Features))
 	for _, feature := range coverage.Features {
@@ -1255,7 +1270,7 @@ func buildFeatureRoadmapReport(index featureRadarIndex, minReferences int, limit
 			AvailableCommands:      availableCommands,
 			ImplementationCommands: implementationCommands,
 			TotalStars:             totalStars,
-			PlanCommand:            featurePlanCommand(feature.ID, coverage.ReferenceGate.Required),
+			PlanCommand:            featurePlanCommand(feature.ID, coverage.ReferenceGate.Required, indexPath),
 			TopReferences:          feature.TopReferences,
 			NextCommands:           nextCommands,
 		}
@@ -1289,8 +1304,8 @@ func buildFeatureRoadmapReport(index featureRadarIndex, minReferences int, limit
 	}
 }
 
-func buildFeatureBacklogReport(index featureRadarIndex, minReferences int, limit int, referenceLimit int) featureBacklogReport {
-	roadmap := buildFeatureRoadmapReport(index, minReferences, limit, referenceLimit)
+func buildFeatureBacklogReport(index featureRadarIndex, indexPath string, minReferences int, limit int, referenceLimit int) featureBacklogReport {
+	roadmap := buildFeatureRoadmapReport(index, indexPath, minReferences, limit, referenceLimit)
 	items := make([]featureBacklogItem, 0, len(roadmap.Items))
 	for index, item := range roadmap.Items {
 		priority := index + 1
@@ -1305,7 +1320,7 @@ func buildFeatureBacklogReport(index featureRadarIndex, minReferences int, limit
 			References:             item.TopReferences,
 			PlanCommand:            item.PlanCommand,
 			ImplementationCommands: featureImplementationCommands(item.NextCommands),
-			VerificationCommands:   featureBacklogVerificationCommands(item, roadmap.ReferenceGate.Required),
+			VerificationCommands:   featureBacklogVerificationCommands(item, roadmap.ReferenceGate.Required, indexPath),
 			AcceptanceCriteria:     featureBacklogAcceptanceCriteria(item, roadmap.ReferenceGate.Required),
 		})
 	}
@@ -1339,9 +1354,9 @@ func featureImplementationCommands(commands []featureNextCommand) []featureNextC
 	return out
 }
 
-func featureBacklogVerificationCommands(item featureRoadmapItem, minReferences int) []string {
+func featureBacklogVerificationCommands(item featureRoadmapItem, minReferences int, indexPath string) []string {
 	commands := []string{
-		fmt.Sprintf("agent-testbench research coverage --min-references %d --json", minReferences),
+		fmt.Sprintf("agent-testbench research coverage%s --min-references %d --json", featureRadarIndexFlag(indexPath), minReferences),
 		item.PlanCommand,
 	}
 	for _, command := range featureImplementationCommands(item.NextCommands) {
@@ -1389,11 +1404,11 @@ func featureReadinessScore(references int, availableCommands int, implementation
 	return implementationCommands*100 + availableCommands*10 + references*20 + starWeight
 }
 
-func featurePlanCommand(featureID string, minReferences int) string {
-	return "agent-testbench research plan --feature " + quoteCommandValue(featureID) + featureRequireMinFlag(minReferences) + " --format markdown"
+func featurePlanCommand(featureID string, minReferences int, indexPath string) string {
+	return "agent-testbench research plan --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences) + " --format markdown"
 }
 
-func buildFeatureResearchPlan(index featureRadarIndex, feature featureRadarFeature, featureQuery string, limit int, requireMinMatches int) featureResearchPlanReport {
+func buildFeatureResearchPlan(index featureRadarIndex, indexPath string, feature featureRadarFeature, featureQuery string, limit int, requireMinMatches int) featureResearchPlanReport {
 	nextCommands := featureNextCommands(feature.ID)
 	gate := featureReferenceGate{
 		Required: requireMinMatches,
@@ -1408,7 +1423,7 @@ func buildFeatureResearchPlan(index featureRadarIndex, feature featureRadarFeatu
 		ReferenceGate:        gate,
 		References:           limitFeatureRadarMatches(feature.TopMatches, limit),
 		NextCommands:         nextCommands,
-		VerificationCommands: featureVerificationCommands(featureQuery, requireMinMatches, nextCommands),
+		VerificationCommands: featureVerificationCommands(featureQuery, requireMinMatches, indexPath, nextCommands),
 	}
 }
 
@@ -1439,7 +1454,7 @@ func buildFeatureGateReport(index featureRadarIndex, indexPath string, feature f
 		CommandGate:          commandGate,
 		References:           limitFeatureRadarMatches(feature.TopMatches, limit),
 		NextCommands:         nextCommands,
-		VerificationCommands: featureGateVerificationCommands(featureQuery, requireMinMatches, requireCommand, maxAgeHours, nextCommands),
+		VerificationCommands: featureGateVerificationCommands(featureQuery, requireMinMatches, requireCommand, maxAgeHours, indexPath, nextCommands),
 	}
 	if !status.Fresh {
 		report.Reasons = append(report.Reasons, status.StaleReason)
@@ -1503,10 +1518,10 @@ func featureCommandMatches(command featureNextCommand, requireCommand string) bo
 		normalizeFeatureRadarText(strings.Join(command.CommandPath, " ")) == needle
 }
 
-func featureGateVerificationCommands(featureQuery string, requireMinMatches int, requireCommand string, maxAgeHours int, nextCommands []featureNextCommand) []string {
+func featureGateVerificationCommands(featureQuery string, requireMinMatches int, requireCommand string, maxAgeHours int, indexPath string, nextCommands []featureNextCommand) []string {
 	commands := []string{
-		fmt.Sprintf("agent-testbench research refresh-plan --require-ready --min-references %d --max-age-hours %d --json", requireMinMatches, maxAgeHours),
-		"agent-testbench research gate --feature " + quoteCommandValue(featureQuery) + featureRequireMinFlag(requireMinMatches) + featureRequireCommandFlag(requireCommand) + " --json",
+		fmt.Sprintf("agent-testbench research refresh-plan%s --require-ready --min-references %d --max-age-hours %d --json", featureRadarIndexFlag(indexPath), requireMinMatches, maxAgeHours),
+		"agent-testbench research gate --feature " + quoteCommandValue(featureQuery) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(requireMinMatches) + featureRequireCommandFlag(requireCommand) + " --json",
 	}
 	for _, item := range nextCommands {
 		if item.Available {
@@ -1724,8 +1739,8 @@ func featureNextCommandPath(command string) []string {
 	return path
 }
 
-func featureVerificationCommands(featureQuery string, requireMinMatches int, nextCommands []featureNextCommand) []string {
-	out := []string{"agent-testbench research feature --feature " + quoteCommandValue(featureQuery) + featureRequireMinFlag(requireMinMatches) + " --json"}
+func featureVerificationCommands(featureQuery string, requireMinMatches int, indexPath string, nextCommands []featureNextCommand) []string {
+	out := []string{"agent-testbench research feature --feature " + quoteCommandValue(featureQuery) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(requireMinMatches) + " --json"}
 	for _, item := range nextCommands {
 		if item.Available {
 			out = append(out, item.Command)
@@ -1744,9 +1759,28 @@ func featureRequireMinFlag(value int) string {
 func quoteCommandValue(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return `""`
+		return `''`
 	}
-	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+	return quoteShellValue(value)
+}
+
+func quoteCommandPathValue(value string) string {
+	value = expandUserHomePath(strings.TrimSpace(value))
+	if value == "" {
+		return `''`
+	}
+	return quoteShellValue(value)
+}
+
+func quoteShellValue(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func featureRadarIndexFlag(indexPath string) string {
+	if strings.TrimSpace(indexPath) == "" {
+		return ""
+	}
+	return " --radar-index " + quoteCommandPathValue(indexPath)
 }
 
 func featureRadarCatalogMatches(feature featureRadarFeature, filter string) bool {
