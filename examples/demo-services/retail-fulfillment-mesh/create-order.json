@@ -1,0 +1,34 @@
+{
+  "id": "case.retail.create-order",
+  "title": "Create Retail Order",
+  "request": {
+    "method": "POST",
+    "path": "/retail/orders",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "orderId": "order-demo-001",
+      "items": [
+        {
+          "sku": "sku-demo-keyboard",
+          "quantity": 1
+        }
+      ],
+      "paymentToken": "tok_demo_001",
+      "shipTo": {
+        "city": "Demo City",
+        "country": "US"
+      }
+    }
+  },
+  "assertions": {
+    "expectedStatusCodes": [
+      201
+    ],
+    "responseContains": [
+      "workflow.retail.fulfillment",
+      "carrier-booking"
+    ]
+  }
+}

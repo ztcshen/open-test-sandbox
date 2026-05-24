@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AgentTestBench Demo Gallery</title>
+    <link rel="icon" href="data:,">
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f7f8;
+        --panel: #ffffff;
+        --ink: #151515;
+        --muted: #667085;
+        --line: #d8dee4;
+        --blue: #1f5fbf;
+        --green: #087443;
+        --amber: #9a6400;
+        --teal: #0f766e;
+        --shadow: 0 18px 40px rgba(20, 32, 48, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 28px 0 42px;
+      }
+
+      .top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 22px;
+        align-items: stretch;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 780px;
+        font-size: 42px;
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      h2 {
+        font-size: 20px;
+      }
+
+      .lead {
+        margin-top: 14px;
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.65;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .intro,
+      .terminal,
+      .map,
+      .timeline,
+      .scenario {
+        padding: 22px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        margin-bottom: 12px;
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .terminal {
+        background: #101418;
+        color: #e7edf3;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        overflow: hidden;
+      }
+
+      .terminal strong {
+        color: #7dd3fc;
+      }
+
+      .terminal pre {
+        margin: 0;
+        white-space: pre-wrap;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .automation {
+        margin-top: 18px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: var(--shadow);
+        padding: 22px;
+        overflow: hidden;
+      }
+
+      .automation-head {
+        display: flex;
+        gap: 18px;
+        align-items: start;
+        justify-content: space-between;
+      }
+
+      .automation-head p {
+        max-width: 760px;
+        margin-top: 8px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .replay-button {
+        flex: 0 0 auto;
+        min-height: 38px;
+        border: 1px solid #b8c4d2;
+        border-radius: 6px;
+        padding: 0 14px;
+        background: #f8fafc;
+        color: #1d2939;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .replay-button:hover,
+      .replay-button:focus-visible {
+        border-color: var(--blue);
+        outline: none;
+      }
+
+      .automation-layout {
+        display: grid;
+        grid-template-columns: 210px minmax(0, 1fr) 300px;
+        gap: 16px;
+        margin-top: 18px;
+        align-items: stretch;
+      }
+
+      .runbook-steps {
+        display: grid;
+        gap: 8px;
+      }
+
+      .runbook-step {
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        gap: 10px;
+        align-items: center;
+        min-height: 58px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        background: #fbfcfd;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .runbook-step span {
+        display: inline-flex;
+        width: 30px;
+        height: 30px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: #e7eef8;
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .runbook-step b {
+        display: block;
+        font-size: 13px;
+      }
+
+      .runbook-step small {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 11px;
+        line-height: 1.25;
+      }
+
+      .runbook-step.is-active {
+        border-color: #9bb8e5;
+        background: #eff6ff;
+        box-shadow: inset 4px 0 0 var(--blue);
+      }
+
+      .animation-terminal {
+        display: grid;
+        grid-template-rows: auto auto 1fr;
+        min-height: 370px;
+        border-radius: 8px;
+        background: #101418;
+        color: #e7edf3;
+        overflow: hidden;
+      }
+
+      .terminal-title {
+        display: flex;
+        align-items: center;
+        min-height: 36px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 0 14px;
+        color: #a7b4c2;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+      }
+
+      .animation-terminal pre {
+        margin: 0;
+        padding: 14px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .animation-terminal code {
+        color: #f8fafc;
+      }
+
+      .terminal-log {
+        color: #b6c6d6;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .prompt {
+        color: #7dd3fc;
+        font-weight: 900;
+      }
+
+      .runtime-stage {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 12px;
+      }
+
+      .service-mesh {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .service-node {
+        min-height: 78px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        background: #fbfcfd;
+      }
+
+      .service-node b,
+      .evidence-board b {
+        display: block;
+        font-size: 13px;
+      }
+
+      .service-node span,
+      .evidence-board span {
+        display: block;
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .service-node[data-state="running"] {
+        border-color: #95c7d1;
+        background: #ecfeff;
+        animation: pulseNode 1.4s ease-in-out infinite;
+      }
+
+      .service-node[data-state="ok"] {
+        border-color: #a3d6bd;
+        background: #eefbf4;
+      }
+
+      .service-node[data-state="warn"] {
+        border-color: #e9cf8a;
+        background: #fffaeb;
+      }
+
+      .service-node[data-state="fail"] {
+        border-color: #efa3a3;
+        background: #fff1f1;
+      }
+
+      .evidence-board {
+        display: grid;
+        gap: 8px;
+      }
+
+      .evidence-board > div {
+        border-left: 4px solid var(--line);
+        padding: 10px 10px 10px 12px;
+        background: #fbfcfd;
+      }
+
+      .evidence-board > div:nth-child(1) { border-left-color: var(--green); }
+      .evidence-board > div:nth-child(2) { border-left-color: var(--amber); }
+      .evidence-board > div:nth-child(3) { border-left-color: #c2410c; }
+
+      @keyframes pulseNode {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.02); }
+        100% { transform: scale(1); }
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .capabilities {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .capability {
+        min-height: 112px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: #fbfcfd;
+      }
+
+      .capability b {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .capability span,
+      .timeline p,
+      .scenario p {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .flow {
+        display: grid;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .flow-step {
+        display: grid;
+        grid-template-columns: 84px 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .tag {
+        display: inline-flex;
+        justify-content: center;
+        border-radius: 6px;
+        padding: 5px 8px;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .tag.blue { background: var(--blue); }
+      .tag.green { background: var(--green); }
+      .tag.amber { background: var(--amber); }
+      .tag.teal { background: var(--teal); }
+
+      .scenarios {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .scenario h3 {
+        min-height: 52px;
+        font-size: 18px;
+        line-height: 1.25;
+      }
+
+      .services {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 16px;
+      }
+
+      .services span {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 9px;
+        color: #344054;
+        background: #f8fafc;
+        font-size: 12px;
+      }
+
+      .section-title {
+        margin-top: 28px;
+      }
+
+      code {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      }
+
+      @media (max-width: 900px) {
+        main {
+          width: min(100% - 22px, 680px);
+        }
+
+        .top,
+        .grid,
+        .automation-layout,
+        .scenarios,
+        .capabilities {
+          grid-template-columns: 1fr;
+        }
+
+        .automation-head {
+          flex-direction: column;
+        }
+
+        .runbook-steps {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        h1 {
+          font-size: 32px;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .runbook-steps,
+        .service-mesh {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .automation * {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="top">
+        <div class="panel intro">
+          <span class="eyebrow">AgentTestBench demo gallery</span>
+          <h1>See the CLI path from target discovery to Evidence-rich reports.</h1>
+          <p class="lead">This page is a visual walkthrough for the public project: neutral demo services, Store-first commands, workflow reports, and reviewable Evidence without private business data.</p>
+        </div>
+        <div class="panel terminal">
+          <pre><strong>$</strong> agent-testbench case discover --filter retail --json
+<strong>$</strong> agent-testbench case run --case create-order.json --base-url :49190 --json
+<strong>$</strong> agent-testbench workflow report --workflow workflow.retail.fulfillment --json
+<strong>$</strong> agent-testbench evidence list --run retail-demo-run --json</pre>
+        </div>
+      </section>
+
+      <section class="automation" data-demo-runbook="autoplay" aria-labelledby="automation-title">
+        <div class="automation-head">
+          <div>
+            <span class="eyebrow">CLI automation animation</span>
+            <h2 id="automation-title">A full CLI runbook: restore, execute, collect, diagnose.</h2>
+            <p>The animation compresses a real agent-facing loop: the CLI restores a target environment, ranks risky cases, runs the suite, imports Evidence, analyzes the failing path, and publishes an auditable quality report.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Replay animation</button>
+        </div>
+
+        <div class="automation-layout">
+          <div class="runbook-steps" aria-label="CLI runbook steps">
+            <button class="runbook-step is-active" type="button" data-step="0"><span>01</span><div><b>Restore</b><small>environment restore</small></div></button>
+            <button class="runbook-step" type="button" data-step="1"><span>02</span><div><b>Prioritize</b><small>case suite priority</small></div></button>
+            <button class="runbook-step" type="button" data-step="2"><span>03</span><div><b>Execute</b><small>case run</small></div></button>
+            <button class="runbook-step" type="button" data-step="3"><span>04</span><div><b>Report</b><small>workflow report</small></div></button>
+            <button class="runbook-step" type="button" data-step="4"><span>05</span><div><b>Analyze</b><small>evidence tasks</small></div></button>
+            <button class="runbook-step" type="button" data-step="5"><span>06</span><div><b>Publish</b><small>case suite quality-report</small></div></button>
+          </div>
+
+          <div class="animation-terminal" aria-live="polite">
+            <div class="terminal-title">agent-testbench CLI</div>
+            <pre><span class="prompt">$</span> <code data-runbook-command>agent-testbench environment restore retail-demo --store local-personal --workspace .demo/runtime --execute --json</code></pre>
+            <pre class="terminal-log" data-runbook-log>Store local-personal connected: PostgreSQL profile active
+checkout, payment, risk, warehouse, carrier health checks are green
+Environment Evidence indexed: startup logs, ports, topology shell</pre>
+          </div>
+
+          <div class="runtime-stage" aria-label="Runtime and diagnosis state">
+            <div class="service-mesh">
+              <div class="service-node" data-service="store" data-state="ok"><b>SQL Store</b><span>ready</span></div>
+              <div class="service-node" data-service="checkout" data-state="ok"><b>checkout-api</b><span>ready</span></div>
+              <div class="service-node" data-service="payment" data-state="ok"><b>payment</b><span>ready</span></div>
+              <div class="service-node" data-service="risk" data-state="ok"><b>risk-scorer</b><span>ready</span></div>
+              <div class="service-node" data-service="warehouse" data-state="ok"><b>warehouse</b><span>ready</span></div>
+              <div class="service-node" data-service="carrier" data-state="ok"><b>carrier</b><span>ready</span></div>
+            </div>
+            <div class="evidence-board">
+              <div><b>Evidence</b><span data-evidence-state>startup logs + health probes</span></div>
+              <div><b>Analyzer</b><span data-analyzer-state>waiting for case telemetry</span></div>
+              <div><b>Root cause</b><span data-root-cause>No anomaly yet; target runtime is ready.</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="panel map">
+          <span class="eyebrow">CLI capability map</span>
+          <h2>One command family, one proof surface</h2>
+          <div class="capabilities">
+            <div class="capability"><b>Store</b><span>Configure PostgreSQL, MySQL, or SQLite compatibility Stores and keep runtime facts in SQL.</span></div>
+            <div class="capability"><b>Environment</b><span>Register targets, inspect bootstrap plans, restore runtimes, and publish verified environments.</span></div>
+            <div class="capability"><b>Cases</b><span>Discover, prioritize, run, and inspect HTTP API cases with request and response Evidence.</span></div>
+            <div class="capability"><b>Workflow</b><span>Run ordered API workflows and keep per-step timing, status, logs, and topology context.</span></div>
+            <div class="capability"><b>Evidence</b><span>Review request, response, assertion, timing, log, artifact, and topology records by run id.</span></div>
+            <div class="capability"><b>Reports</b><span>Generate compact JSON and HTML output for agents, CI, and human reviewers.</span></div>
+          </div>
+        </div>
+
+        <div class="panel timeline">
+          <span class="eyebrow">Evidence timeline</span>
+          <h2>What a reviewer gets after a run</h2>
+          <div class="flow">
+            <div class="flow-step"><span class="tag blue">Request</span><p>Rendered method, path, headers, body, and fixture context.</p></div>
+            <div class="flow-step"><span class="tag green">Assert</span><p>Status code checks, response text checks, and failure summaries.</p></div>
+            <div class="flow-step"><span class="tag amber">Timing</span><p>Step elapsed time, downstream latency, and task status.</p></div>
+            <div class="flow-step"><span class="tag teal">Topology</span><p>Optional SkyWalking-backed trace topology for live environment sign-off.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <h2 class="section-title">Neutral demo services</h2>
+      <section class="scenarios">
+        <article class="panel scenario">
+          <h3>Retail Fulfillment Mesh</h3>
+          <p>Checkout, payment authorization, risk review, warehouse allocation, and carrier booking.</p>
+          <div class="services"><span>catalog-api</span><span>payment</span><span>risk</span><span>warehouse</span><span>carrier</span></div>
+        </article>
+        <article class="panel scenario">
+          <h3>IoT Telemetry Control</h3>
+          <p>Telemetry ingest, normalization, anomaly scoring, rules evaluation, command dispatch, and audit.</p>
+          <div class="services"><span>ingest</span><span>normalizer</span><span>scorer</span><span>rules</span><span>audit</span></div>
+        </article>
+        <article class="panel scenario">
+          <h3>Content Moderation Pipeline</h3>
+          <p>Policy checks, model scoring, human escalation, notification, and appeal-readiness Evidence.</p>
+          <div class="services"><span>submission</span><span>policy</span><span>model</span><span>queue</span><span>appeal</span></div>
+        </article>
+      </section>
+    </main>
+    <script>
+      (() => {
+        const root = document.querySelector('[data-demo-runbook="autoplay"]');
+        if (!root) return;
+
+        const steps = [
+          {
+            command: 'agent-testbench environment restore retail-demo --store local-personal --workspace .demo/runtime --execute --json',
+            log: [
+              'Store local-personal connected: PostgreSQL profile active',
+              'checkout, payment, risk, warehouse, carrier health checks are green',
+              'Environment Evidence indexed: startup logs, ports, topology shell'
+            ],
+            states: { store: 'ok', checkout: 'ok', payment: 'ok', risk: 'ok', warehouse: 'ok', carrier: 'ok' },
+            labels: { store: 'ready', checkout: 'ready', payment: 'ready', risk: 'ready', warehouse: 'ready', carrier: 'ready' },
+            evidence: 'startup logs + health probes',
+            analyzer: 'waiting for case telemetry',
+            rootCause: 'No anomaly yet; target runtime is ready.'
+          },
+          {
+            command: 'agent-testbench case suite priority --filter retail --changed-service payment --store local-personal --json',
+            log: [
+              '12 runnable cases found; 4 selected by impact and recent instability',
+              'payment authorization and risk review are moved to the first batch',
+              'priority score includes coverage gaps, timing budget, and last failure state'
+            ],
+            states: { store: 'ok', checkout: 'running', payment: 'running', risk: 'running', warehouse: 'ok', carrier: 'ok' },
+            labels: { checkout: 'selected', payment: 'high risk', risk: 'high risk', warehouse: 'covered', carrier: 'covered' },
+            evidence: 'case metadata + impact reasons',
+            analyzer: 'ranking likely failure paths',
+            rootCause: 'Candidate risk is payment to risk handoff latency.'
+          },
+          {
+            command: 'agent-testbench case run --case examples/demo-services/retail-fulfillment-mesh/create-order.json --base-url http://127.0.0.1:49190 --store local-personal --evidence-dir .agent-testbench/evidence --json',
+            log: [
+              'POST /retail/orders rendered from fixture context',
+              'assertion failed: risk decision expected approve, got review',
+              'request.json, response.json, assertions.json, and summary.json written'
+            ],
+            states: { store: 'ok', checkout: 'ok', payment: 'warn', risk: 'fail', warehouse: 'running', carrier: 'running' },
+            labels: { payment: 'slow 942 ms', risk: 'failed assert', warehouse: 'skipped', carrier: 'skipped' },
+            evidence: 'request + response + assertion bundle',
+            analyzer: 'failure captured with run id retail-demo-run',
+            rootCause: 'Risk scorer returned review after payment latency exceeded the configured budget.'
+          },
+          {
+            command: 'agent-testbench workflow report --workflow workflow.retail.fulfillment --base-url http://127.0.0.1:49190 --store local-personal --html --json',
+            log: [
+              'workflow plan expanded: checkout -> payment -> risk -> warehouse -> carrier',
+              'step 3 failed; downstream steps are marked blocked with Evidence links',
+              'HTML and JSON reports include timing, status, and artifact manifest'
+            ],
+            states: { store: 'ok', checkout: 'ok', payment: 'warn', risk: 'fail', warehouse: 'warn', carrier: 'warn' },
+            labels: { checkout: 'passed', payment: 'budget warn', risk: 'failed', warehouse: 'blocked', carrier: 'blocked' },
+            evidence: 'workflow HTML + artifact manifest',
+            analyzer: 'correlating step failure with topology edge',
+            rootCause: 'The failing edge is payment -> risk-scorer, not warehouse allocation.'
+          },
+          {
+            command: 'agent-testbench evidence tasks --run retail-demo-run --failed-only --store local-personal --json',
+            log: [
+              'post-process tasks imported logs, replay shells, and trace topology',
+              'failure category: timing_budget_then_assertion_mismatch',
+              'diagnosis: retry with payment timeout fixture or inspect risk threshold'
+            ],
+            states: { store: 'ok', checkout: 'ok', payment: 'warn', risk: 'fail', warehouse: 'warn', carrier: 'warn' },
+            labels: { payment: 'trace hot edge', risk: 'root cause', warehouse: 'not owner', carrier: 'not owner' },
+            evidence: 'logs + replay + topology + failure summary',
+            analyzer: 'Root cause narrowed to payment latency before risk decision',
+            rootCause: 'Payment authorization delay changed the risk decision branch and broke the expected workflow outcome.'
+          },
+          {
+            command: 'agent-testbench case suite quality-report --filter retail --run retail-demo-run --store local-personal --format html --json',
+            log: [
+              'quality report published: 1 failed, 2 warned, 9 stable',
+              'repair plan: add timeout boundary case and isolate risk fixture',
+              'agent-ready summary links commands, Evidence files, and owner hints'
+            ],
+            states: { store: 'ok', checkout: 'ok', payment: 'warn', risk: 'fail', warehouse: 'ok', carrier: 'ok' },
+            labels: { checkout: 'stable', payment: 'needs case', risk: 'owner hint', warehouse: 'stable', carrier: 'stable' },
+            evidence: 'quality HTML + repair plan + owner hints',
+            analyzer: 'ready for PR, issue, or CI gate annotation',
+            rootCause: 'Root cause preserved with a proposed regression case and reproducible CLI replay.'
+          }
+        ];
+
+        const commandEl = root.querySelector('[data-runbook-command]');
+        const logEl = root.querySelector('[data-runbook-log]');
+        const evidenceEl = root.querySelector('[data-evidence-state]');
+        const analyzerEl = root.querySelector('[data-analyzer-state]');
+        const rootCauseEl = root.querySelector('[data-root-cause]');
+        const stepButtons = [...root.querySelectorAll('[data-step]')];
+        const serviceNodes = [...root.querySelectorAll('[data-service]')];
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        let active = 0;
+        let timer;
+
+        const render = (next) => {
+          active = next % steps.length;
+          const step = steps[active];
+          commandEl.textContent = step.command;
+          logEl.textContent = step.log.join('\n');
+          evidenceEl.textContent = step.evidence;
+          analyzerEl.textContent = step.analyzer;
+          rootCauseEl.textContent = step.rootCause;
+
+          stepButtons.forEach((button, index) => {
+            const isActive = index === active;
+            button.classList.toggle('is-active', isActive);
+            button.setAttribute('aria-pressed', String(isActive));
+          });
+
+          serviceNodes.forEach((node) => {
+            const service = node.dataset.service;
+            const state = step.states[service] || 'ok';
+            const label = step.labels[service] || state;
+            node.dataset.state = state;
+            node.querySelector('span').textContent = label;
+          });
+        };
+
+        const start = () => {
+          if (reducedMotion) return;
+          window.clearInterval(timer);
+          timer = window.setInterval(() => render(active + 1), 2600);
+        };
+
+        stepButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            render(Number(button.dataset.step));
+            start();
+          });
+        });
+
+        root.querySelector('[data-replay]').addEventListener('click', () => {
+          render(0);
+          start();
+        });
+
+        render(0);
+        start();
+      })();
+    </script>
+  </body>
+</html>

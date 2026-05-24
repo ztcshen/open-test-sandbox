@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT_DIR"
 
-paths=(
+default_paths=(
   AGENTS.md
   CONTRIBUTING.md
   README.md
@@ -18,6 +18,21 @@ paths=(
   tools/release-check.sh
   tools/smoke
 )
+paths=("${default_paths[@]}")
+scoped=0
+if [[ $# -gt 0 ]]; then
+  scoped=1
+  paths=()
+  for scan_path in "$@"; do
+    for default_path in "${default_paths[@]}"; do
+      case "$scan_path" in
+        "$default_path"|"$default_path"/*)
+          paths+=("$scan_path")
+          ;;
+      esac
+    done
+  done
+fi
 
 violations=0
 
@@ -25,6 +40,9 @@ check_pattern() {
   local pattern=$1
   local message=$2
   local matches
+  if [[ ${#paths[*]} -eq 0 ]]; then
+    return
+  fi
   matches=$(rg -n -i "$pattern" "${paths[@]}" || true)
   if [[ -n "$matches" ]]; then
     echo "$message" >&2
@@ -37,6 +55,9 @@ check_current_docs_pattern() {
   local pattern=$1
   local message=$2
   local matches
+  if [[ ${#paths[*]} -eq 0 ]]; then
+    return
+  fi
   matches=$(rg -n -i "$pattern" "${paths[@]}" --glob '!docs/progress/**' --glob '!docs/plans/**' || true)
   if [[ -n "$matches" ]]; then
     echo "$message" >&2
@@ -72,63 +93,65 @@ check_pattern 'AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1 npm run demo:api-case' \
 check_pattern "topology:[[:space:]]*\\{[[:space:]]*status:[[:space:]]*['\"](partial|complete|unavailable)|\"topology\":[[:space:]]*\\{[[:space:]]*\"status\"[[:space:]]*:[[:space:]]*\"(partial|complete|unavailable)" \
   "SkyWalking topology fixtures must set provider/source before status."
 
-if ! rg -q -i 'not release evidence|not proof of a live SkyWalking deployment' README.md docs/store-backends.md docs/release-checklist.md; then
-  echo "Docs must state that synthetic SkyWalking smoke is not live release proof." >&2
-  violations=1
-fi
+if [[ "$scoped" -eq 0 ]]; then
+  if ! rg -q -i 'not release evidence|not proof of a live SkyWalking deployment' README.md docs/store-backends.md docs/release-checklist.md; then
+    echo "Docs must state that synthetic SkyWalking smoke is not live release proof." >&2
+    violations=1
+  fi
 
-if ! rg -q -i 'unavailable, failed, or skipped' README.md README.zh-CN.md docs/cli-api-contracts.md docs/roadmap.md; then
-  echo "Docs must state that missing SkyWalking topology reports unavailable, failed, or skipped status." >&2
-  violations=1
-fi
+  if ! rg -q -i 'unavailable, failed, or skipped' README.md README.zh-CN.md docs/cli-api-contracts.md docs/roadmap.md; then
+    echo "Docs must state that missing SkyWalking topology reports unavailable, failed, or skipped status." >&2
+    violations=1
+  fi
 
-if ! rg -q -i 'synthetic smoke is not live topology proof' tools/release-check.sh; then
-  echo "release-check must distinguish synthetic smoke from live SkyWalking proof." >&2
-  violations=1
-fi
+  if ! rg -q -i 'synthetic smoke is not live topology proof' tools/release-check.sh; then
+    echo "release-check must distinguish synthetic smoke from live SkyWalking proof." >&2
+    violations=1
+  fi
 
-if ! rg -q 'AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING' tools/release-check.sh docs/release-checklist.md; then
-  echo "release-check must keep the explicit real SkyWalking enforcement mode documented and implemented." >&2
-  violations=1
-fi
+  if ! rg -q 'AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING' tools/release-check.sh docs/release-checklist.md; then
+    echo "release-check must keep the explicit real SkyWalking enforcement mode documented and implemented." >&2
+    violations=1
+  fi
 
-if ! rg -q 'AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1' tools/release-check.sh || ! rg -q 'requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL' tools/smoke/skywalking-release-guard.mjs; then
-  echo "release-check real SkyWalking mode must require AGENT_TESTBENCH_TRACE_GRAPHQL_URL before expensive gates run." >&2
-  violations=1
-fi
+  if ! rg -q 'AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1' tools/release-check.sh || ! rg -q 'requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL' tools/smoke/skywalking-release-guard.mjs; then
+    echo "release-check real SkyWalking mode must require AGENT_TESTBENCH_TRACE_GRAPHQL_URL before expensive gates run." >&2
+    violations=1
+  fi
 
-if ! rg -q 'AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1' tools/release-check.sh || ! rg -q 'requires AGENT_TESTBENCH_SMOKE_TRACE_IDS' tools/smoke/skywalking-release-guard.mjs; then
-  echo "release-check real SkyWalking mode must require AGENT_TESTBENCH_SMOKE_TRACE_IDS for the configured workflow." >&2
-  violations=1
-fi
+  if ! rg -q 'AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1' tools/release-check.sh || ! rg -q 'requires AGENT_TESTBENCH_SMOKE_TRACE_IDS' tools/smoke/skywalking-release-guard.mjs; then
+    echo "release-check real SkyWalking mode must require AGENT_TESTBENCH_SMOKE_TRACE_IDS for the configured workflow." >&2
+    violations=1
+  fi
 
-if ! rg -q 'every configured workflow step' tools/smoke/skywalking-release-guard.mjs docs/release-checklist.md; then
-  echo "release-check real SkyWalking mode must require trace ids for every configured workflow step." >&2
-  violations=1
-fi
+  if ! rg -q 'every configured workflow step' tools/smoke/skywalking-release-guard.mjs docs/release-checklist.md; then
+    echo "release-check real SkyWalking mode must require trace ids for every configured workflow step." >&2
+    violations=1
+  fi
 
-if ! rg -q 'AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL' tools/smoke/control-plane-smoke.mjs; then
-  echo "control-plane smoke harness must reject required real SkyWalking mode without AGENT_TESTBENCH_TRACE_GRAPHQL_URL." >&2
-  violations=1
-fi
+  if ! rg -q 'AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL' tools/smoke/control-plane-smoke.mjs; then
+    echo "control-plane smoke harness must reject required real SkyWalking mode without AGENT_TESTBENCH_TRACE_GRAPHQL_URL." >&2
+    violations=1
+  fi
 
-if ! rg -q 'every configured workflow step' tools/smoke/control-plane-smoke.mjs tools/smoke/control-plane-smoke.test.mjs; then
-  echo "control-plane smoke harness must require trace ids for every configured workflow step in real SkyWalking mode." >&2
-  violations=1
-fi
+  if ! rg -q 'every configured workflow step' tools/smoke/control-plane-smoke.mjs tools/smoke/control-plane-smoke.test.mjs; then
+    echo "control-plane smoke harness must require trace ids for every configured workflow step in real SkyWalking mode." >&2
+    violations=1
+  fi
 
-generic_resolver_count=$(rg -n 'resolveStoreReference\(' cmd/agent-testbench/main.go | wc -l | tr -d ' ')
-if [[ "$generic_resolver_count" != "4" ]]; then
-  echo "Daily command code must not add generic Store resolver calls; use resolveRequiredDailyStoreReference unless the path is Store maintenance, offline review, or migration." >&2
-  rg -n 'resolveStoreReference\(' cmd/agent-testbench/main.go >&2 || true
-  violations=1
-fi
+  generic_resolver_count=$(rg -n 'resolveStoreReference\(' cmd/agent-testbench/main.go | wc -l | tr -d ' ')
+  if [[ "$generic_resolver_count" != "4" ]]; then
+    echo "Daily command code must not add generic Store resolver calls; use resolveRequiredDailyStoreReference unless the path is Store maintenance, offline review, or migration." >&2
+    rg -n 'resolveStoreReference\(' cmd/agent-testbench/main.go >&2 || true
+    violations=1
+  fi
 
-compat_required_resolver_count=$(rg -n 'resolveRequiredStoreReference\(' cmd/agent-testbench/main.go | wc -l | tr -d ' ')
-if [[ "$compat_required_resolver_count" != "1" ]]; then
-  echo "Only explicit migration/compatibility commands may use resolveRequiredStoreReference in CLI handlers." >&2
-  rg -n 'resolveRequiredStoreReference\(' cmd/agent-testbench/main.go >&2 || true
-  violations=1
+  compat_required_resolver_count=$(rg -n 'resolveRequiredStoreReference\(' cmd/agent-testbench/main.go | wc -l | tr -d ' ')
+  if [[ "$compat_required_resolver_count" != "1" ]]; then
+    echo "Only explicit migration/compatibility commands may use resolveRequiredStoreReference in CLI handlers." >&2
+    rg -n 'resolveRequiredStoreReference\(' cmd/agent-testbench/main.go >&2 || true
+    violations=1
+  fi
 fi
 
 blocked_a="fall"
@@ -136,6 +159,14 @@ blocked_b="back"
 blocked_word="${blocked_a}${blocked_b}"
 
 repo_files=()
+if [[ "$scoped" -eq 1 && ${#paths[*]} -eq 0 ]]; then
+  git_files_cmd=(printf '')
+elif [[ "$scoped" -eq 1 ]]; then
+  git_files_cmd=(git ls-files --cached --others --exclude-standard -z -- "${paths[@]}")
+else
+  git_files_cmd=(git ls-files --cached --others --exclude-standard -z)
+fi
+
 while IFS= read -r -d '' path; do
   case "$path" in
     .git/*|.idea/*|.runtime/*|.scratch/*|node_modules/*)
@@ -148,7 +179,7 @@ while IFS= read -r -d '' path; do
   if [[ -f "$path" ]]; then
     repo_files+=("$path")
   fi
-done < <(git ls-files --cached --others --exclude-standard -z)
+done < <("${git_files_cmd[@]}")
 
 if [[ ${#repo_files[@]} -gt 0 ]]; then
   blocked_matches=$(rg -n -i "$blocked_word" "${repo_files[@]}" || true)

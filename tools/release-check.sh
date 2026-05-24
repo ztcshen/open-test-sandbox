@@ -20,8 +20,100 @@ is_sqlite_store_dsn() {
   [[ "$1" =~ ^([Ss][Qq][Ll][Ii][Tt][Ee]://|[Ff][Ii][Ll][Ee]:) ]]
 }
 
+scope_paths=()
+add_scope_path() {
+  local path=$1
+  path=${path#./}
+  if [[ -n "$path" ]]; then
+    scope_paths+=("$path")
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --scope)
+      if [[ $# -lt 2 ]]; then
+        echo "--scope requires a path" >&2
+        exit 1
+      fi
+      add_scope_path "$2"
+      shift 2
+      ;;
+    --scope-file)
+      if [[ $# -lt 2 ]]; then
+        echo "--scope-file requires a file path" >&2
+        exit 1
+      fi
+      if [[ ! -f "$2" ]]; then
+        echo "--scope-file path does not exist: $2" >&2
+        exit 1
+      fi
+      while IFS= read -r path; do
+        add_scope_path "$path"
+      done < "$2"
+      shift 2
+      ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        add_scope_path "$1"
+        shift
+      done
+      ;;
+    -*)
+      echo "unknown release-check option: $1" >&2
+      exit 1
+      ;;
+    *)
+      add_scope_path "$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -n "${AGENT_TESTBENCH_RELEASE_CHECK_SCOPE:-}" ]]; then
+  while IFS= read -r path; do
+    add_scope_path "$path"
+  done <<< "$AGENT_TESTBENCH_RELEASE_CHECK_SCOPE"
+fi
+
+if [[ ${#scope_paths[@]} -gt 0 ]]; then
+  unique_scope_paths=()
+  seen_path=""
+  for path in "${scope_paths[@]}"; do
+    duplicate=0
+    if [[ ${#unique_scope_paths[*]} -gt 0 ]]; then
+      for seen_path in "${unique_scope_paths[@]}"; do
+        if [[ "$seen_path" == "$path" ]]; then
+          duplicate=1
+          break
+        fi
+      done
+    fi
+    if [[ "$duplicate" -eq 1 ]]; then
+      continue
+    fi
+    unique_scope_paths+=("$path")
+  done
+  scope_paths=("${unique_scope_paths[@]}")
+fi
+
+scoped_release_check=0
+if [[ ${#scope_paths[@]} -gt 0 ]]; then
+  scoped_release_check=1
+fi
+
+if [[ "$scoped_release_check" -eq 1 ]]; then
+  step "checking release scope"
+  printf '  %s\n' "${scope_paths[@]}"
+fi
+
 step "checking whitespace"
-git diff --check
+if [[ "$scoped_release_check" -eq 1 ]]; then
+  git diff --check -- "${scope_paths[@]}"
+else
+  git diff --check
+fi
 
 step "checking release gate tools"
 for tool in rg sqlite3; do
@@ -85,18 +177,34 @@ if [[ -d team-configs ]]; then
   exit 1
 fi
 
-tracked_generated=$(git ls-files \
-  '.runtime' \
-  'cmd/agent-testbench/.runtime' \
-  'internal/server/controlplane/.runtime' \
-  'node_modules' \
-  'team-configs' \
-  'test-private' \
-  'test-results' \
-  'coverage' \
-  '*.db' \
-  '*.sqlite' \
-  '*.sqlite3')
+if [[ "$scoped_release_check" -eq 1 ]]; then
+  tracked_generated_paths=()
+  while IFS= read -r -d '' path; do
+    case "$path" in
+      .runtime/*|cmd/agent-testbench/.runtime/*|internal/server/controlplane/.runtime/*|node_modules/*|team-configs/*|test-private/*|test-results/*|coverage/*|*.db|*.sqlite|*.sqlite3)
+        tracked_generated_paths+=("$path")
+        ;;
+    esac
+  done < <(git ls-files -z -- "${scope_paths[@]}")
+  if [[ ${#tracked_generated_paths[*]} -gt 0 ]]; then
+    tracked_generated=$(printf '%s\n' "${tracked_generated_paths[@]}")
+  else
+    tracked_generated=""
+  fi
+else
+  tracked_generated=$(git ls-files \
+    '.runtime' \
+    'cmd/agent-testbench/.runtime' \
+    'internal/server/controlplane/.runtime' \
+    'node_modules' \
+    'team-configs' \
+    'test-private' \
+    'test-results' \
+    'coverage' \
+    '*.db' \
+    '*.sqlite' \
+    '*.sqlite3')
+fi
 
 if [[ -n "$tracked_generated" ]]; then
   echo "generated or local-only paths are tracked:" >&2
@@ -105,51 +213,150 @@ if [[ -n "$tracked_generated" ]]; then
 fi
 
 step "checking source-domain guardrail"
-tools/guardrails/check_no_source_domain_core.sh
+if [[ "$scoped_release_check" -eq 1 ]]; then
+  tools/guardrails/check_no_source_domain_core.sh "${scope_paths[@]}"
+else
+  tools/guardrails/check_no_source_domain_core.sh
+fi
 
 step "checking Store-first contract guardrail"
-tools/guardrails/check_store_first_contracts.sh
-
-step "running Go tests"
-if is_mysql_store_dsn "$smoke_store_dsn"; then
-  go test -p 1 ./... -count=1
+if [[ "$scoped_release_check" -eq 1 ]]; then
+  tools/guardrails/check_store_first_contracts.sh "${scope_paths[@]}"
 else
-  go test ./... -count=1
+  tools/guardrails/check_store_first_contracts.sh
 fi
 
-step "running generic API case demo"
-if is_sqlite_store_dsn "$smoke_store_dsn"; then
-  AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1 AGENT_TESTBENCH_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
+if [[ "$scoped_release_check" -eq 0 ]]; then
+  step "running Go tests"
+  if is_mysql_store_dsn "$smoke_store_dsn"; then
+    go test -p 1 ./... -count=1
+  else
+    go test ./... -count=1
+  fi
+
+  step "running generic API case demo"
+  if is_sqlite_store_dsn "$smoke_store_dsn"; then
+    AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1 AGENT_TESTBENCH_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
+  else
+    AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1 AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 AGENT_TESTBENCH_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
+  fi
+
+  step "building React workbench"
+  npm run build:frontend
+
+  step "running frontend model tests"
+  npm run test:frontend
+
+  step "running smoke harness tests"
+  node --test tools/examples/*.test.mjs tools/smoke/*.test.mjs
+
+  step "running active SQL Store CLI smoke tests"
+  if is_sqlite_store_dsn "$smoke_store_dsn"; then
+    node tools/smoke/cli-active-store-smoke.mjs
+  else
+    npm run smoke:cli:sql-active
+  fi
+
+  if is_mysql_store_dsn "$smoke_store_dsn"; then
+    step "running MySQL Store API smoke tests"
+    AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
+  fi
+
+  step "running active SQL Store browser smoke tests"
+  if is_sqlite_store_dsn "$smoke_store_dsn"; then
+    node tools/smoke/control-plane-smoke.mjs
+  else
+    npm run smoke:frontend:sql-active
+  fi
 else
-  AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1 AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 AGENT_TESTBENCH_DEMO_STORE="$smoke_store_dsn" npm run demo:api-case
-fi
+  node_scope_tests=()
+  run_scoped_go_tests=0
+  run_frontend_tests=0
+  run_frontend_build=0
+  ran_scoped_runtime_tests=0
 
-step "building React workbench"
-npm run build:frontend
+  for path in "${scope_paths[@]}"; do
+    case "$path" in
+      *.go|go.mod|go.sum|cmd/*|internal/*)
+        run_scoped_go_tests=1
+        ;;
+    esac
 
-step "running frontend model tests"
-npm run test:frontend
+    case "$path" in
+      control-plane/frontend/src/*|control-plane/frontend/build.mjs|package.json|package-lock.json)
+        run_frontend_build=1
+        run_frontend_tests=1
+        ;;
+      control-plane/static/demo-gallery.html|docs/demo-gallery.md|examples/demo-services/*|tools/examples/demo-service-server.mjs|tools/examples/demo-showcase.test.mjs)
+        node_scope_tests+=("tools/examples/demo-showcase.test.mjs")
+        ;;
+      tools/examples/*.test.mjs|tools/smoke/*.test.mjs)
+        node_scope_tests+=("$path")
+        ;;
+      .github/workflows/ci.yml)
+        node_scope_tests+=("tools/smoke/ci-workflow.test.mjs")
+        ;;
+      tools/release-check.sh|tools/guardrails/*)
+        node_scope_tests+=("tools/smoke/release-check.test.mjs")
+        ;;
+    esac
+  done
 
-step "running smoke harness tests"
-node --test tools/examples/*.test.mjs tools/smoke/*.test.mjs
+  unique_node_scope_tests=()
+  if [[ ${#node_scope_tests[*]} -gt 0 ]]; then
+    for test_path in "${node_scope_tests[@]}"; do
+      duplicate=0
+      if [[ ${#unique_node_scope_tests[*]} -gt 0 ]]; then
+        for seen_test_path in "${unique_node_scope_tests[@]}"; do
+          if [[ "$seen_test_path" == "$test_path" ]]; then
+            duplicate=1
+            break
+          fi
+        done
+      fi
+      if [[ "$duplicate" -eq 0 ]]; then
+        unique_node_scope_tests+=("$test_path")
+      fi
+    done
+  fi
+  if [[ ${#unique_node_scope_tests[*]} -gt 0 ]]; then
+    node_scope_tests=("${unique_node_scope_tests[@]}")
+  else
+    node_scope_tests=()
+  fi
 
-step "running active SQL Store CLI smoke tests"
-if is_sqlite_store_dsn "$smoke_store_dsn"; then
-  node tools/smoke/cli-active-store-smoke.mjs
-else
-  npm run smoke:cli:sql-active
-fi
+  if [[ "$run_scoped_go_tests" -eq 1 ]]; then
+    step "running scoped Go tests"
+    if is_mysql_store_dsn "$smoke_store_dsn"; then
+      go test -p 1 ./... -count=1
+    else
+      go test ./... -count=1
+    fi
+    ran_scoped_runtime_tests=1
+  fi
 
-if is_mysql_store_dsn "$smoke_store_dsn"; then
-  step "running MySQL Store API smoke tests"
-  AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
-fi
+  if [[ "$run_frontend_build" -eq 1 ]]; then
+    step "building React workbench"
+    npm run build:frontend
+    ran_scoped_runtime_tests=1
+  fi
 
-step "running active SQL Store browser smoke tests"
-if is_sqlite_store_dsn "$smoke_store_dsn"; then
-  node tools/smoke/control-plane-smoke.mjs
-else
-  npm run smoke:frontend:sql-active
+  if [[ "$run_frontend_tests" -eq 1 ]]; then
+    step "running frontend model tests"
+    npm run test:frontend
+    ran_scoped_runtime_tests=1
+  fi
+
+  if [[ ${#node_scope_tests[@]} -gt 0 ]]; then
+    step "running scoped Node tests"
+    printf '  %s\n' "${node_scope_tests[@]}"
+    node --test "${node_scope_tests[@]}"
+    ran_scoped_runtime_tests=1
+  fi
+
+  if [[ "$ran_scoped_runtime_tests" -eq 0 ]]; then
+    step "no scoped runtime tests selected"
+  fi
 fi
 
 step "release check passed"

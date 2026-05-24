@@ -56,8 +56,20 @@ jobs:
       - name: Install browser
         run: npx playwright install chromium
 
+      - name: Collect release scope
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          git diff --name-only --diff-filter=ACMRT "origin/${{ github.base_ref }}" HEAD > .release-check-scope
+          sed 's/^/release scope: /' .release-check-scope
+
       - name: Run release gate
-        run: npm run release-check
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" && -s .release-check-scope ]]; then
+            npm run release-check -- --scope-file .release-check-scope
+          else
+            npm run release-check
+          fi
         env:
           AGENT_TESTBENCH_SMOKE_STORE_DSN: mysql://root:ci-store-pass@127.0.0.1:3306/agent_testbench_ci_smoke?tls=false
 

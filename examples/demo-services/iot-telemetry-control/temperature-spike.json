@@ -1,0 +1,26 @@
+{
+  "id": "case.iot.temperature-spike",
+  "title": "Detect Temperature Spike",
+  "request": {
+    "method": "POST",
+    "path": "/iot/telemetry",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "deviceId": "device-demo-17",
+      "temperatureCelsius": 83.2,
+      "humidityPercent": 41,
+      "sampledAt": "2026-05-24T09:30:00Z"
+    }
+  },
+  "assertions": {
+    "expectedStatusCodes": [
+      202
+    ],
+    "responseContains": [
+      "command-dispatched",
+      "reduce-duty-cycle"
+    ]
+  }
+}

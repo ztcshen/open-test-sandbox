@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -53,6 +54,86 @@ type RunResult struct {
 	CreatedAt    string `json:"createdAt"`
 }
 
+type DryRunPlan struct {
+	OK         bool                `json:"ok"`
+	DryRun     bool                `json:"dryRun"`
+	RunID      string              `json:"runId"`
+	CaseID     string              `json:"caseId"`
+	Title      string              `json:"title,omitempty"`
+	Request    DryRunRequestPlan   `json:"request"`
+	Assertions DryRunAssertionPlan `json:"assertions"`
+	Effects    DryRunEffectsPlan   `json:"effects"`
+	Warnings   []string            `json:"warnings"`
+}
+
+type DryRunRequestPlan struct {
+	Method     string   `json:"method"`
+	Path       string   `json:"path"`
+	URL        string   `json:"url,omitempty"`
+	HeaderKeys []string `json:"headerKeys"`
+	HasBody    bool     `json:"hasBody"`
+	BodyKeys   []string `json:"bodyKeys"`
+}
+
+type DryRunAssertionPlan struct {
+	ExpectedStatusCodes   []int `json:"expectedStatusCodes"`
+	ResponseContainsCount int   `json:"responseContainsCount"`
+}
+
+type DryRunEffectsPlan struct {
+	HTTPRequest         bool   `json:"httpRequest"`
+	WritesEvidence      bool   `json:"writesEvidence"`
+	WritesStore         bool   `json:"writesStore"`
+	PlannedEvidencePath string `json:"plannedEvidencePath"`
+}
+
+func Plan(options RunOptions) (DryRunPlan, error) {
+	item, err := Load(options.CasePath)
+	if err != nil {
+		return DryRunPlan{}, err
+	}
+	applyOverrides(&item, options.Overrides)
+
+	warnings := []string{}
+	endpoint := ""
+	if strings.TrimSpace(options.BaseURL) == "" {
+		warnings = append(warnings, "base url is not set; live runs need --base-url")
+	} else {
+		endpoint, err = buildURL(options.BaseURL, item.Request.Path)
+		if err != nil {
+			return DryRunPlan{}, err
+		}
+	}
+	runID := plannedCaseRunID(options.RunID)
+
+	return DryRunPlan{
+		OK:     true,
+		DryRun: true,
+		RunID:  runID,
+		CaseID: item.ID,
+		Title:  item.Title,
+		Request: DryRunRequestPlan{
+			Method:     strings.ToUpper(strings.TrimSpace(item.Request.Method)),
+			Path:       item.Request.Path,
+			URL:        endpoint,
+			HeaderKeys: sortedStringMapKeys(item.Request.Headers),
+			HasBody:    item.Request.Body != nil,
+			BodyKeys:   sortedAnyMapKeys(item.Request.Body),
+		},
+		Assertions: DryRunAssertionPlan{
+			ExpectedStatusCodes:   append([]int(nil), item.Assertions.ExpectedStatusCodes...),
+			ResponseContainsCount: len(item.Assertions.ResponseContains),
+		},
+		Effects: DryRunEffectsPlan{
+			HTTPRequest:         false,
+			WritesEvidence:      false,
+			WritesStore:         false,
+			PlannedEvidencePath: caseRunEvidencePath(options.EvidenceDir, runID),
+		},
+		Warnings: warnings,
+	}, nil
+}
+
 func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 	started := time.Now().UTC()
 	item, err := Load(options.CasePath)
@@ -60,15 +141,8 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 		return RunResult{}, err
 	}
 	applyOverrides(&item, options.Overrides)
-	runID := strings.TrimSpace(options.RunID)
-	if runID == "" {
-		runID = "case-run-" + time.Now().UTC().Format("20060102T150405")
-	}
-	root := options.EvidenceDir
-	if strings.TrimSpace(root) == "" {
-		root = filepath.Join(".runtime", "cases")
-	}
-	evidencePath := filepath.Join(root, runID)
+	runID := plannedCaseRunID(options.RunID)
+	evidencePath := caseRunEvidencePath(options.EvidenceDir, runID)
 	if err := os.MkdirAll(evidencePath, 0o755); err != nil {
 		return RunResult{}, fmt.Errorf("create evidence directory: %w", err)
 	}
@@ -162,6 +236,39 @@ func writeJSON(path string, value any) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
+}
+
+func plannedCaseRunID(runID string) string {
+	value := strings.TrimSpace(runID)
+	if value != "" {
+		return value
+	}
+	return "case-run-" + time.Now().UTC().Format("20060102T150405")
+}
+
+func caseRunEvidencePath(root string, runID string) string {
+	if strings.TrimSpace(root) == "" {
+		root = filepath.Join(".runtime", "cases")
+	}
+	return filepath.Join(root, plannedCaseRunID(runID))
+}
+
+func sortedStringMapKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedAnyMapKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 type ResponseEvidence struct {

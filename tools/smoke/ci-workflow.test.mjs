@@ -24,3 +24,19 @@ test("manual MySQL real sign-off runs preflight before full release gate", () =>
   assert.match(job, /AGENT_TESTBENCH_TRACE_GRAPHQL_URL:\s*\$\{\{\s*secrets\.AGENT_TESTBENCH_TRACE_GRAPHQL_URL\s*\}\}/);
   assert.match(job, /AGENT_TESTBENCH_SMOKE_TRACE_IDS:\s*\$\{\{\s*secrets\.AGENT_TESTBENCH_SMOKE_TRACE_IDS\s*\}\}/);
 });
+
+test("pull request CI passes changed paths into release-check scope", () => {
+  const workflow = readFileSync(join(rootDir, ".github", "workflows", "ci.yml"), "utf8");
+  const releaseJobIndex = workflow.indexOf("release-check:");
+  const signoffJobIndex = workflow.indexOf("mysql-real-signoff:");
+  assert.notEqual(releaseJobIndex, -1);
+  assert.notEqual(signoffJobIndex, -1);
+
+  const releaseJob = workflow.slice(releaseJobIndex, signoffJobIndex);
+  assert.match(releaseJob, /Collect release scope/);
+  assert.match(releaseJob, /refs\/remotes\/origin\/\$\{\{\s*github\.base_ref\s*\}\}/);
+  assert.match(releaseJob, /git diff --name-only --diff-filter=ACMRT "origin\/\$\{\{\s*github\.base_ref\s*\}\}" HEAD/);
+  assert.doesNotMatch(releaseJob, /origin\/\$\{\{\s*github\.base_ref\s*\}\}\.\.\.HEAD/);
+  assert.match(releaseJob, /"\$\{\{\s*github\.event_name\s*\}\}" == "pull_request" && -s \.release-check-scope/);
+  assert.match(releaseJob, /npm run release-check -- --scope-file \.release-check-scope/);
+});
