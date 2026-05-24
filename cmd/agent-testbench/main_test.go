@@ -3378,6 +3378,91 @@ func TestResearchRoadmapCanRankLiveCheckedCandidates(t *testing.T) {
 	}
 }
 
+func TestResearchRoadmapLiveCheckSummarizesGitHubRateLimit(t *testing.T) {
+	requests := []string{}
+	resetAt := time.Unix(1779667200, 0).UTC()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", resetAt.Unix()))
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"message":"API rate limit exceeded for 203.0.113.10."}`)
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-20T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases.",
+				"topMatches": []map[string]any{
+					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z"},
+					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t,
+		"research", "roadmap",
+		"--radar-index", indexPath,
+		"--min-references", "2",
+		"--limit", "1",
+		"--reference-limit", "2",
+		"--live-check",
+		"--github-api-url", server.URL,
+		"--json",
+	)
+	var report struct {
+		OK        bool `json:"ok"`
+		LiveCheck struct {
+			OK               bool     `json:"ok"`
+			CheckedCount     int      `json:"checkedCount"`
+			SkippedCount     int      `json:"skippedCount"`
+			RateLimited      bool     `json:"rateLimited"`
+			AuthRequired     bool     `json:"authRequired"`
+			RateLimitResetAt string   `json:"rateLimitResetAt"`
+			Diagnostics      []string `json:"diagnostics"`
+		} `json:"liveCheck"`
+		Items []struct {
+			ID        string `json:"id"`
+			LiveCheck struct {
+				SkippedCount     int    `json:"skippedCount"`
+				RateLimited      bool   `json:"rateLimited"`
+				RateLimitResetAt string `json:"rateLimitResetAt"`
+			} `json:"liveCheck"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode rate-limited roadmap json: %v\n%s", err, out)
+	}
+	if report.OK || report.LiveCheck.OK || !report.LiveCheck.RateLimited || !report.LiveCheck.AuthRequired || report.LiveCheck.CheckedCount != 1 || report.LiveCheck.SkippedCount != 1 || report.LiveCheck.RateLimitResetAt != resetAt.Format(time.RFC3339) {
+		t.Fatalf("rate-limited roadmap summary = %#v", report.LiveCheck)
+	}
+	if len(requests) != 1 || requests[0] != "/repos/aquasecurity/trivy" {
+		t.Fatalf("rate-limited roadmap should stop after first request, got %#v", requests)
+	}
+	if len(report.Items) != 1 || report.Items[0].ID != "quality-gates" || !report.Items[0].LiveCheck.RateLimited || report.Items[0].LiveCheck.SkippedCount != 1 || report.Items[0].LiveCheck.RateLimitResetAt != resetAt.Format(time.RFC3339) {
+		t.Fatalf("rate-limited roadmap item = %#v", report.Items)
+	}
+	if !strings.Contains(strings.Join(report.LiveCheck.Diagnostics, "\n"), "1 reference(s) skipped") || !strings.Contains(strings.Join(report.LiveCheck.Diagnostics, "\n"), resetAt.Format(time.RFC3339)) {
+		t.Fatalf("rate-limited roadmap diagnostics = %#v", report.LiveCheck.Diagnostics)
+	}
+}
+
 func TestResearchBacklogTurnsRoadmapIntoImplementationTasks(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{

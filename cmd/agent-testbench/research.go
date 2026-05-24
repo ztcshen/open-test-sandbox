@@ -311,14 +311,19 @@ type featureRoadmapChecks struct {
 }
 
 type featureRoadmapLiveSummary struct {
-	OK                bool `json:"ok"`
-	CheckedCount      int  `json:"checkedCount"`
-	CheckedCandidates int  `json:"checkedCandidates"`
-	FailedCount       int  `json:"failedCount"`
-	FailedCandidates  int  `json:"failedCandidates"`
-	RefreshNeeded     bool `json:"refreshNeeded"`
-	RefreshCount      int  `json:"refreshCount"`
-	RefreshCandidates int  `json:"refreshCandidates"`
+	OK                bool     `json:"ok"`
+	CheckedCount      int      `json:"checkedCount"`
+	CheckedCandidates int      `json:"checkedCandidates"`
+	SkippedCount      int      `json:"skippedCount,omitempty"`
+	FailedCount       int      `json:"failedCount"`
+	FailedCandidates  int      `json:"failedCandidates"`
+	RefreshNeeded     bool     `json:"refreshNeeded"`
+	RefreshCount      int      `json:"refreshCount"`
+	RefreshCandidates int      `json:"refreshCandidates"`
+	RateLimited       bool     `json:"rateLimited,omitempty"`
+	AuthRequired      bool     `json:"authRequired,omitempty"`
+	RateLimitResetAt  string   `json:"rateLimitResetAt,omitempty"`
+	Diagnostics       []string `json:"diagnostics,omitempty"`
 }
 
 type featureRoadmapItem struct {
@@ -3170,8 +3175,7 @@ func attachFeatureRoadmapLiveChecks(ctx context.Context, report *featureRoadmapR
 			MaxPushedDriftHours: options.MaxPushedDriftHours,
 		})
 		report.Items[index].LiveCheck = &liveReport
-		summary.CheckedCandidates++
-		summary.CheckedCount += liveReport.CheckedCount
+		absorbFeatureRoadmapLiveSummary(&summary, liveReport)
 		if liveReport.OK {
 			continue
 		}
@@ -3205,6 +3209,42 @@ func attachFeatureRoadmapLiveChecks(ctx context.Context, report *featureRoadmapR
 	sortFeatureRoadmapItems(report.Items)
 	report.Items = limitFeatureRoadmapItems(report.Items, options.Limit)
 	report.Count = len(report.Items)
+}
+
+func absorbFeatureRoadmapLiveSummary(summary *featureRoadmapLiveSummary, liveReport featureLiveCheckReport) {
+	summary.CheckedCandidates++
+	summary.CheckedCount += liveReport.CheckedCount
+	summary.SkippedCount += liveReport.SkippedCount
+	if !liveReport.RateLimited {
+		return
+	}
+	summary.RateLimited = true
+	summary.AuthRequired = summary.AuthRequired || liveReport.AuthRequired
+	summary.RateLimitResetAt = earliestNonEmptyRFC3339(summary.RateLimitResetAt, liveReport.RateLimitResetAt)
+	summary.Diagnostics = uniquePreserveOrder(append(summary.Diagnostics, liveReport.Diagnostics...))
+}
+
+func earliestNonEmptyRFC3339(left string, right string) string {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == "" {
+		return right
+	}
+	if right == "" {
+		return left
+	}
+	leftTime, leftOK := parseRadarTimestamp(left)
+	rightTime, rightOK := parseRadarTimestamp(right)
+	if !leftOK || !rightOK {
+		if right < left {
+			return right
+		}
+		return left
+	}
+	if rightTime.Before(leftTime) {
+		return right
+	}
+	return left
 }
 
 func sortFeatureRoadmapItems(items []featureRoadmapItem) {
@@ -3965,8 +4005,7 @@ func attachFeatureSearchLiveChecks(ctx context.Context, report *featureSearchRep
 		})
 		report.Candidates[index].LiveCheck = &liveReport
 		report.Candidates[index].PlanCommand = featurePlanCommandWithLiveCheck(feature.ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours) + featureGitHubAPIURLFlag(options.GitHubAPIURL)
-		summary.CheckedCandidates++
-		summary.CheckedCount += liveReport.CheckedCount
+		absorbFeatureRoadmapLiveSummary(&summary, liveReport)
 		if liveReport.OK {
 			continue
 		}
@@ -4156,8 +4195,7 @@ func attachFeatureCompareLiveChecks(ctx context.Context, report *featureCompareR
 		report.Items[index].LiveCheck = &liveReport
 		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
 		report.Items[index].BriefCommand = featureCompareBriefCommand(report.Query, options.IndexPath, minReferences, true, options.MaxStarDrift, options.MaxPushedDriftHours, "")
-		summary.CheckedCandidates++
-		summary.CheckedCount += liveReport.CheckedCount
+		absorbFeatureRoadmapLiveSummary(&summary, liveReport)
 		if liveReport.OK {
 			continue
 		}
@@ -4339,8 +4377,7 @@ func attachFeatureCommandLiveChecks(ctx context.Context, report *featureCommandR
 		report.Items[index].LiveCheck = &liveReport
 		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
 		report.Items[index].GateCommand = featureGateCommandWithLiveCheck(report.Items[index].ID, minReferences, report.Items[index].CatalogCommand, 72, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
-		summary.CheckedCandidates++
-		summary.CheckedCount += liveReport.CheckedCount
+		absorbFeatureRoadmapLiveSummary(&summary, liveReport)
 		if liveReport.OK {
 			continue
 		}
