@@ -438,6 +438,7 @@ Usage:
   agent-testbench research references --feature TEXT --radar-index PATH [--limit N] [--json]
   agent-testbench research live-check --radar-index PATH [--feature TEXT] [--limit N] [--max-star-drift N] [--max-pushed-drift-hours N] [--github-api-url URL] [--json]
   agent-testbench research brief --query TEXT --radar-index PATH [--min-references N] [--require-command COMMAND] [--max-age-hours N] [--reference-limit N] [--live-check] [--max-star-drift N] [--max-pushed-drift-hours N] [--format text|json|markdown] [--json]
+  agent-testbench research compare --query TEXT --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--live-check] [--max-star-drift N] [--max-pushed-drift-hours N] [--github-api-url URL] [--json]
   agent-testbench research sync --radar-root PATH [--radar-index PATH] [--refresh-limit N] [--max-age-hours N] [--min-references N] [--execute] [--json]
   agent-testbench research coverage --radar-index PATH [--min-references N] [--limit N] [--json]
   agent-testbench research audit --radar-index PATH [--min-references N] [--json]

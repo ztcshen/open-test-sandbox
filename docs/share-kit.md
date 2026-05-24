@@ -77,6 +77,11 @@ What to point out:
 - `agent-testbench research brief --query "quality gate" --live-check`
   keeps that one-shot brief feature-first while also embedding live GitHub
   reference policy and drift evidence.
+- `agent-testbench research compare --query "quality gate workflow" --live-check`
+  compares multiple matching feature candidates by query score, references,
+  command availability, implementation-command count, star signal, and live
+  GitHub drift so agents can choose the next CLI slice without overfitting to
+  the first fuzzy match.
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   rechecks selected references against live GitHub repository metadata, then
   reports policy failures or `refresh-needed` drift before demos or CLI
@@ -169,6 +174,9 @@ What to point out:
 - `agent-testbench research brief --query "quality gate" --live-check`
   会保持 one-shot brief 的 feature-first 入口，同时内嵌 GitHub 实时 reference
   policy 与 drift 证据。
+- `agent-testbench research compare --query "quality gate workflow" --live-check`
+  会按 query score、引用覆盖、命令可用性、实现命令数量、star 信号和 GitHub
+  实时 drift 横向比较多个 feature 候选，避免 agent 只依赖第一个模糊命中。
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   会用 GitHub 实时仓库元数据复核参考项目，并在 demo 或 CLI 实现依赖过期
   radar 数据前报告 policy failure 或 `refresh-needed` 漂移。
