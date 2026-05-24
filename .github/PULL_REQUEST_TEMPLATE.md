@@ -4,7 +4,8 @@
 
 ## Verification
 
-- [ ] `npm run release-check`
+- [ ] `npm run release-check -- --scope PATH`
+- [ ] `npm run release-check -- --scope-file .release-check-scope`
 
 ## Contract Impact
 
