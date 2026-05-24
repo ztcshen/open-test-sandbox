@@ -74,6 +74,9 @@ List the available feature index before choosing the next CLI slice:
   --radar-index $RADAR_HOME/data/feature-index.json \
   --query "quality gate" \
   --limit 5 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --json
 
 ./bin/agent-testbench.sh research brief \
@@ -128,14 +131,17 @@ List the available feature index before choosing the next CLI slice:
 `research search` is the feature-search front door. It uses the generated
 token index to rank candidate features for a query, reports matched tokens,
 reference counts, top recent 3K+ star references, and a copyable
-`research plan` command for each candidate. Successful searches also return
-copyable `compare`, `brief`, `references`, `plan`, and `live-check` follow-up
-commands for the best candidate so the fuzzy search can move directly into
-design or live reference validation. Use it when the feature wording is still
-fuzzy and several maintained feature records may apply. Its JSON also includes
-search diagnostics: indexed/scanned token counts, matched token count,
-candidate feature count, missing query terms, and starter tokens plus recovery
-commands when the query has no candidates.
+`research plan` command for each candidate. Add `--live-check` when the search
+result itself should prove that candidate references still satisfy the GitHub
+policy and local-index drift thresholds; the report then includes a summary
+live gate plus per-candidate live evidence before the first design command is
+chosen. Successful searches also return copyable `compare`, `brief`,
+`references`, `plan`, and `live-check` follow-up commands for the best
+candidate, carrying live-check flags forward when used. Use it when the feature
+wording is still fuzzy and several maintained feature records may apply. Its
+JSON also includes search diagnostics: indexed/scanned token counts, matched
+token count, candidate feature count, missing query terms, and starter tokens
+plus recovery commands when the query has no candidates.
 
 `research brief` is the one-shot pre-design runbook. It starts from a fuzzy
 query, selects the highest-ranked feature candidate, runs the same freshness,
@@ -432,7 +438,7 @@ Recommended pre-design gate:
 ```sh
 ./bin/agent-testbench.sh research features --filter "new cli capability"
 ./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3 --strict-search
-./bin/agent-testbench.sh research search --query "new cli capability" --limit 5
+./bin/agent-testbench.sh research search --query "new cli capability" --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research compare --query "new cli capability" --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research command --command "target command" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research scope --scope cmd/agent-testbench --scope docs/feature-research.md --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72

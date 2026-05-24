@@ -422,15 +422,16 @@ type featureRadarCatalogItem struct {
 }
 
 type featureSearchReport struct {
-	OK                bool                     `json:"ok"`
-	Query             string                   `json:"query"`
-	NormalizedQuery   string                   `json:"normalizedQuery"`
-	Count             int                      `json:"count"`
-	Policy            featureRadarPolicy       `json:"policy"`
-	SourceGeneratedAt string                   `json:"sourceGeneratedAt"`
-	Stats             featureSearchStats       `json:"stats"`
-	Candidates        []featureSearchCandidate `json:"candidates"`
-	NextCommands      []string                 `json:"nextCommands,omitempty"`
+	OK                bool                       `json:"ok"`
+	Query             string                     `json:"query"`
+	NormalizedQuery   string                     `json:"normalizedQuery"`
+	Count             int                        `json:"count"`
+	Policy            featureRadarPolicy         `json:"policy"`
+	SourceGeneratedAt string                     `json:"sourceGeneratedAt"`
+	Stats             featureSearchStats         `json:"stats"`
+	LiveCheck         *featureRoadmapLiveSummary `json:"liveCheck,omitempty"`
+	Candidates        []featureSearchCandidate   `json:"candidates"`
+	NextCommands      []string                   `json:"nextCommands,omitempty"`
 }
 
 type featureSearchStats struct {
@@ -444,15 +445,16 @@ type featureSearchStats struct {
 }
 
 type featureSearchCandidate struct {
-	ID            string              `json:"id"`
-	Title         string              `json:"title"`
-	Intent        string              `json:"intent,omitempty"`
-	Score         int                 `json:"score"`
-	MatchedTokens []string            `json:"matchedTokens"`
-	References    int                 `json:"references"`
-	Gate          string              `json:"gate"`
-	PlanCommand   string              `json:"planCommand"`
-	TopReferences []featureRadarMatch `json:"topReferences"`
+	ID            string                  `json:"id"`
+	Title         string                  `json:"title"`
+	Intent        string                  `json:"intent,omitempty"`
+	Score         int                     `json:"score"`
+	MatchedTokens []string                `json:"matchedTokens"`
+	References    int                     `json:"references"`
+	Gate          string                  `json:"gate"`
+	PlanCommand   string                  `json:"planCommand"`
+	LiveCheck     *featureLiveCheckReport `json:"liveCheck,omitempty"`
+	TopReferences []featureRadarMatch     `json:"topReferences"`
 }
 
 type featureBriefReport struct {
@@ -753,6 +755,11 @@ func runResearchSearch(args []string) error {
 	limit := flags.Int("limit", 5, "Maximum candidate features to show")
 	referenceLimit := flags.Int("reference-limit", 2, "Maximum top references per candidate to include")
 	minReferences := flags.Int("min-references", 3, "Reference gate shown for each candidate")
+	liveCheck := flags.Bool("live-check", false, "Also verify candidate references against live GitHub repository metadata")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token for --live-check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "With --live-check, fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "With --live-check, fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -776,10 +783,30 @@ func runResearchSearch(args []string) error {
 		return errors.New("research search requires a radar index with non-empty tokenIndex; regenerate the feature index before ranked search")
 	}
 	report := buildFeatureSearchReport(index, resolvedIndexPath, resolvedQuery, *limit, *referenceLimit, *minReferences)
-	if *jsonOutput {
-		return json.NewEncoder(os.Stdout).Encode(report)
+	if *liveCheck {
+		attachFeatureSearchLiveChecks(context.Background(), &report, featureRoadmapLiveOptions{
+			Index:               index,
+			IndexPath:           resolvedIndexPath,
+			ReferenceLimit:      *referenceLimit,
+			GitHubAPIURL:        *githubAPIURL,
+			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			MaxStarDrift:        *maxStarDrift,
+			MaxPushedDriftHours: *maxPushedDriftHours,
+		}, *minReferences)
+		if len(report.Candidates) > 0 {
+			report.NextCommands = featureSearchFollowUpCommands(resolvedQuery, report.Candidates[0].ID, resolvedIndexPath, *minReferences, *limit, *referenceLimit, true, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+		}
 	}
-	printFeatureSearchReport(report)
+	if *jsonOutput {
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			return err
+		}
+	} else {
+		printFeatureSearchReport(report)
+	}
+	if report.LiveCheck != nil && !report.LiveCheck.OK {
+		return errors.New("feature search live-check failed")
+	}
 	return nil
 }
 
@@ -3618,7 +3645,7 @@ func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query s
 	if len(candidates) == 0 {
 		nextCommands = featureSearchNoMatchCommands(indexPath, minReferences)
 	} else {
-		nextCommands = featureSearchFollowUpCommands(query, candidates[0].ID, indexPath, minReferences, limit, referenceLimit)
+		nextCommands = featureSearchFollowUpCommands(query, candidates[0].ID, indexPath, minReferences, limit, referenceLimit, false, 0, 0, "")
 	}
 	return featureSearchReport{
 		OK:                len(candidates) > 0,
@@ -3631,6 +3658,53 @@ func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query s
 		Candidates:        candidates,
 		NextCommands:      nextCommands,
 	}
+}
+
+func attachFeatureSearchLiveChecks(ctx context.Context, report *featureSearchReport, options featureRoadmapLiveOptions, minReferences int) {
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	summary := featureRoadmapLiveSummary{OK: true}
+	for index := range report.Candidates {
+		feature := options.Index.Features[report.Candidates[index].ID]
+		liveReport := buildFeatureLiveCheckReport(ctx, featureLiveCheckOptions{
+			Index:               options.Index,
+			IndexPath:           options.IndexPath,
+			Query:               feature.ID,
+			Feature:             feature,
+			References:          featureProjectReferences(options.Index, feature, options.ReferenceLimit),
+			GitHubAPIURL:        options.GitHubAPIURL,
+			Token:               options.Token,
+			MaxStarDrift:        options.MaxStarDrift,
+			MaxPushedDriftHours: options.MaxPushedDriftHours,
+		})
+		report.Candidates[index].LiveCheck = &liveReport
+		report.Candidates[index].PlanCommand = featurePlanCommandWithLiveCheck(feature.ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours) + featureGitHubAPIURLFlag(options.GitHubAPIURL)
+		summary.CheckedCandidates++
+		summary.CheckedCount += liveReport.CheckedCount
+		if liveReport.OK {
+			continue
+		}
+		summary.OK = false
+		if liveReport.FailedCount > 0 {
+			summary.FailedCount += liveReport.FailedCount
+			summary.FailedCandidates++
+			report.Candidates[index].Gate = "live-failed"
+		}
+		if liveReport.RefreshCount > 0 {
+			summary.RefreshNeeded = true
+			summary.RefreshCount += liveReport.RefreshCount
+			summary.RefreshCandidates++
+			if liveReport.FailedCount == 0 {
+				report.Candidates[index].Gate = "needs-refresh"
+			}
+		}
+		if liveReport.FailedCount == 0 && liveReport.RefreshCount == 0 {
+			report.Candidates[index].Gate = "live-failed"
+		}
+	}
+	report.LiveCheck = &summary
+	report.OK = report.OK && summary.OK
 }
 
 func featureSearchMissingTerms(queryTerms []string, matchedTokens map[string]bool) []string {
@@ -3693,7 +3767,7 @@ func featureSearchNoMatchCommands(indexPath string, minReferences int) []string 
 	}
 }
 
-func featureSearchFollowUpCommands(query string, featureID string, indexPath string, minReferences int, limit int, referenceLimit int) []string {
+func featureSearchFollowUpCommands(query string, featureID string, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) []string {
 	if minReferences <= 0 {
 		minReferences = 3
 	}
@@ -3703,12 +3777,19 @@ func featureSearchFollowUpCommands(query string, featureID string, indexPath str
 	if referenceLimit < 0 {
 		referenceLimit = 0
 	}
+	planCommand := featurePlanCommandWithLiveCheck(featureID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours)
+	briefCommand := fmt.Sprintf("agent-testbench research brief --query %s%s --min-references %d", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences)
+	if liveCheck {
+		briefCommand += featureResearchLiveFlags(true, maxStarDrift, maxPushedDriftHours) + featureGitHubAPIURLFlag(githubAPIURL)
+		planCommand += featureGitHubAPIURLFlag(githubAPIURL)
+	}
+	briefCommand += " --format markdown"
 	return []string{
-		fmt.Sprintf("agent-testbench research compare --query %s%s --min-references %d --limit %d --reference-limit %d --json", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences, limit, referenceLimit),
-		fmt.Sprintf("agent-testbench research brief --query %s%s --min-references %d --format markdown", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences),
+		fmt.Sprintf("agent-testbench research compare --query %s%s --min-references %d --limit %d --reference-limit %d%s%s --json", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences, limit, referenceLimit, featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours), featureGitHubAPIURLFlag(githubAPIURL)),
+		briefCommand,
 		"agent-testbench research references --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --limit 10 --json",
-		"agent-testbench research plan --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences) + " --format markdown",
-		"agent-testbench research live-check --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --json",
+		planCommand,
+		featureGateLiveCheckCommand(featureID, indexPath, referenceLimit, maxStarDrift, maxPushedDriftHours, githubAPIURL),
 	}
 }
 
@@ -4712,6 +4793,9 @@ func printFeatureSearchReport(report featureSearchReport) {
 	if report.SourceGeneratedAt != "" {
 		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
 	}
+	if report.LiveCheck != nil {
+		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
 	if report.Count == 0 {
 		fmt.Println("No candidates")
 		if len(report.Stats.MissingTerms) > 0 {
@@ -4729,7 +4813,11 @@ func printFeatureSearchReport(report featureSearchReport) {
 		return
 	}
 	for _, candidate := range report.Candidates {
-		fmt.Printf("- %s (%s): score=%d references=%d gate=%s\n", candidate.Title, candidate.ID, candidate.Score, candidate.References, candidate.Gate)
+		liveStatus := ""
+		if candidate.LiveCheck != nil {
+			liveStatus = " live=" + statusWord(candidate.LiveCheck.OK)
+		}
+		fmt.Printf("- %s (%s): score=%d references=%d gate=%s%s\n", candidate.Title, candidate.ID, candidate.Score, candidate.References, candidate.Gate, liveStatus)
 		if len(candidate.MatchedTokens) > 0 {
 			fmt.Printf("  matched: %s\n", strings.Join(candidate.MatchedTokens, ", "))
 		}

@@ -93,9 +93,10 @@ What to point out:
   rechecks selected references against live GitHub repository metadata, then
   reports policy failures or `refresh-needed` drift before demos or CLI
   implementation depend on stale local radar data.
-- `agent-testbench research search --query "workflow failure analysis"`
-  ranks feature candidates, explains matched tokens, and prints copyable
-  compare, brief, references, plan, and live-check follow-up commands.
+- `agent-testbench research search --query "workflow failure analysis" --live-check`
+  ranks feature candidates, explains matched tokens, verifies candidate
+  references against live GitHub metadata, and prints copyable compare, brief,
+  references, plan, and live-check follow-up commands.
 - `agent-testbench research gate --feature "workflow report" --live-check`
   combines freshness, audit, reference coverage, command availability, and live
   reference checks into one pre-implementation CLI gate.
@@ -197,9 +198,9 @@ What to point out:
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   会用 GitHub 实时仓库元数据复核参考项目，并在 demo 或 CLI 实现依赖过期
   radar 数据前报告 policy failure 或 `refresh-needed` 漂移。
-- `agent-testbench research search --query "workflow failure analysis"`
-  会排序 feature 候选、解释 matched tokens，并直接打印 compare、brief、
-  references、plan 和 live-check 后续命令。
+- `agent-testbench research search --query "workflow failure analysis" --live-check`
+  会排序 feature 候选、解释 matched tokens，使用 GitHub 实时元数据复核候选
+  reference，并直接打印 compare、brief、references、plan 和 live-check 后续命令。
 - `agent-testbench research gate --feature "workflow report" --live-check`
   会把 freshness、audit、reference coverage、命令可用性和实时 reference
   校验合成一个 CLI 实现前置门禁。

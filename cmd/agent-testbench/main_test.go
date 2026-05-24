@@ -513,6 +513,136 @@ func TestResearchSearchRanksCandidateFeaturesFromRadarIndex(t *testing.T) {
 	}
 }
 
+func TestResearchSearchCanLiveCheckCandidateReferences(t *testing.T) {
+	requested := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/aquasecurity/trivy":
+			fmt.Fprint(w, `{"full_name":"aquasecurity/trivy","html_url":"https://github.com/aquasecurity/trivy","stargazers_count":35200,"pushed_at":"2026-05-24T11:51:15Z","archived":false,"fork":false}`)
+		case "/repos/n8n-io/n8n":
+			fmt.Fprint(w, `{"full_name":"n8n-io/n8n","html_url":"https://github.com/n8n-io/n8n","stargazers_count":189900,"pushed_at":"2026-05-24T09:05:35Z","archived":false,"fork":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"gate":          []string{"quality-gates", "workflow-orchestration"},
+			"quality gate":  []string{"quality-gates"},
+			"workflow gate": []string{"workflow-orchestration"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases with policy checks.",
+				"topMatches": []map[string]any{
+					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z"},
+				},
+			},
+			"workflow-orchestration": map[string]any{
+				"id":     "workflow-orchestration",
+				"title":  "Workflow Orchestration",
+				"intent": "Find projects that model workflow automation.",
+				"topMatches": []map[string]any{
+					{"fullName": "n8n-io/n8n", "url": "https://github.com/n8n-io/n8n", "stars": 189461, "pushedAt": "2026-05-24T09:05:35Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t,
+		"research", "search",
+		"--query", "gate",
+		"--radar-index", indexPath,
+		"--limit", "2",
+		"--reference-limit", "1",
+		"--min-references", "1",
+		"--live-check",
+		"--github-api-url", server.URL,
+		"--max-star-drift", "1000",
+		"--max-pushed-drift-hours", "100",
+		"--json",
+	)
+	var report struct {
+		OK        bool `json:"ok"`
+		LiveCheck struct {
+			OK                bool `json:"ok"`
+			CheckedCandidates int  `json:"checkedCandidates"`
+			CheckedCount      int  `json:"checkedCount"`
+			FailedCount       int  `json:"failedCount"`
+			RefreshCount      int  `json:"refreshCount"`
+		} `json:"liveCheck"`
+		Candidates []struct {
+			ID          string `json:"id"`
+			Gate        string `json:"gate"`
+			PlanCommand string `json:"planCommand"`
+			LiveCheck   struct {
+				OK           bool `json:"ok"`
+				CheckedCount int  `json:"checkedCount"`
+				References   []struct {
+					FullName  string `json:"fullName"`
+					Status    string `json:"status"`
+					LiveStars int    `json:"liveStars"`
+				} `json:"references"`
+			} `json:"liveCheck"`
+		} `json:"candidates"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode live research search json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.LiveCheck.OK || report.LiveCheck.CheckedCandidates != 2 || report.LiveCheck.CheckedCount != 2 || report.LiveCheck.FailedCount != 0 || report.LiveCheck.RefreshCount != 0 {
+		t.Fatalf("live search summary = %#v", report.LiveCheck)
+	}
+	if len(requested) != 2 || !stringSliceContains(requested, "/repos/aquasecurity/trivy") || !stringSliceContains(requested, "/repos/n8n-io/n8n") {
+		t.Fatalf("requested paths = %#v", requested)
+	}
+	if len(report.Candidates) != 2 || !report.Candidates[0].LiveCheck.OK || report.Candidates[0].LiveCheck.CheckedCount != 1 || report.Candidates[0].LiveCheck.References[0].LiveStars != 35200 {
+		t.Fatalf("top live candidate = %#v", report.Candidates)
+	}
+	if !strings.Contains(report.Candidates[0].PlanCommand, "--live-check") || !strings.Contains(report.Candidates[0].PlanCommand, "--max-star-drift 1000") || !strings.Contains(report.Candidates[0].PlanCommand, "--max-pushed-drift-hours 100") {
+		t.Fatalf("live plan command = %q", report.Candidates[0].PlanCommand)
+	}
+	joinedNext := strings.Join(report.NextCommands, "\n")
+	for _, want := range []string{
+		"research compare --query 'gate'",
+		"research brief --query 'gate'",
+		"research plan --feature 'quality-gates'",
+		"research live-check --feature 'quality-gates'",
+		"--live-check",
+		"--max-star-drift 1000",
+		"--max-pushed-drift-hours 100",
+		"--github-api-url " + quoteCommandValue(server.URL),
+	} {
+		if !strings.Contains(joinedNext, want) {
+			t.Fatalf("live search next commands missing %q:\n%s", want, joinedNext)
+		}
+	}
+
+	textOut := runCLI(t, "research", "search", "--query", "gate", "--radar-index", indexPath, "--limit", "1", "--reference-limit", "1", "--min-references", "1", "--live-check", "--github-api-url", server.URL, "--max-star-drift", "1000", "--max-pushed-drift-hours", "100")
+	for _, want := range []string{"Live check: ok checked=1 failed=0 refresh-needed=0", "live=ok", "Top reference: aquasecurity/trivy"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("live search text output missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestResearchSearchExplainsZeroMatchQueries(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{
