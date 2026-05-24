@@ -1901,6 +1901,76 @@ func TestResearchScopeWritesNormalizedScopeFileForReleaseCheck(t *testing.T) {
 	}
 }
 
+func TestResearchScopeCarriesTokenEnvIntoLiveFollowUps(t *testing.T) {
+	t.Setenv("AGENT_TESTBENCH_RADAR_TOKEN", "radar-token")
+	authHeaders := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeaders = append(authHeaders, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"full_name":"example/quality-one","html_url":"https://github.com/example/quality-one","stargazers_count":9000,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string][]string{
+			"release":      {"quality-gates"},
+			"release gate": {"quality-gates"},
+			"checks":       {"quality-gates"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/quality-one", "url": "https://github.com/example/quality-one", "stars": 9000, "pushedAt": "2026-05-24T12:00:00Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t,
+		"research", "scope",
+		"--scope", "cmd/agent-testbench/research.go",
+		"--radar-index", indexPath,
+		"--min-references", "1",
+		"--limit", "1",
+		"--reference-limit", "1",
+		"--live-check",
+		"--token-env", "AGENT_TESTBENCH_RADAR_TOKEN",
+		"--github-api-url", server.URL,
+		"--json",
+	)
+	var report struct {
+		OK           bool     `json:"ok"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode live scope token-env json: %v\n%s", err, out)
+	}
+	if !report.OK {
+		t.Fatalf("live scope should pass = %#v", report)
+	}
+	if fmt.Sprint(authHeaders) != "[Bearer radar-token]" {
+		t.Fatalf("live scope should use custom token env for GitHub requests, got %#v", authHeaders)
+	}
+	joinedNext := strings.Join(report.NextCommands, "\n")
+	if !strings.Contains(joinedNext, "--token-env 'AGENT_TESTBENCH_RADAR_TOKEN'") {
+		t.Fatalf("next commands should preserve custom live-check token env: %#v", report.NextCommands)
+	}
+}
+
 func TestResearchSyncPlansAndExecutesRadarMaintenanceWorkflow(t *testing.T) {
 	radarRoot := t.TempDir()
 	dataDir := filepath.Join(radarRoot, "data")

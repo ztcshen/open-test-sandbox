@@ -815,7 +815,7 @@ func runResearchSearch(args []string) error {
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		}, *minReferences)
 		if len(report.Candidates) > 0 {
-			report.NextCommands = featureSearchFollowUpCommands(resolvedQuery, report.Candidates[0].ID, resolvedIndexPath, *minReferences, *limit, *referenceLimit, true, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+			report.NextCommands = featureSearchFollowUpCommands(resolvedQuery, report.Candidates[0].ID, resolvedIndexPath, *minReferences, *limit, *referenceLimit, true, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))
 		}
 	}
 	if *jsonOutput {
@@ -1001,8 +1001,8 @@ func runResearchBrief(args []string) error {
 		})
 		attachFeatureBriefLiveCheck(&report, liveReport)
 		nonLiveGateCommand := report.GateCommand
-		report.GateCommand = featureGateCommandWithLiveCheck(report.Selected.ID, *minReferences, *requireCommand, *maxAgeHours, resolvedIndexPath, true, *maxStarDrift, *maxPushedDriftHours)
-		liveCommand := featureGateLiveCheckCommand(report.Selected.ID, resolvedIndexPath, *referenceLimit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+		report.GateCommand = featureGateCommandWithLiveCheck(report.Selected.ID, *minReferences, *requireCommand, *maxAgeHours, resolvedIndexPath, true, *maxStarDrift, *maxPushedDriftHours, strings.TrimSpace(*tokenEnv))
+		liveCommand := featureGateLiveCheckCommand(report.Selected.ID, resolvedIndexPath, *referenceLimit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))
 		report.VerificationCommands = removeString(report.VerificationCommands, nonLiveGateCommand)
 		report.VerificationCommands = append([]string{liveCommand, report.GateCommand}, report.VerificationCommands...)
 		report.VerificationCommands = uniquePreserveOrder(report.VerificationCommands)
@@ -1072,7 +1072,7 @@ func runResearchCompare(args []string) error {
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		}, *minReferences)
-		report.NextCommands = featureCompareCommands(*query, resolvedIndexPath, *minReferences, *limit, *referenceLimit, true, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+		report.NextCommands = featureCompareCommands(*query, resolvedIndexPath, *minReferences, *limit, *referenceLimit, true, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))
 	}
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
@@ -1131,7 +1131,7 @@ func runResearchCommand(args []string) error {
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		}, *minReferences)
 	}
-	report.NextCommands = featureCommandNextCommands(report, resolvedIndexPath, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours)
+	report.NextCommands = featureCommandNextCommands(report, resolvedIndexPath, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
 			return err
@@ -1190,7 +1190,7 @@ func runResearchScope(args []string) error {
 		return err
 	}
 	scopeOutputFile := strings.TrimSpace(*writeScopeFile)
-	report := buildFeatureScopeReport(index, resolvedIndexPath, scopes, scopeOutputFile, *query, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+	report := buildFeatureScopeReport(index, resolvedIndexPath, scopes, scopeOutputFile, *query, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))
 	if *liveCheck {
 		compare := featureCompareReport{
 			OK:                report.OK,
@@ -1221,7 +1221,7 @@ func runResearchScope(args []string) error {
 		report.Count = compare.Count
 		report.Items = compare.Items
 		report.Reasons = compare.Reasons
-		report.NextCommands = featureScopeNextCommands(report, resolvedIndexPath, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+		report.NextCommands = featureScopeNextCommands(report, resolvedIndexPath, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))
 	}
 	if scopeOutputFile != "" {
 		if err := writeFeatureScopeFile(scopeOutputFile, scopes); err != nil {
@@ -1484,7 +1484,7 @@ func runResearchRefreshPlan(args []string) error {
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		})
-		attachFeatureRefreshPlanLiveCheck(&report, roadmap, index, resolvedIndexPath, *minReferences, *limit, firstFeatureRefreshCommand(report.NextCommands), *referenceLimit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+		attachFeatureRefreshPlanLiveCheck(&report, roadmap, index, resolvedIndexPath, *minReferences, *limit, firstFeatureRefreshCommand(report.NextCommands), *referenceLimit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))
 	}
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
@@ -1669,7 +1669,7 @@ func runResearchPlan(args []string) error {
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		})
 		attachFeaturePlanLiveCheck(&report, liveReport)
-		report.VerificationCommands = append([]string{featureGateLiveCheckCommand(feature.ID, resolvedIndexPath, *limit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)}, report.VerificationCommands...)
+		report.VerificationCommands = append([]string{featureGateLiveCheckCommand(feature.ID, resolvedIndexPath, *limit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))}, report.VerificationCommands...)
 	}
 	format := strings.ToLower(strings.TrimSpace(*outputFormat))
 	if *jsonOutput {
@@ -1780,7 +1780,7 @@ func runResearchGate(args []string) error {
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		})
 		attachFeatureGateLiveCheck(&report, liveReport)
-		report.VerificationCommands = append([]string{featureGateLiveCheckCommand(*featureQuery, resolvedIndexPath, *limit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)}, report.VerificationCommands...)
+		report.VerificationCommands = append([]string{featureGateLiveCheckCommand(*featureQuery, resolvedIndexPath, *limit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL, strings.TrimSpace(*tokenEnv))}, report.VerificationCommands...)
 	}
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
@@ -2535,7 +2535,7 @@ func buildFeatureRefreshPlanReport(index featureRadarIndex, indexPath string, mi
 	return report
 }
 
-func attachFeatureRefreshPlanLiveCheck(report *featureRefreshPlanReport, roadmap featureRoadmapReport, index featureRadarIndex, indexPath string, minReferences int, limit int, refreshCommand string, referenceLimit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) {
+func attachFeatureRefreshPlanLiveCheck(report *featureRefreshPlanReport, roadmap featureRoadmapReport, index featureRadarIndex, indexPath string, minReferences int, limit int, refreshCommand string, referenceLimit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) {
 	if roadmap.LiveCheck == nil {
 		return
 	}
@@ -2558,7 +2558,7 @@ func attachFeatureRefreshPlanLiveCheck(report *featureRefreshPlanReport, roadmap
 	report.Reasons = uniquePreserveOrder(report.Reasons)
 	report.NeedsRefresh = len(report.Reasons) > 0
 	report.FocusFeatures = mergeFeatureRefreshLiveFocus(report.FocusFeatures, roadmap, index, indexPath, minReferences, limit, refreshCommand)
-	report.NextCommands = uniquePreserveOrder(append(report.NextCommands, featureRefreshLiveRoadmapCommand(indexPath, minReferences, limit, referenceLimit, maxStarDrift, maxPushedDriftHours, githubAPIURL)))
+	report.NextCommands = uniquePreserveOrder(append(report.NextCommands, featureRefreshLiveRoadmapCommand(indexPath, minReferences, limit, referenceLimit, maxStarDrift, maxPushedDriftHours, githubAPIURL, firstOptionalString(tokenEnvs))))
 }
 
 func firstFeatureRefreshCommand(commands []string) string {
@@ -2888,7 +2888,7 @@ func attachFeatureSyncLiveCheck(ctx context.Context, report *featureSyncReport, 
 		MaxStarDrift:        options.MaxStarDrift,
 		MaxPushedDriftHours: options.MaxPushedDriftHours,
 	})
-	attachFeatureRefreshPlanLiveCheck(&refreshPlan, roadmap, index, options.RadarIndex, options.MinReferences, options.LiveLimit, featureSyncRefreshCommand(report.Steps), options.ReferenceLimit, options.MaxStarDrift, options.MaxPushedDriftHours, options.GitHubAPIURL)
+	attachFeatureRefreshPlanLiveCheck(&refreshPlan, roadmap, index, options.RadarIndex, options.MinReferences, options.LiveLimit, featureSyncRefreshCommand(report.Steps), options.ReferenceLimit, options.MaxStarDrift, options.MaxPushedDriftHours, options.GitHubAPIURL, options.TokenEnv)
 	report.LiveCheck = refreshPlan.LiveCheck
 	report.LiveRefreshPlan = &refreshPlan
 	report.Checks.LiveCheckOK = refreshPlan.LiveCheck == nil || refreshPlan.LiveCheck.OK
@@ -3213,7 +3213,7 @@ func attachFeatureRoadmapLiveChecks(ctx context.Context, report *featureRoadmapR
 	report.Checks.LiveCheckOK = summary.OK
 	report.OK = report.OK && summary.OK
 	for index := range report.Items {
-		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, report.ReferenceGate.Required, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
+		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, report.ReferenceGate.Required, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours, options.TokenEnv)
 	}
 	sortFeatureRoadmapItems(report.Items)
 	report.Items = limitFeatureRoadmapItems(report.Items, options.Limit)
@@ -3435,10 +3435,10 @@ func featurePlanCommand(featureID string, minReferences int, indexPath string) s
 	return featurePlanCommandWithLiveCheck(featureID, minReferences, indexPath, false, 0, 0)
 }
 
-func featurePlanCommandWithLiveCheck(featureID string, minReferences int, indexPath string, liveCheck bool, maxStarDrift int, maxPushedDriftHours int) string {
+func featurePlanCommandWithLiveCheck(featureID string, minReferences int, indexPath string, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, tokenEnvs ...string) string {
 	command := "agent-testbench research plan --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences)
 	if liveCheck {
-		command += " --live-check"
+		command += " --live-check" + featureTokenEnvFlag(firstOptionalString(tokenEnvs))
 		if maxStarDrift > 0 {
 			command += fmt.Sprintf(" --max-star-drift %d", maxStarDrift)
 		}
@@ -3704,11 +3704,12 @@ func featureGateVerificationCommands(featureQuery string, requireMinMatches int,
 	return commands
 }
 
-func featureGateLiveCheckCommand(featureQuery string, indexPath string, limit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) string {
+func featureGateLiveCheckCommand(featureQuery string, indexPath string, limit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) string {
 	command := "agent-testbench research live-check --feature " + quoteCommandValue(featureQuery) + featureRadarIndexFlag(indexPath)
 	if limit > 0 {
 		command += fmt.Sprintf(" --limit %d", limit)
 	}
+	command += featureTokenEnvFlag(firstOptionalString(tokenEnvs))
 	if maxStarDrift > 0 {
 		command += fmt.Sprintf(" --max-star-drift %d", maxStarDrift)
 	}
@@ -3721,7 +3722,7 @@ func featureGateLiveCheckCommand(featureQuery string, indexPath string, limit in
 	return command + " --json"
 }
 
-func featureRefreshLiveRoadmapCommand(indexPath string, minReferences int, limit int, referenceLimit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) string {
+func featureRefreshLiveRoadmapCommand(indexPath string, minReferences int, limit int, referenceLimit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) string {
 	command := fmt.Sprintf("agent-testbench research roadmap%s --min-references %d", featureRadarIndexFlag(indexPath), minReferences)
 	if limit > 0 {
 		command += fmt.Sprintf(" --limit %d", limit)
@@ -3730,6 +3731,7 @@ func featureRefreshLiveRoadmapCommand(indexPath string, minReferences int, limit
 		command += fmt.Sprintf(" --reference-limit %d", referenceLimit)
 	}
 	command += " --live-check"
+	command += featureTokenEnvFlag(firstOptionalString(tokenEnvs))
 	if maxStarDrift > 0 {
 		command += fmt.Sprintf(" --max-star-drift %d", maxStarDrift)
 	}
@@ -3742,31 +3744,32 @@ func featureRefreshLiveRoadmapCommand(indexPath string, minReferences int, limit
 	return command + " --json"
 }
 
-func featureCompareCommands(query string, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) []string {
+func featureCompareCommands(query string, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) []string {
 	query = strings.TrimSpace(query)
+	tokenEnv := firstOptionalString(tokenEnvs)
 	commands := []string{
-		featureCompareBriefCommand(query, indexPath, minReferences, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL),
-		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL),
+		featureCompareBriefCommand(query, indexPath, minReferences, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL, tokenEnv),
+		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL, tokenEnv),
 		fmt.Sprintf("agent-testbench research refresh-plan%s --min-references %d --max-age-hours 72 --json", featureRadarIndexFlag(indexPath), minReferences),
 	}
 	if liveCheck {
-		commands = append(commands, fmt.Sprintf("agent-testbench research refresh-plan%s --min-references %d --max-age-hours 72 --limit %d --reference-limit %d --live-check%s%s%s --json", featureRadarIndexFlag(indexPath), minReferences, limit, referenceLimit, featureStarDriftFlag(maxStarDrift), featurePushedDriftFlag(maxPushedDriftHours), featureGitHubAPIURLFlag(githubAPIURL)))
+		commands = append(commands, fmt.Sprintf("agent-testbench research refresh-plan%s --min-references %d --max-age-hours 72 --limit %d --reference-limit %d --live-check%s%s%s%s --json", featureRadarIndexFlag(indexPath), minReferences, limit, referenceLimit, featureTokenEnvFlag(tokenEnv), featureStarDriftFlag(maxStarDrift), featurePushedDriftFlag(maxPushedDriftHours), featureGitHubAPIURLFlag(githubAPIURL)))
 	}
 	return uniquePreserveOrder(commands)
 }
 
-func featureCompareBriefCommand(query string, indexPath string, minReferences int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) string {
+func featureCompareBriefCommand(query string, indexPath string, minReferences int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) string {
 	command := "agent-testbench research brief --query " + quoteCommandValue(query) + featureRadarIndexFlag(indexPath)
 	if minReferences > 0 {
 		command += fmt.Sprintf(" --min-references %d", minReferences)
 	}
 	if liveCheck {
-		command += " --live-check" + featureStarDriftFlag(maxStarDrift) + featurePushedDriftFlag(maxPushedDriftHours) + featureGitHubAPIURLFlag(githubAPIURL)
+		command += " --live-check" + featureTokenEnvFlag(firstOptionalString(tokenEnvs)) + featureStarDriftFlag(maxStarDrift) + featurePushedDriftFlag(maxPushedDriftHours) + featureGitHubAPIURLFlag(githubAPIURL)
 	}
 	return command + " --json"
 }
 
-func featureCompareRoadmapCommand(indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) string {
+func featureCompareRoadmapCommand(indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) string {
 	command := fmt.Sprintf("agent-testbench research roadmap%s --min-references %d", featureRadarIndexFlag(indexPath), minReferences)
 	if limit > 0 {
 		command += fmt.Sprintf(" --limit %d", limit)
@@ -3775,7 +3778,7 @@ func featureCompareRoadmapCommand(indexPath string, minReferences int, limit int
 		command += fmt.Sprintf(" --reference-limit %d", referenceLimit)
 	}
 	if liveCheck {
-		command += " --live-check" + featureStarDriftFlag(maxStarDrift) + featurePushedDriftFlag(maxPushedDriftHours) + featureGitHubAPIURLFlag(githubAPIURL)
+		command += " --live-check" + featureTokenEnvFlag(firstOptionalString(tokenEnvs)) + featureStarDriftFlag(maxStarDrift) + featurePushedDriftFlag(maxPushedDriftHours) + featureGitHubAPIURLFlag(githubAPIURL)
 	}
 	return command + " --json"
 }
@@ -3802,45 +3805,71 @@ func featureGitHubAPIURLFlag(value string) string {
 	return " --github-api-url " + quoteCommandValue(value)
 }
 
-func featureCommandNextCommands(report featureCommandReport, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int) []string {
+func featureTokenEnvFlag(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "GITHUB_TOKEN" {
+		return ""
+	}
+	return " --token-env " + quoteCommandValue(value)
+}
+
+func firstOptionalString(values []string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func featureCommandNextCommands(report featureCommandReport, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, liveProviderFlags ...string) []string {
+	githubAPIURL := ""
+	tokenEnv := ""
+	if len(liveProviderFlags) > 0 {
+		githubAPIURL = liveProviderFlags[0]
+	}
+	if len(liveProviderFlags) > 1 {
+		tokenEnv = liveProviderFlags[1]
+	}
 	commands := []string{}
 	if report.Recommended.ID != "" {
 		commands = append(commands,
-			featureGateCommandWithLiveCheck(report.Recommended.ID, minReferences, report.CatalogCommand, 72, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
-			featurePlanCommandWithLiveCheck(report.Recommended.ID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
+			featureGateCommandWithLiveCheck(report.Recommended.ID, minReferences, report.CatalogCommand, 72, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours, tokenEnv),
+			featurePlanCommandWithLiveCheck(report.Recommended.ID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours, tokenEnv),
 		)
 	}
 	commands = append(commands,
-		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, ""),
-		"agent-testbench research compare --query "+quoteCommandValue(report.Command)+featureRadarIndexFlag(indexPath)+fmt.Sprintf(" --min-references %d --limit %d --reference-limit %d", minReferences, limit, referenceLimit)+featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours)+" --json",
+		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL, tokenEnv),
+		"agent-testbench research compare --query "+quoteCommandValue(report.Command)+featureRadarIndexFlag(indexPath)+fmt.Sprintf(" --min-references %d --limit %d --reference-limit %d", minReferences, limit, referenceLimit)+featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours, tokenEnv)+featureGitHubAPIURLFlag(githubAPIURL)+" --json",
 	)
 	return uniquePreserveOrder(commands)
 }
 
-func featureResearchLiveFlags(liveCheck bool, maxStarDrift int, maxPushedDriftHours int) string {
+func featureResearchLiveFlags(liveCheck bool, maxStarDrift int, maxPushedDriftHours int, tokenEnvs ...string) string {
 	if !liveCheck {
 		return ""
 	}
-	return " --live-check" + featureStarDriftFlag(maxStarDrift) + featurePushedDriftFlag(maxPushedDriftHours)
+	return " --live-check" + featureTokenEnvFlag(firstOptionalString(tokenEnvs)) + featureStarDriftFlag(maxStarDrift) + featurePushedDriftFlag(maxPushedDriftHours)
 }
 
-func featureScopeNextCommands(report featureScopeReport, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) []string {
+func featureScopeNextCommands(report featureScopeReport, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) []string {
+	tokenEnv := firstOptionalString(tokenEnvs)
 	commands := []string{report.ReleaseCheck.Command}
 	if report.Recommended.ID != "" {
 		commands = append(commands,
-			featureGateCommandWithReleaseCheck(report.Recommended.ID, minReferences, "", 72, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours, report.ReleaseCheck),
-			featurePlanCommandWithLiveCheck(report.Recommended.ID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
+			featureGateCommandWithReleaseCheck(report.Recommended.ID, minReferences, "", 72, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours, report.ReleaseCheck, tokenEnv),
+			featurePlanCommandWithLiveCheck(report.Recommended.ID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours, tokenEnv),
 		)
 	}
 	commands = append(commands,
-		"agent-testbench research compare --query "+quoteCommandValue(report.Query)+featureRadarIndexFlag(indexPath)+fmt.Sprintf(" --min-references %d --limit %d --reference-limit %d", minReferences, limit, referenceLimit)+featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours)+featureGitHubAPIURLFlag(githubAPIURL)+" --json",
-		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL),
+		"agent-testbench research compare --query "+quoteCommandValue(report.Query)+featureRadarIndexFlag(indexPath)+fmt.Sprintf(" --min-references %d --limit %d --reference-limit %d", minReferences, limit, referenceLimit)+featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours, tokenEnv)+featureGitHubAPIURLFlag(githubAPIURL)+" --json",
+		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL, tokenEnv),
 	)
 	return uniquePreserveOrder(commands)
 }
 
-func featureGateCommandWithReleaseCheck(featureID string, minReferences int, requireCommand string, maxAgeHours int, indexPath string, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, releaseCheck featureScopeReleaseCheck) string {
-	command := strings.TrimSuffix(featureGateCommandWithLiveCheck(featureID, minReferences, requireCommand, maxAgeHours, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours), " --json")
+func featureGateCommandWithReleaseCheck(featureID string, minReferences int, requireCommand string, maxAgeHours int, indexPath string, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, releaseCheck featureScopeReleaseCheck, tokenEnvs ...string) string {
+	command := strings.TrimSuffix(featureGateCommandWithLiveCheck(featureID, minReferences, requireCommand, maxAgeHours, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours, firstOptionalString(tokenEnvs)), " --json")
 	command += featureReleaseCheckScopeFlags(releaseCheck)
 	return command + " --json"
 }
@@ -4028,7 +4057,7 @@ func attachFeatureSearchLiveChecks(ctx context.Context, report *featureSearchRep
 			MaxPushedDriftHours: options.MaxPushedDriftHours,
 		})
 		report.Candidates[index].LiveCheck = &liveReport
-		report.Candidates[index].PlanCommand = featurePlanCommandWithLiveCheck(feature.ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours) + featureGitHubAPIURLFlag(options.GitHubAPIURL)
+		report.Candidates[index].PlanCommand = featurePlanCommandWithLiveCheck(feature.ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours, options.TokenEnv) + featureGitHubAPIURLFlag(options.GitHubAPIURL)
 		absorbFeatureRoadmapLiveSummary(&summary, liveReport)
 		if liveReport.OK {
 			continue
@@ -4115,7 +4144,7 @@ func featureSearchNoMatchCommands(indexPath string, minReferences int) []string 
 	}
 }
 
-func featureSearchFollowUpCommands(query string, featureID string, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) []string {
+func featureSearchFollowUpCommands(query string, featureID string, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) []string {
 	if minReferences <= 0 {
 		minReferences = 3
 	}
@@ -4125,19 +4154,20 @@ func featureSearchFollowUpCommands(query string, featureID string, indexPath str
 	if referenceLimit < 0 {
 		referenceLimit = 0
 	}
-	planCommand := featurePlanCommandWithLiveCheck(featureID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours)
+	tokenEnv := firstOptionalString(tokenEnvs)
+	planCommand := featurePlanCommandWithLiveCheck(featureID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours, tokenEnv)
 	briefCommand := fmt.Sprintf("agent-testbench research brief --query %s%s --min-references %d", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences)
 	if liveCheck {
-		briefCommand += featureResearchLiveFlags(true, maxStarDrift, maxPushedDriftHours) + featureGitHubAPIURLFlag(githubAPIURL)
+		briefCommand += featureResearchLiveFlags(true, maxStarDrift, maxPushedDriftHours, tokenEnv) + featureGitHubAPIURLFlag(githubAPIURL)
 		planCommand += featureGitHubAPIURLFlag(githubAPIURL)
 	}
 	briefCommand += " --format markdown"
 	return []string{
-		fmt.Sprintf("agent-testbench research compare --query %s%s --min-references %d --limit %d --reference-limit %d%s%s --json", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences, limit, referenceLimit, featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours), featureGitHubAPIURLFlag(githubAPIURL)),
+		fmt.Sprintf("agent-testbench research compare --query %s%s --min-references %d --limit %d --reference-limit %d%s%s --json", quoteCommandValue(query), featureRadarIndexFlag(indexPath), minReferences, limit, referenceLimit, featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours, tokenEnv), featureGitHubAPIURLFlag(githubAPIURL)),
 		briefCommand,
 		"agent-testbench research references --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --limit 10 --json",
 		planCommand,
-		featureGateLiveCheckCommand(featureID, indexPath, referenceLimit, maxStarDrift, maxPushedDriftHours, githubAPIURL),
+		featureGateLiveCheckCommand(featureID, indexPath, referenceLimit, maxStarDrift, maxPushedDriftHours, githubAPIURL, tokenEnv),
 	}
 }
 
@@ -4226,8 +4256,8 @@ func attachFeatureCompareLiveChecks(ctx context.Context, report *featureCompareR
 			MaxPushedDriftHours: options.MaxPushedDriftHours,
 		})
 		report.Items[index].LiveCheck = &liveReport
-		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
-		report.Items[index].BriefCommand = featureCompareBriefCommand(report.Query, options.IndexPath, minReferences, true, options.MaxStarDrift, options.MaxPushedDriftHours, "")
+		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours, options.TokenEnv)
+		report.Items[index].BriefCommand = featureCompareBriefCommand(report.Query, options.IndexPath, minReferences, true, options.MaxStarDrift, options.MaxPushedDriftHours, "", options.TokenEnv)
 		absorbFeatureRoadmapLiveSummary(&summary, liveReport)
 		if liveReport.OK {
 			continue
@@ -4417,8 +4447,8 @@ func attachFeatureCommandLiveChecks(ctx context.Context, report *featureCommandR
 			MaxPushedDriftHours: options.MaxPushedDriftHours,
 		})
 		report.Items[index].LiveCheck = &liveReport
-		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
-		report.Items[index].GateCommand = featureGateCommandWithLiveCheck(report.Items[index].ID, minReferences, report.Items[index].CatalogCommand, 72, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
+		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours, options.TokenEnv)
+		report.Items[index].GateCommand = featureGateCommandWithLiveCheck(report.Items[index].ID, minReferences, report.Items[index].CatalogCommand, 72, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours, options.TokenEnv)
 		absorbFeatureRoadmapLiveSummary(&summary, liveReport)
 		if liveReport.OK {
 			continue
@@ -4492,7 +4522,7 @@ func rankFeatureCommandItems(items []featureCommandItem) {
 	}
 }
 
-func buildFeatureScopeReport(index featureRadarIndex, indexPath string, scopes []string, scopeFile string, extraQuery string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) featureScopeReport {
+func buildFeatureScopeReport(index featureRadarIndex, indexPath string, scopes []string, scopeFile string, extraQuery string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string, tokenEnvs ...string) featureScopeReport {
 	if minReferences <= 0 {
 		minReferences = 3
 	}
@@ -4536,7 +4566,7 @@ func buildFeatureScopeReport(index featureRadarIndex, indexPath string, scopes [
 	if len(scopes) == 0 {
 		report.Reasons = append(report.Reasons, "no release-check scope paths were provided")
 	}
-	report.NextCommands = featureScopeNextCommands(report, indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL)
+	report.NextCommands = featureScopeNextCommands(report, indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL, firstOptionalString(tokenEnvs))
 	return report
 }
 
@@ -4850,7 +4880,7 @@ func featureGateCommand(featureID string, minReferences int, requireCommand stri
 	return featureGateCommandWithLiveCheck(featureID, minReferences, requireCommand, maxAgeHours, indexPath, false, 0, 0)
 }
 
-func featureGateCommandWithLiveCheck(featureID string, minReferences int, requireCommand string, maxAgeHours int, indexPath string, liveCheck bool, maxStarDrift int, maxPushedDriftHours int) string {
+func featureGateCommandWithLiveCheck(featureID string, minReferences int, requireCommand string, maxAgeHours int, indexPath string, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, tokenEnvs ...string) string {
 	if minReferences <= 0 {
 		minReferences = 3
 	}
@@ -4859,7 +4889,7 @@ func featureGateCommandWithLiveCheck(featureID string, minReferences int, requir
 	}
 	command := "agent-testbench research gate --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences) + featureRequireCommandFlag(requireCommand) + fmt.Sprintf(" --max-age-hours %d", maxAgeHours)
 	if liveCheck {
-		command += " --live-check"
+		command += " --live-check" + featureTokenEnvFlag(firstOptionalString(tokenEnvs))
 		if maxStarDrift > 0 {
 			command += fmt.Sprintf(" --max-star-drift %d", maxStarDrift)
 		}
