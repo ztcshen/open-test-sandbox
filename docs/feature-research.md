@@ -96,6 +96,16 @@ List the available feature index before choosing the next CLI slice:
   --max-pushed-drift-hours 72 \
   --json
 
+./bin/agent-testbench.sh research scope \
+  --radar-index $RADAR_HOME/data/feature-index.json \
+  --scope cmd/agent-testbench \
+  --scope docs/feature-research.md \
+  --min-references 3 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
+  --json
+
 ./bin/agent-testbench.sh research features \
   --radar-index $RADAR_HOME/data/feature-index.json \
   --filter "gate" \
@@ -142,6 +152,14 @@ commands, star signal, and optional live GitHub policy/drift evidence, then
 returns copyable `gate`, `plan`, `roadmap`, and `compare` commands. Use it when
 the next slice starts from a concrete CLI command, such as `workflow gate`, but
 still needs to stay grounded in feature-first 3K+ star OSS references.
+
+`research scope` is the slice-first entry point for local work. It accepts the
+same touched paths that should later be passed to `release-check --scope`,
+turns those paths into a feature query, ranks radar feature candidates, and
+returns a copyable scoped `npm run release-check -- --scope ...` command beside
+the matching `compare`, `gate`, `plan`, and `roadmap` commands. Use it before
+or after editing so feature research, OSS references, and release validation
+share the same directory/file boundary.
 
 `research sync` keeps radar maintenance visible from the AgentTestBench side
 without moving the crawler into the core repository. Dry-run mode emits the
@@ -407,6 +425,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research search --query "new cli capability" --limit 5
 ./bin/agent-testbench.sh research compare --query "new cli capability" --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research command --command "target command" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
+./bin/agent-testbench.sh research scope --scope cmd/agent-testbench --scope docs/feature-research.md --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --format markdown
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72 --format markdown
 ./bin/agent-testbench.sh research status --max-age-hours 72

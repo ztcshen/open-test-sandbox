@@ -86,6 +86,9 @@ What to point out:
   starts from an existing CLI surface, maps it back to feature records and
   reference projects, then returns live-aware `gate`, `plan`, `roadmap`, and
   `compare` follow-up commands.
+- `agent-testbench research scope --scope cmd/agent-testbench --live-check`
+  starts from touched files or directories, ranks feature candidates, and emits
+  the matching scoped `npm run release-check -- --scope ...` command.
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   rechecks selected references against live GitHub repository metadata, then
   reports policy failures or `refresh-needed` drift before demos or CLI
@@ -184,6 +187,9 @@ What to point out:
 - `agent-testbench research command --command "workflow gate" --live-check`
   会从已有 CLI 入口反查 feature 记录和参考项目，并返回带 live-check 证据的
   `gate`、`plan`、`roadmap` 与 `compare` 后续命令。
+- `agent-testbench research scope --scope cmd/agent-testbench --live-check`
+  会从本次触达的文件/目录反推 feature 候选，并直接给出匹配的 scoped
+  `npm run release-check -- --scope ...` 命令。
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   会用 GitHub 实时仓库元数据复核参考项目，并在 demo 或 CLI 实现依赖过期
   radar 数据前报告 policy failure 或 `refresh-needed` 漂移。

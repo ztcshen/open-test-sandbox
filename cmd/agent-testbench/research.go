@@ -561,6 +561,35 @@ type featureCommandItem struct {
 	Reasons                []string                `json:"reasons,omitempty"`
 }
 
+type featureScopeReport struct {
+	OK                bool                       `json:"ok"`
+	Scopes            []string                   `json:"scopes"`
+	Query             string                     `json:"query"`
+	Policy            featureRadarPolicy         `json:"policy"`
+	SourceGeneratedAt string                     `json:"sourceGeneratedAt"`
+	Checks            featureScopeChecks         `json:"checks"`
+	ReleaseCheck      featureScopeReleaseCheck   `json:"releaseCheck"`
+	LiveCheck         *featureRoadmapLiveSummary `json:"liveCheck,omitempty"`
+	Recommended       featureCompareItem         `json:"recommended,omitempty"`
+	Count             int                        `json:"count"`
+	Items             []featureCompareItem       `json:"items"`
+	NextCommands      []string                   `json:"nextCommands"`
+	Reasons           []string                   `json:"reasons,omitempty"`
+}
+
+type featureScopeChecks struct {
+	ScopesProvided     bool `json:"scopesProvided"`
+	FeatureCandidates  bool `json:"featureCandidates"`
+	ReleaseCheckScoped bool `json:"releaseCheckScoped"`
+	LiveCheckOK        bool `json:"liveCheckOk,omitempty"`
+}
+
+type featureScopeReleaseCheck struct {
+	Scoped  bool     `json:"scoped"`
+	Scopes  []string `json:"scopes"`
+	Command string   `json:"command"`
+}
+
 type featureSyncReport struct {
 	OK            bool              `json:"ok"`
 	Execute       bool              `json:"execute"`
@@ -611,6 +640,8 @@ func runResearch(args []string) error {
 		return runResearchCompare(args[1:])
 	case "command":
 		return runResearchCommand(args[1:])
+	case "scope":
+		return runResearchScope(args[1:])
 	case "sync":
 		return runResearchSync(args[1:])
 	case "plan":
@@ -1056,6 +1087,89 @@ func runResearchCommand(args []string) error {
 	}
 	if !report.OK {
 		return errors.New("feature research command mapping failed")
+	}
+	return nil
+}
+
+func runResearchScope(args []string) error {
+	flags := flag.NewFlagSet("research scope", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	var scopesFlag stringListFlag
+	flags.Var(&scopesFlag, "scope", "Touched file or directory to include in the research and release-check scope")
+	scopeFile := flags.String("scope-file", "", "File containing touched paths, one per line")
+	query := flags.String("query", "", "Additional feature query text to combine with touched scope signals")
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	minReferences := flags.Int("min-references", 3, "Require this many reference projects before a feature is healthy")
+	limit := flags.Int("limit", 5, "Maximum matching features to include")
+	referenceLimit := flags.Int("reference-limit", 2, "Maximum top references per matched feature")
+	liveCheck := flags.Bool("live-check", false, "Also verify matched feature references against live GitHub repository metadata")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token for --live-check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "With --live-check, fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "With --live-check, fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	scopes, err := featureResearchScopes(scopesFlag.Values(), *scopeFile)
+	if err != nil {
+		return err
+	}
+	if len(scopes) == 0 {
+		return errors.New("research scope requires --scope PATH or --scope-file PATH")
+	}
+	resolvedIndexPath := strings.TrimSpace(*indexPath)
+	if resolvedIndexPath == "" {
+		resolvedIndexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if resolvedIndexPath == "" {
+		return fmt.Errorf("research scope requires --radar-index PATH or %s", featureRadarIndexEnv)
+	}
+	index, err := readFeatureRadarIndex(resolvedIndexPath)
+	if err != nil {
+		return err
+	}
+	report := buildFeatureScopeReport(index, resolvedIndexPath, scopes, *query, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+	if *liveCheck {
+		compare := featureCompareReport{
+			OK:                report.OK,
+			Query:             report.Query,
+			Policy:            report.Policy,
+			SourceGeneratedAt: report.SourceGeneratedAt,
+			Checks:            featureCompareChecks{CandidatesOK: report.Checks.FeatureCandidates},
+			Recommended:       report.Recommended,
+			Count:             report.Count,
+			Items:             report.Items,
+			NextCommands:      report.NextCommands,
+			Reasons:           report.Reasons,
+		}
+		attachFeatureCompareLiveChecks(context.Background(), &compare, featureRoadmapLiveOptions{
+			Index:               index,
+			IndexPath:           resolvedIndexPath,
+			ReferenceLimit:      *referenceLimit,
+			GitHubAPIURL:        *githubAPIURL,
+			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			MaxStarDrift:        *maxStarDrift,
+			MaxPushedDriftHours: *maxPushedDriftHours,
+		}, *minReferences)
+		report.LiveCheck = compare.LiveCheck
+		report.Checks.LiveCheckOK = compare.Checks.LiveCheckOK
+		report.OK = report.OK && compare.OK
+		report.Recommended = compare.Recommended
+		report.Count = compare.Count
+		report.Items = compare.Items
+		report.Reasons = compare.Reasons
+		report.NextCommands = featureScopeNextCommands(report, resolvedIndexPath, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+	}
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printFeatureScopeReport(report)
+	}
+	if !report.OK {
+		return errors.New("feature research scope mapping failed")
 	}
 	return nil
 }
@@ -3346,6 +3460,21 @@ func featureResearchLiveFlags(liveCheck bool, maxStarDrift int, maxPushedDriftHo
 	return " --live-check" + featureStarDriftFlag(maxStarDrift) + featurePushedDriftFlag(maxPushedDriftHours)
 }
 
+func featureScopeNextCommands(report featureScopeReport, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) []string {
+	commands := []string{report.ReleaseCheck.Command}
+	if report.Recommended.ID != "" {
+		commands = append(commands,
+			featureGateCommandWithLiveCheck(report.Recommended.ID, minReferences, "", 72, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
+			featurePlanCommandWithLiveCheck(report.Recommended.ID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
+		)
+	}
+	commands = append(commands,
+		"agent-testbench research compare --query "+quoteCommandValue(report.Query)+featureRadarIndexFlag(indexPath)+fmt.Sprintf(" --min-references %d --limit %d --reference-limit %d", minReferences, limit, referenceLimit)+featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours)+featureGitHubAPIURLFlag(githubAPIURL)+" --json",
+		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL),
+	)
+	return uniquePreserveOrder(commands)
+}
+
 func featureRequireCommandFlag(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -3876,6 +4005,184 @@ func rankFeatureCommandItems(items []featureCommandItem) {
 	for index := range items {
 		items[index].Rank = index + 1
 	}
+}
+
+func buildFeatureScopeReport(index featureRadarIndex, indexPath string, scopes []string, extraQuery string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) featureScopeReport {
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	if referenceLimit <= 0 {
+		referenceLimit = 2
+	}
+	query := featureScopeQuery(scopes, extraQuery)
+	compare := buildFeatureCompareReport(index, indexPath, query, minReferences, limit, referenceLimit)
+	boostFeatureScopeReleaseCheckCandidates(compare.Items)
+	sortFeatureCompareItems(compare.Items)
+	rankFeatureCompareItems(compare.Items)
+	if len(compare.Items) > 0 {
+		compare.Recommended = compare.Items[0]
+	}
+	releaseCheck := featureScopeReleaseCheck{
+		Scoped:  len(scopes) > 0,
+		Scopes:  scopes,
+		Command: featureScopedReleaseCheckCommand(scopes),
+	}
+	report := featureScopeReport{
+		OK:                len(scopes) > 0 && compare.OK && releaseCheck.Scoped,
+		Scopes:            scopes,
+		Query:             query,
+		Policy:            index.Policy,
+		SourceGeneratedAt: index.SourceGeneratedAt,
+		Checks: featureScopeChecks{
+			ScopesProvided:     len(scopes) > 0,
+			FeatureCandidates:  compare.OK,
+			ReleaseCheckScoped: releaseCheck.Scoped,
+		},
+		ReleaseCheck: releaseCheck,
+		Recommended:  compare.Recommended,
+		Count:        compare.Count,
+		Items:        compare.Items,
+		Reasons:      compare.Reasons,
+	}
+	if len(scopes) == 0 {
+		report.Reasons = append(report.Reasons, "no release-check scope paths were provided")
+	}
+	report.NextCommands = featureScopeNextCommands(report, indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL)
+	return report
+}
+
+func boostFeatureScopeReleaseCheckCandidates(items []featureCompareItem) {
+	for index := range items {
+		if !featureScopeMatchesReleaseCheck(items[index]) {
+			continue
+		}
+		items[index].SelectionScore += 1000
+		items[index].Reasons = append(items[index].Reasons, "scope includes release-check validation; prioritize release/quality gate references")
+	}
+}
+
+func featureScopeMatchesReleaseCheck(item featureCompareItem) bool {
+	for _, token := range item.MatchedTokens {
+		normalized := normalizeFeatureRadarText(token)
+		if strings.Contains(normalized, "release") || strings.Contains(normalized, "gate") || strings.Contains(normalized, "check") {
+			return true
+		}
+	}
+	return false
+}
+
+func featureResearchScopes(values []string, scopeFile string) ([]string, error) {
+	scopes := append([]string(nil), values...)
+	scopeFile = strings.TrimSpace(scopeFile)
+	if scopeFile != "" {
+		raw, err := os.ReadFile(expandUserHomePath(scopeFile))
+		if err != nil {
+			return nil, fmt.Errorf("read research scope file: %w", err)
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			scopes = append(scopes, strings.TrimSpace(line))
+		}
+	}
+	return normalizeResearchScopes(scopes), nil
+}
+
+func normalizeResearchScopes(values []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	cwd, _ := os.Getwd()
+	for _, value := range values {
+		scope := normalizeResearchScope(value, cwd)
+		if scope == "" || seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		out = append(out, scope)
+	}
+	return out
+}
+
+func normalizeResearchScope(value string, cwd string) string {
+	value = expandUserHomePath(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	if filepath.IsAbs(value) && strings.TrimSpace(cwd) != "" {
+		if rel, err := filepath.Rel(cwd, value); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != ".." {
+			value = rel
+		}
+	}
+	value = filepath.Clean(value)
+	if value == "." {
+		return ""
+	}
+	value = strings.TrimPrefix(value, "."+string(os.PathSeparator))
+	return filepath.ToSlash(value)
+}
+
+func featureScopeQuery(scopes []string, extraQuery string) string {
+	parts := []string{
+		"quality gate",
+		"release gate",
+		"release check scope",
+		"scoped validation",
+		"feature research",
+	}
+	for _, scope := range scopes {
+		parts = append(parts, featureScopePathQuery(scope)...)
+	}
+	if strings.TrimSpace(extraQuery) != "" {
+		parts = append(parts, extraQuery)
+	}
+	return strings.Join(uniqueNormalizedFeatureQueryParts(parts), " ")
+}
+
+func featureScopePathQuery(scope string) []string {
+	normalized := normalizeFeatureRadarText(scope)
+	if normalized == "" {
+		return nil
+	}
+	parts := []string{normalized}
+	if strings.Contains(scope, "cmd/agent-testbench") {
+		parts = append(parts, "cli command", "command catalog", "terminal command")
+	}
+	if strings.Contains(scope, "research") {
+		parts = append(parts, "github radar", "feature search", "feature research")
+	}
+	if strings.Contains(scope, "feature-research") || strings.Contains(scope, "github-feature-radar") {
+		parts = append(parts, "github radar generation", "feature search performance")
+	}
+	if strings.Contains(scope, "release-check") || strings.Contains(scope, "guardrail") {
+		parts = append(parts, "release gate", "quality gate", "checks")
+	}
+	if strings.HasPrefix(scope, "docs/") {
+		parts = append(parts, "documentation", "reviewable runbook")
+	}
+	return parts
+}
+
+func uniqueNormalizedFeatureQueryParts(values []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, value := range values {
+		normalized := normalizeFeatureRadarText(value)
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func featureScopedReleaseCheckCommand(scopes []string) string {
+	command := "AGENT_TESTBENCH_SMOKE_STORE_DSN=" + quoteCommandValue("sqlite:///tmp/agent-testbench-scope-smoke.sqlite") + " npm run release-check --"
+	for _, scope := range scopes {
+		command += " --scope " + quoteCommandValue(scope)
+	}
+	return command
 }
 
 func buildFeatureBriefReport(index featureRadarIndex, indexPath string, query string, minReferences int, requireCommand string, maxAgeHours int, checkedAt time.Time, searchLimit int, referenceLimit int) (featureBriefReport, error) {
@@ -4596,6 +4903,42 @@ func printFeatureCommandReport(report featureCommandReport) {
 		}
 		fmt.Printf("  Gate: %s\n", item.GateCommand)
 		fmt.Printf("  Plan: %s\n", item.PlanCommand)
+	}
+	if len(report.NextCommands) > 0 {
+		fmt.Println("Next commands:")
+		for _, command := range report.NextCommands {
+			fmt.Printf("- %s\n", command)
+		}
+	}
+}
+
+func printFeatureScopeReport(report featureScopeReport) {
+	fmt.Println("Research Scope")
+	fmt.Printf("Scopes: %s\n", strings.Join(report.Scopes, ", "))
+	fmt.Printf("Query: %s\n", report.Query)
+	fmt.Printf("Checks: scopes=%s candidates=%s release-check=%s", statusWord(report.Checks.ScopesProvided), statusWord(report.Checks.FeatureCandidates), statusWord(report.Checks.ReleaseCheckScoped))
+	if report.LiveCheck != nil {
+		fmt.Printf(" live=%s", statusWord(report.Checks.LiveCheckOK))
+	}
+	fmt.Println()
+	if report.LiveCheck != nil {
+		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
+	fmt.Printf("Release check: %s\n", report.ReleaseCheck.Command)
+	if len(report.Reasons) > 0 {
+		fmt.Println("Reasons:")
+		for _, reason := range report.Reasons {
+			fmt.Printf("- %s\n", reason)
+		}
+	}
+	if report.Recommended.ID != "" {
+		fmt.Printf("Recommended: %s (%s)\n", report.Recommended.Title, report.Recommended.ID)
+	}
+	for _, item := range report.Items {
+		fmt.Printf("- #%d %s (%s): %s references=%d matched=%s\n", item.Rank, item.Title, item.ID, item.Gate, item.References, strings.Join(item.MatchedTokens, ", "))
+		if len(item.TopReferences) > 0 {
+			fmt.Printf("  Top reference: %s\n", item.TopReferences[0].FullName)
+		}
 	}
 	if len(report.NextCommands) > 0 {
 		fmt.Println("Next commands:")

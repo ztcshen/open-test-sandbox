@@ -68,6 +68,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research command") {
 		t.Fatalf("top-level help should expose command-backed feature research:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench research scope") {
+		t.Fatalf("top-level help should expose scope-backed feature research:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench research sync") {
 		t.Fatalf("top-level help should expose feature radar sync automation:\n%s", out)
 	}
@@ -1327,6 +1330,118 @@ func TestResearchCommandMapsCatalogCommandToFeatureReferences(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(report.NextCommands, "\n"), "research gate --feature 'workflow-orchestration'"+featureRadarIndexFlag(indexPath)+" --require-min-matches 2 --require-command 'workflow gate' --max-age-hours 72 --live-check --max-star-drift 100 --max-pushed-drift-hours 24 --json") {
 		t.Fatalf("research command next commands = %#v", report.NextCommands)
+	}
+}
+
+func TestResearchScopeBuildsScopedReleaseCheckAndFeatureCandidates(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string][]string{
+			"release":          {"quality-gates"},
+			"release gate":     {"quality-gates"},
+			"checks":           {"quality-gates"},
+			"feature":          {"github-radar-generation"},
+			"feature search":   {"github-radar-generation"},
+			"github":           {"github-radar-generation"},
+			"radar":            {"github-radar-generation"},
+			"cli command":      {"cli-command-ux"},
+			"command catalog":  {"cli-command-ux"},
+			"terminal command": {"cli-command-ux"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/quality-one", "url": "https://github.com/example/quality-one", "stars": 9000, "pushedAt": "2026-05-24T12:00:00Z"},
+					{"fullName": "example/quality-two", "url": "https://github.com/example/quality-two", "stars": 7200, "pushedAt": "2026-05-22T12:00:00Z"},
+				},
+			},
+			"github-radar-generation": map[string]any{
+				"id":     "github-radar-generation",
+				"title":  "GitHub Radar Generation",
+				"intent": "Find projects that generate GitHub indexes.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/radar-one", "url": "https://github.com/example/radar-one", "stars": 5000, "pushedAt": "2026-05-24T12:00:00Z"},
+					{"fullName": "example/radar-two", "url": "https://github.com/example/radar-two", "stars": 4100, "pushedAt": "2026-05-22T12:00:00Z"},
+				},
+			},
+			"cli-command-ux": map[string]any{
+				"id":     "cli-command-ux",
+				"title":  "CLI Command UX",
+				"intent": "Find mature CLIs with discoverable command catalogs.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/cli-one", "url": "https://github.com/example/cli-one", "stars": 8500, "pushedAt": "2026-05-24T12:00:00Z"},
+					{"fullName": "example/cli-two", "url": "https://github.com/example/cli-two", "stars": 6500, "pushedAt": "2026-05-22T12:00:00Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t,
+		"research", "scope",
+		"--scope", "./cmd/agent-testbench/research.go",
+		"--scope", "docs/feature-research.md",
+		"--radar-index", indexPath,
+		"--min-references", "2",
+		"--limit", "3",
+		"--reference-limit", "1",
+		"--json",
+	)
+	var report struct {
+		OK     bool     `json:"ok"`
+		Scopes []string `json:"scopes"`
+		Query  string   `json:"query"`
+		Checks struct {
+			ScopesProvided     bool `json:"scopesProvided"`
+			FeatureCandidates  bool `json:"featureCandidates"`
+			ReleaseCheckScoped bool `json:"releaseCheckScoped"`
+		} `json:"checks"`
+		ReleaseCheck struct {
+			Scoped  bool     `json:"scoped"`
+			Scopes  []string `json:"scopes"`
+			Command string   `json:"command"`
+		} `json:"releaseCheck"`
+		Recommended struct {
+			ID string `json:"id"`
+		} `json:"recommended"`
+		Items []struct {
+			ID            string   `json:"id"`
+			MatchedTokens []string `json:"matchedTokens"`
+		} `json:"items"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode research scope json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Checks.ScopesProvided || !report.Checks.FeatureCandidates || !report.Checks.ReleaseCheckScoped {
+		t.Fatalf("research scope checks = %#v", report)
+	}
+	if fmt.Sprint(report.Scopes) != "[cmd/agent-testbench/research.go docs/feature-research.md]" {
+		t.Fatalf("research scope normalized scopes = %#v", report.Scopes)
+	}
+	if !strings.Contains(report.Query, "release check scope") || !strings.Contains(report.Query, "feature research") || !strings.Contains(report.Query, "command catalog") {
+		t.Fatalf("research scope query should combine release scope and touched-path signals: %q", report.Query)
+	}
+	if !report.ReleaseCheck.Scoped || !strings.Contains(report.ReleaseCheck.Command, "npm run release-check -- --scope 'cmd/agent-testbench/research.go' --scope 'docs/feature-research.md'") {
+		t.Fatalf("research scope release-check command = %#v", report.ReleaseCheck)
+	}
+	if len(report.Items) < 2 || report.Recommended.ID != "quality-gates" {
+		t.Fatalf("research scope should recommend quality gate candidates first: %#v", report)
+	}
+	if !strings.Contains(strings.Join(report.NextCommands, "\n"), "research compare --query") || !strings.Contains(strings.Join(report.NextCommands, "\n"), "npm run release-check") {
+		t.Fatalf("research scope next commands = %#v", report.NextCommands)
 	}
 }
 
