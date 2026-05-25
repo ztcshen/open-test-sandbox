@@ -33,7 +33,7 @@ private maintainer channel rather than a public issue. Include:
 Before a public release, run the release gate and review third-party licenses:
 
 ```sh
-AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check -- --full
 go list -m all
 npm ls --all
 ```

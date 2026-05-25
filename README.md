@@ -67,7 +67,6 @@ contract instead of guessing target ids from prompts or private notes.
 | SQL Store-first | Named SQLite, PostgreSQL, or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through AgentTestBench APIs and UI discovery. |
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
-| Feature-first CLI research | Search capabilities from an external GitHub radar index, check index freshness, audit recent 3K+ star references, explain feature-to-reference matrices, plan or execute external radar refreshes, rank roadmap candidates, and gate each CLI slice against enough references plus a concrete command path before turning it into runnable AgentTestBench plans and backlog tasks. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
 | Workflow execution | Run ordered workflow steps and keep per-step Evidence, timing, status, logs, and topology. |
 | Environment restore | Store-backed Environment Catalog entries can plan or execute remote repository preparation, compact startup-file generation, Docker Compose pull/build/up, health checks, and the bound verification workflow. |
@@ -96,13 +95,13 @@ npm ci
 # SQL Store examples:
 # PostgreSQL:
 AGENT_TESTBENCH_DEMO_STORE='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --scope cmd/agent-testbench
 # MySQL:
 AGENT_TESTBENCH_DEMO_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check -- --scope cmd/agent-testbench
 # SQLite:
 AGENT_TESTBENCH_DEMO_STORE="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check -- --scope cmd/agent-testbench
 ```
 
 The primary CLI is `agent-testbench`; public configuration and smoke-test
@@ -165,7 +164,6 @@ Core packages stay generic:
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | First local run, Store setup, and workbench launch direction. |
 | [Demo Gallery](docs/demo-gallery.md) | Visual CLI capability tour, neutral demo services, and exposure plan. |
-| [Feature Research Radar](docs/feature-research.md) | Feature-first OSS reference workflow for CLI design, backed by the external GitHub radar index. |
 | [Backend Capabilities](docs/backend-capabilities.md) | Store, Environment Catalog, clean-machine restore, discovery, execution, reports, Evidence, APIs, and release guardrails. |
 | [Share Kit](docs/share-kit.md) | Project tagline, short descriptions, demo script, and announcement snippets for sharing the project. |
 | [Roadmap](docs/roadmap.md) | Public development themes and contribution-friendly milestones. |
@@ -209,8 +207,10 @@ Current working areas:
   acceptance workflow recording, and verified publishing gates.
 - Workbench: local React pages backed by Control plane APIs for catalog,
   workflow, environment, run, Evidence, and topology review.
-- Release gate: `AGENT_TESTBENCH_SMOKE_STORE_DSN=postgres://... npm run release-check`
-  or `AGENT_TESTBENCH_SMOKE_STORE_DSN=mysql://... npm run release-check`; for an
+- Release gate: daily slices should run `npm run release-check -- --scope PATH`;
+  full sign-off uses
+  `AGENT_TESTBENCH_SMOKE_STORE_DSN=postgres://... npm run release-check -- --full`
+  or `AGENT_TESTBENCH_SMOKE_STORE_DSN=mysql://... npm run release-check -- --full`; for an
   optional organization-owned MySQL Store sign-off, run
   `npm run release-check:mysql-real:preflight` first, then
   `npm run release-check:mysql-real` with
@@ -228,9 +228,9 @@ for that workflow before running the strict gate.
 Run the full local gate before publishing a change:
 
 ```sh
-AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --full
 # or
-AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check -- --full
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and

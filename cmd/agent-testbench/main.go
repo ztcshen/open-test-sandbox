@@ -257,11 +257,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-	case "research":
-		if err := runResearch(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
 	case "serve":
 		if err := runServe(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -432,20 +427,6 @@ Usage:
   agent-testbench case run --case PATH [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--run-id ID] [--dry-run] [--json]
   agent-testbench case run --case-id ID [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
   agent-testbench case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]
-  agent-testbench research feature --feature TEXT --radar-index PATH [--limit N] [--require-min-matches N] [--json]
-  agent-testbench research features --radar-index PATH [--filter TEXT] [--json]
-  agent-testbench research search --query TEXT --radar-index PATH [--limit N] [--reference-limit N] [--min-references N] [--json]
-  agent-testbench research brief --query TEXT --radar-index PATH [--min-references N] [--require-command COMMAND] [--max-age-hours N] [--reference-limit N] [--format text|json|markdown] [--json]
-  agent-testbench research sync --radar-root PATH [--radar-index PATH] [--refresh-limit N] [--max-age-hours N] [--min-references N] [--execute] [--json]
-  agent-testbench research coverage --radar-index PATH [--min-references N] [--limit N] [--json]
-  agent-testbench research audit --radar-index PATH [--min-references N] [--json]
-  agent-testbench research status --radar-index PATH [--max-age-hours N] [--json]
-  agent-testbench research matrix --radar-index PATH [--filter TEXT] [--limit N] [--json]
-  agent-testbench research refresh-plan --radar-index PATH [--min-references N] [--max-age-hours N] [--limit N] [--require-ready] [--json]
-  agent-testbench research roadmap --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--json]
-  agent-testbench research backlog --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--json]
-  agent-testbench research gate --feature TEXT --radar-index PATH [--require-min-matches N] [--require-command COMMAND] [--max-age-hours N] [--json]
-  agent-testbench research plan --feature TEXT --radar-index PATH [--limit N] [--require-min-matches N] [--format text|json|markdown] [--json]
   agent-testbench case diagnose [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
   agent-testbench case gate [--store NAME_OR_DSN] [--run ID] [--require-no-failures] [--require-evidence] [--min-passed N] [--json]
   agent-testbench serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
@@ -14258,6 +14239,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func quoteCommandValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return `''`
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func runCaseRun(ctx context.Context, args []string) error {

@@ -68,7 +68,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" && -s .release-check-scope ]]; then
             npm run release-check -- --scope-file .release-check-scope
           else
-            npm run release-check
+            npm run release-check -- --full
           fi
         env:
           AGENT_TESTBENCH_SMOKE_STORE_DSN: mysql://root:ci-store-pass@127.0.0.1:3306/agent_testbench_ci_smoke?tls=false

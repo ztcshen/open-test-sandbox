@@ -9,7 +9,8 @@ AgentTestBench 目前仍是 pre-1.0。路线图重点是降低试用门槛、提
 ## Now / 当前
 
 - Keep the core repository generic and free of bundled team template packages.
-- Maintain a green `npm run release-check` gate.
+- Maintain a green scoped `npm run release-check -- --scope PATH` gate for
+  slices, with `--full` reserved for release sign-off.
 - Treat the product as a CLI-first, SQL Store-first testing workbench.
   PostgreSQL and MySQL are supported product Store engines; teams should choose
   the engine that matches their operational environment. Each isolation
@@ -35,7 +36,8 @@ AgentTestBench 目前仍是 pre-1.0。路线图重点是降低试用门槛、提
 - Keep CLI and API contracts documented as they change.
 
 - 保持核心仓库通用，不内置团队 template package。
-- 保持 `npm run release-check` 门禁稳定通过。
+- 保持切片级 `npm run release-check -- --scope PATH` 门禁稳定通过，`--full`
+  仅用于正式发布签核。
 - 将产品定位为 CLI-first、SQL Store-first 的测试工作台。PostgreSQL 与 MySQL
   都是产品 Store 引擎；团队按自己的运维环境选择。每个隔离边界使用独立 Store
   database，例如个人 `local-personal` 和团队共享 `team-verified`；Docker runtime

@@ -23,14 +23,15 @@ go test ./...
 npm run build:frontend
 ```
 
-Run the full release gate before opening a pull request:
+Run the scoped release gate before opening a pull request:
 
 ```sh
-AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check -- --scope PATH
 ```
 
 The gate runs formatting hygiene, generated-state checks, source-domain
-guardrails, Go tests, the React build, and browser smoke tests.
+guardrails, and the runtime tests selected by the touched scope. Use
+`npm run release-check -- --full` only for explicit release sign-off.
 
 ## Pull Request Checklist
 

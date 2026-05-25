@@ -21,6 +21,7 @@ is_sqlite_store_dsn() {
 }
 
 scope_paths=()
+full_release_check=0
 add_scope_path() {
   local path=$1
   path=${path#./}
@@ -31,6 +32,10 @@ add_scope_path() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --full)
+      full_release_check=1
+      shift
+      ;;
     --scope)
       if [[ $# -lt 2 ]]; then
         echo "--scope requires a path" >&2
@@ -103,6 +108,19 @@ if [[ ${#scope_paths[@]} -gt 0 ]]; then
   scoped_release_check=1
 fi
 
+if [[ "$scoped_release_check" -eq 1 && "$full_release_check" -eq 1 ]]; then
+  echo "release-check cannot combine --full with --scope or --scope-file." >&2
+  exit 1
+fi
+
+if [[ "$scoped_release_check" -eq 0 && "$full_release_check" -eq 0 ]]; then
+  echo "release-check requires --scope, --scope-file, or --full." >&2
+  echo "Slice validation: AGENT_TESTBENCH_SMOKE_STORE_DSN='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check -- --scope PATH" >&2
+  echo "Scope file: AGENT_TESTBENCH_SMOKE_STORE_DSN='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check -- --scope-file .release-check-scope" >&2
+  echo "Full sign-off: AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --full" >&2
+  exit 1
+fi
+
 if [[ "$scoped_release_check" -eq 1 ]]; then
   step "checking release scope"
   printf '  %s\n' "${scope_paths[@]}"
@@ -127,9 +145,9 @@ step "checking SQL smoke Store"
 if [[ -z "${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}" ]]; then
   echo "AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE is required for release-check." >&2
   echo "SQL Store examples:" >&2
-  echo "PostgreSQL: AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check" >&2
-  echo "MySQL: AGENT_TESTBENCH_SMOKE_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check" >&2
-  echo "SQLite: AGENT_TESTBENCH_SMOKE_STORE='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check" >&2
+  echo "PostgreSQL: AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --full" >&2
+  echo "MySQL: AGENT_TESTBENCH_SMOKE_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check -- --full" >&2
+  echo "SQLite: AGENT_TESTBENCH_SMOKE_STORE='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check -- --scope PATH" >&2
   exit 1
 fi
 smoke_store_dsn="${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}"
@@ -270,17 +288,88 @@ if [[ "$scoped_release_check" -eq 0 ]]; then
   fi
 else
   node_scope_tests=()
-  run_scoped_go_tests=0
+  go_scope_all=0
+  go_scope_packages=()
   run_frontend_tests=0
   run_frontend_build=0
   ran_scoped_runtime_tests=0
 
-  for path in "${scope_paths[@]}"; do
+  add_go_scope_package() {
+    local package=$1
+    local seen_package
+    if [[ ${#go_scope_packages[*]} -gt 0 ]]; then
+      for seen_package in "${go_scope_packages[@]}"; do
+        if [[ "$seen_package" == "$package" ]]; then
+          return
+        fi
+      done
+    fi
+    go_scope_packages+=("$package")
+  }
+
+  go_test_packages=()
+  add_go_test_package() {
+    local package=$1
+    local seen_package
+    if [[ ${#go_test_packages[*]} -gt 0 ]]; then
+      for seen_package in "${go_test_packages[@]}"; do
+        if [[ "$seen_package" == "$package" ]]; then
+          return
+        fi
+      done
+    fi
+    go_test_packages+=("$package")
+  }
+
+  collect_go_scope_package() {
+    local path=$1
+    local dir
+    path=${path#./}
+
     case "$path" in
-      *.go|go.mod|go.sum|cmd/*|internal/*)
-        run_scoped_go_tests=1
+      go.mod|go.sum)
+        go_scope_all=1
+        return
+        ;;
+      *.go)
+        dir=$(dirname -- "$path")
+        if [[ "$dir" == "." ]]; then
+          go_scope_all=1
+        else
+          add_go_scope_package "./$dir"
+        fi
+        return
         ;;
     esac
+
+    case "$path" in
+      cmd/*|internal/*)
+        if [[ -d "$path" ]]; then
+          if [[ -n "$(find "$path" -name '*.go' -print -quit)" ]]; then
+            add_go_scope_package "./$path/..."
+          fi
+          return
+        fi
+
+        dir=$(dirname -- "$path")
+        while [[ "$dir" != "." && "$dir" != "/" ]]; do
+          if compgen -G "$dir/*.go" >/dev/null; then
+            add_go_scope_package "./$dir"
+            return
+          fi
+          case "$dir" in
+            cmd|internal)
+              return
+              ;;
+          esac
+          dir=$(dirname -- "$dir")
+        done
+        ;;
+    esac
+  }
+
+  for path in "${scope_paths[@]}"; do
+    collect_go_scope_package "$path"
 
     case "$path" in
       control-plane/frontend/src/*|control-plane/frontend/build.mjs|package.json|package-lock.json)
@@ -325,12 +414,54 @@ else
     node_scope_tests=()
   fi
 
-  if [[ "$run_scoped_go_tests" -eq 1 ]]; then
+  if [[ "$go_scope_all" -eq 1 || ${#go_scope_packages[*]} -gt 0 ]]; then
     step "running scoped Go tests"
-    if is_mysql_store_dsn "$smoke_store_dsn"; then
-      go test -p 1 ./... -count=1
+    if [[ "$go_scope_all" -eq 1 ]]; then
+      if is_mysql_store_dsn "$smoke_store_dsn"; then
+        echo "  go test -p 1 ./... -count=1"
+        go test -p 1 ./... -count=1
+      else
+        echo "  go test ./... -count=1"
+        go test ./... -count=1
+      fi
     else
-      go test ./... -count=1
+      for package in "${go_scope_packages[@]}"; do
+        add_go_test_package "$package"
+      done
+
+      target_go_imports=()
+      while IFS= read -r import_path; do
+        if [[ -n "$import_path" ]]; then
+          target_go_imports+=("$import_path")
+        fi
+      done < <(go list "${go_scope_packages[@]}")
+
+      if [[ ${#target_go_imports[*]} -gt 0 ]]; then
+        while IFS= read -r package_line; do
+          package=${package_line%% *}
+          deps=""
+          if [[ "$package_line" == *" "* ]]; then
+            deps=${package_line#* }
+          fi
+          for target_import in "${target_go_imports[@]}"; do
+            if [[ "$package" == "$target_import" ]]; then
+              continue
+            fi
+            if [[ " $deps " == *" $target_import "* ]]; then
+              add_go_test_package "$package"
+              break
+            fi
+          done
+        done < <(go list -f '{{.ImportPath}} {{join .Deps " "}}' ./...)
+      fi
+
+      if is_mysql_store_dsn "$smoke_store_dsn"; then
+        printf '  go test -p 1 %s -count=1\n' "${go_test_packages[*]}"
+        go test -p 1 "${go_test_packages[@]}" -count=1
+      else
+        printf '  go test %s -count=1\n' "${go_test_packages[*]}"
+        go test "${go_test_packages[@]}" -count=1
+      fi
     fi
     ran_scoped_runtime_tests=1
   fi

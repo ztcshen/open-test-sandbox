@@ -8,10 +8,24 @@ outside a trusted team.
 ```sh
 # SQL Store examples:
 # PostgreSQL:
-AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check -- --full
 # MySQL:
-AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check -- --full
 ```
+
+For pull-request or local slice validation, pass an explicit scope so the gate
+checks only the touched paths and selects matching runtime tests:
+
+```sh
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite:///tmp/agent-testbench-smoke.sqlite" npm run release-check -- --scope internal/store/mysql
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite:///tmp/agent-testbench-smoke.sqlite" npm run release-check -- --scope-file .release-check-scope
+```
+
+`release-check` refuses to run without one of `--scope`, `--scope-file`, or
+`--full`. When scoped to a Go file, release-check runs only that package. When
+scoped to a Go directory, it runs that directory tree. Module metadata changes
+such as `go.mod` and `go.sum` still run the full Go suite because they can
+affect every package.
 
 ## Optional Real-Environment Sign-Off
 
@@ -62,7 +76,7 @@ entrypoints require the same real SkyWalking mode, an `http` or `https`
 GraphQL URL, and complete trace-id mapping for the configured workflow. The
 preflight stops before the heavy gate after proving the guarded wrapper would
 run release-check with a masked DSN and existing-database mode.
-The generic MySQL `npm run release-check` path also refuses MySQL database
+The generic MySQL `npm run release-check -- --full` path also refuses MySQL database
 names that do not look dedicated to sandbox/smoke/test/CI validation before it
 runs Store migrations, tests, CLI smoke, API smoke, or frontend smoke writes.
 Generic MySQL release-check sets the Store contract to existing-database mode
@@ -117,7 +131,7 @@ of these items:
   `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`, `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and real
   `AGENT_TESTBENCH_SMOKE_TRACE_IDS`, and the persisted topology rows include provider,
   trace id, status, observed nodes, and confirmed edges;
-- `npm run release-check` passed with the selected SQL smoke Store DSN, and the live
+- `npm run release-check -- --full` passed with the selected SQL smoke Store DSN, and the live
   SkyWalking sign-off command above passed when real topology coverage is
   claimed.
 

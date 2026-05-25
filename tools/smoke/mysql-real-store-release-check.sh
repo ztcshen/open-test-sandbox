@@ -51,10 +51,11 @@ echo "Real SkyWalking release mode: required" >&2
 export AGENT_TESTBENCH_SMOKE_STORE_DSN="$raw_dsn"
 export AGENT_TESTBENCH_MYSQL_TEST_DSN="${AGENT_TESTBENCH_MYSQL_TEST_DSN:-$raw_dsn}"
 export AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE="existing"
+unset AGENT_TESTBENCH_RELEASE_CHECK_SCOPE
 echo "MySQL Store contract mode: existing" >&2
 if [[ "${AGENT_TESTBENCH_REAL_MYSQL_RELEASE_DRY_RUN:-}" == "1" ]]; then
   echo "Validated MySQL release-check Store: $masked" >&2
-  echo "Would run: npm run release-check" >&2
+  echo "Would run: npm run release-check -- --full" >&2
   exit 0
 fi
-exec npm run release-check
+exec npm run release-check -- --full

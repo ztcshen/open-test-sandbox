@@ -23,19 +23,20 @@ npm ci
 # SQL Store examples:
 # PostgreSQL:
 AGENT_TESTBENCH_DEMO_STORE="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check -- --scope cmd/agent-testbench
 # MySQL:
 AGENT_TESTBENCH_DEMO_STORE="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check -- --scope cmd/agent-testbench
 # SQLite:
 AGENT_TESTBENCH_DEMO_STORE="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check -- --scope cmd/agent-testbench
 ```
 
-The release check requires a SQLite, PostgreSQL, or MySQL smoke Store DSN. It runs Go
-tests, the source-domain guardrail, the React build, active SQL Store CLI
-smoke, and a SQL Store headless browser smoke test against a generated generic import
-bundle. For final live topology sign-off, add
+The release check requires a SQLite, PostgreSQL, or MySQL smoke Store DSN and
+an explicit `--scope`, `--scope-file`, or `--full` mode. Scoped mode checks the
+touched paths and selects matching runtime tests; `--full` runs Go tests, the
+React build, active SQL Store CLI smoke, and a SQL Store headless browser smoke
+test against a generated generic import bundle. For final live topology sign-off, add
 `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`, `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`,
 `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` with trace id mappings
 for every configured workflow step so release-check fails instead of using the

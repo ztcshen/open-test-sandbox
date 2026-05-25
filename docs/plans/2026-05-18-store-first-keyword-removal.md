@@ -51,7 +51,10 @@ or migration. They are not the daily testing surface.
 
 ## Verification
 
-- Main-project `npm run release-check` must stay green after every naming slice.
+- Main-project `npm run release-check -- --scope PATH` or
+  `npm run release-check -- --scope-file PATH` must stay green after every
+  naming slice; use `npm run release-check -- --full` only for explicit full
+  release sign-off.
 - The local workbench must still expose the core workflow entry path.
 - Full runtime validation remains a heavy gate and must be run before declaring
   the core workflow green.

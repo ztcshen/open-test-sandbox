@@ -39,4 +39,13 @@ test("pull request CI passes changed paths into release-check scope", () => {
   assert.doesNotMatch(releaseJob, /origin\/\$\{\{\s*github\.base_ref\s*\}\}\.\.\.HEAD/);
   assert.match(releaseJob, /"\$\{\{\s*github\.event_name\s*\}\}" == "pull_request" && -s \.release-check-scope/);
   assert.match(releaseJob, /npm run release-check -- --scope-file \.release-check-scope/);
+  assert.match(releaseJob, /npm run release-check -- --full/);
+});
+
+test("pull request template asks for scoped release-check evidence", () => {
+  const template = readFileSync(join(rootDir, ".github", "PULL_REQUEST_TEMPLATE.md"), "utf8");
+
+  assert.match(template, /npm run release-check -- --scope (PATH|FILE_OR_DIR)/);
+  assert.match(template, /npm run release-check -- --scope-file \.release-check-scope/);
+  assert.doesNotMatch(template, /- \[[ xX]\] `npm run release-check`/);
 });
