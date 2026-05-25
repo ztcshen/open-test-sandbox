@@ -184,6 +184,103 @@ func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
 	}
 }
 
+func TestCoreSchemaSQLIncludesPostgreSQLComments(t *testing.T) {
+	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
+	joined := strings.Join(statements, "\n")
+	for _, want := range []string{
+		`comment on table "runs" is 'Workflow run records and their execution summary.'`,
+		`comment on column "runs"."summary_json" is 'Machine-readable run summary used by APIs and reports.'`,
+		`comment on table "environment_components" is 'Runtime components that make up a registered environment.'`,
+		`comment on column "component_config_assets"."content_inline" is 'Inline asset content when the asset is stored directly in the Store.'`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("postgres schema comments missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestCoreSchemaSQLIncludesMySQLComments(t *testing.T) {
+	statements := sqlstore.CoreSchemaSQL(sqlstore.MySQLDialect{})
+	joined := strings.Join(statements, "\n")
+	for _, want := range []string{
+		"alter table `runs` comment = 'Workflow run records and their execution summary.'",
+		"alter table `runs` modify column `summary_json` json not null comment 'Machine-readable run summary used by APIs and reports.'",
+		"alter table `environment_components` comment = 'Runtime components that make up a registered environment.'",
+		"alter table `component_config_assets` modify column `content_inline` mediumtext not null comment 'Inline asset content when the asset is stored directly in the Store.'",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("mysql schema comments missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestUpgradeSchemaAddsCommentsFromVersionNine(t *testing.T) {
+	tests := []struct {
+		name    string
+		dialect sqlstore.Dialect
+		want    []string
+	}{
+		{
+			name:    "postgres",
+			dialect: sqlstore.PostgresDialect{},
+			want: []string{
+				`comment on table "runs" is 'Workflow run records and their execution summary.'`,
+				`comment on column "runs"."summary_json" is 'Machine-readable run summary used by APIs and reports.'`,
+			},
+		},
+		{
+			name:    "mysql",
+			dialect: sqlstore.MySQLDialect{},
+			want: []string{
+				"alter table `runs` comment = 'Workflow run records and their execution summary.'",
+				"alter table `runs` modify column `summary_json` json not null comment 'Machine-readable run summary used by APIs and reports.'",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, state := openFakeSQLDB(t)
+			defer db.Close()
+
+			state.queueRows(fakeRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"version"},
+				values:  [][]driver.Value{{int64(9)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"version"},
+				values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+			})
+
+			status, err := sqlstore.UpgradeSchema(ctx, db, tt.dialect)
+			if err != nil {
+				t.Fatalf("upgrade v9 schema: %v", err)
+			}
+			if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+				t.Fatalf("upgraded v9 schema status = %#v", status)
+			}
+			joinedExecs := strings.Builder{}
+			for _, exec := range state.execsSnapshot() {
+				joinedExecs.WriteString(exec.query)
+				joinedExecs.WriteByte('\n')
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(joinedExecs.String(), want) {
+					t.Fatalf("%s v9 upgrade missing schema comment %q:\n%s", tt.name, want, joinedExecs.String())
+				}
+			}
+		})
+	}
+}
+
 func TestSchemaStatusAndUpgradeSchemaUseSharedDatabaseSQLMigrations(t *testing.T) {
 	ctx := context.Background()
 	db, state := openFakeSQLDB(t)
