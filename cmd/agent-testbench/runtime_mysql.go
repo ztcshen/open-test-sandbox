@@ -125,7 +125,7 @@ func runtimeMySQLEndpoints(ctx context.Context, includeTables bool) (runtimeMySQ
 		}
 		inspect, err := runtimeDockerInspect(ctx, container.ID)
 		if err != nil {
-			return runtimeMySQLEndpointsReport{}, err
+			continue
 		}
 		endpoint, ok := runtimeMySQLEndpointFromInspect(container, inspect)
 		if !ok {
@@ -196,11 +196,10 @@ func runtimeMySQLEndpointFromInspect(container runtimeDockerPSContainer, inspect
 	if len(published) == 0 {
 		return runtimeMySQLEndpoint{}, false
 	}
-	port, err := strconv.Atoi(strings.TrimSpace(published[0].HostPort))
-	if err != nil || port <= 0 {
+	host, port, ok := runtimeFirstPublishedMySQLBinding(published)
+	if !ok {
 		return runtimeMySQLEndpoint{}, false
 	}
-	host := runtimeNormalizePublishedHost(published[0].HostIP)
 	env := runtimeEnvMap(inspected.Config.Env)
 	user := runtimeFirstNonEmpty(env["MYSQL_USER"], env["MARIADB_USER"], "root")
 	database := runtimeFirstNonEmpty(env["MYSQL_DATABASE"], env["MARIADB_DATABASE"])
@@ -227,11 +226,27 @@ func runtimeMySQLEndpointFromInspect(container runtimeDockerPSContainer, inspect
 	return endpoint, true
 }
 
+func runtimeFirstPublishedMySQLBinding(published []struct {
+	HostIP   string `json:"HostIp"`
+	HostPort string `json:"HostPort"`
+}) (string, int, bool) {
+	for _, binding := range published {
+		port, err := strconv.Atoi(strings.TrimSpace(binding.HostPort))
+		if err != nil || port <= 0 {
+			continue
+		}
+		return runtimeNormalizePublishedHost(binding.HostIP), port, true
+	}
+	return "", 0, false
+}
+
 func runtimeNormalizePublishedHost(host string) string {
 	host = strings.TrimSpace(host)
 	switch host {
-	case "", "0.0.0.0", "::":
+	case "", "0.0.0.0":
 		return "127.0.0.1"
+	case "::":
+		return "::1"
 	default:
 		return host
 	}
@@ -327,10 +342,25 @@ func parseRuntimeMySQLTables(out []byte) []runtimeMySQLDatabase {
 	sort.Strings(names)
 	databases := make([]runtimeMySQLDatabase, 0, len(names))
 	for _, name := range names {
-		tables := normalizeStringList(tablesByDatabase[name])
+		tables := runtimeUniqueSortedStrings(tablesByDatabase[name])
 		databases = append(databases, runtimeMySQLDatabase{Name: name, Tables: tables})
 	}
 	return databases
+}
+
+func runtimeUniqueSortedStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func printRuntimeMySQLEndpoints(report runtimeMySQLEndpointsReport) {

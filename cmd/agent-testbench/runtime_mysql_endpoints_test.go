@@ -77,6 +77,83 @@ func TestRuntimeMySQLEndpointsReportsEmptyDockerInventory(t *testing.T) {
 	}
 }
 
+func TestRuntimeMySQLEndpointUsesFirstUsablePublishedBinding(t *testing.T) {
+	container := runtimeDockerPSContainer{ID: "mysql-container-id", Names: "mysql-1", Image: "mysql:8.4"}
+	inspect := runtimeDockerInspectContainer{ID: "mysql-container-id", Name: "/mysql-1"}
+	inspect.NetworkSettings.Ports = map[string][]struct {
+		HostIP   string `json:"HostIp"`
+		HostPort string `json:"HostPort"`
+	}{
+		"3306/tcp": {
+			{HostIP: "0.0.0.0", HostPort: ""},
+			{HostIP: "127.0.0.1", HostPort: "33307"},
+		},
+	}
+
+	endpoint, ok := runtimeMySQLEndpointFromInspect(container, inspect)
+
+	if !ok {
+		t.Fatal("expected endpoint from second published binding")
+	}
+	if endpoint.Host != "127.0.0.1" || endpoint.Port != 33307 {
+		t.Fatalf("endpoint binding = %s:%d", endpoint.Host, endpoint.Port)
+	}
+}
+
+func TestRuntimeMySQLEndpointKeepsIPv6LoopbackForIPv6WildcardBinding(t *testing.T) {
+	container := runtimeDockerPSContainer{ID: "mysql-container-id", Names: "mysql-1", Image: "mysql:8.4"}
+	inspect := runtimeDockerInspectContainer{ID: "mysql-container-id", Name: "/mysql-1"}
+	inspect.NetworkSettings.Ports = map[string][]struct {
+		HostIP   string `json:"HostIp"`
+		HostPort string `json:"HostPort"`
+	}{
+		"3306/tcp": {
+			{HostIP: "::", HostPort: "33308"},
+		},
+	}
+
+	endpoint, ok := runtimeMySQLEndpointFromInspect(container, inspect)
+
+	if !ok {
+		t.Fatal("expected endpoint from IPv6 published binding")
+	}
+	if endpoint.Host != "::1" || endpoint.Port != 33308 || endpoint.DSN != "mysql://root@[::1]:33308" {
+		t.Fatalf("IPv6 endpoint = %#v", endpoint)
+	}
+}
+
+func TestRuntimeMySQLEndpointsSkipsStaleInspectContainers(t *testing.T) {
+	fakeEnv := fakeRuntimeMySQLDockerCommandWithStaleContainer(t)
+
+	out := runCLIWithEnv(t, fakeEnv, "runtime", "mysql", "endpoints", "--json")
+
+	var report struct {
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
+		Items []struct {
+			ContainerName string `json:"containerName"`
+			Port          int    `json:"port"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode stale-container report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Count != 1 || len(report.Items) != 1 {
+		t.Fatalf("stale-container report = %#v", report)
+	}
+	if report.Items[0].ContainerName != "healthy-mysql" || report.Items[0].Port != 33306 {
+		t.Fatalf("remaining endpoint = %#v", report.Items[0])
+	}
+}
+
+func TestParseRuntimeMySQLTablesPreservesCaseDistinctTableNames(t *testing.T) {
+	tables := parseRuntimeMySQLTables([]byte("appdb\tUsers\nappdb\tusers\nappdb\tUsers\n"))
+
+	if len(tables) != 1 || tables[0].Name != "appdb" || strings.Join(tables[0].Tables, ",") != "Users,users" {
+		t.Fatalf("case-distinct table inventory = %#v", tables)
+	}
+}
+
 func fakeRuntimeMySQLDockerCommand(t *testing.T) []string {
 	t.Helper()
 	dir := t.TempDir()
@@ -128,6 +205,49 @@ if [[ "$1" == "exec" ]]; then
   printf 'appdb\torders\n'
   printf 'appdb\tusers\n'
   printf 'reporting\tdaily_summary\n'
+  exit 0
+fi
+printf 'unexpected docker args: %s\n' "$*" >&2
+exit 1
+`)
+	if err := os.Chmod(dockerPath, 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	return []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")}
+}
+
+func fakeRuntimeMySQLDockerCommandWithStaleContainer(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	dockerPath := filepath.Join(dir, "docker")
+	writeFile(t, dockerPath, `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "ps" ]]; then
+  printf '%s\n' '{"ID":"stale-mysql-id","Names":"stale-mysql","Image":"mysql:8.4","Ports":"0.0.0.0:33305->3306/tcp"}'
+  printf '%s\n' '{"ID":"healthy-mysql-id","Names":"healthy-mysql","Image":"mysql:8.4","Ports":"0.0.0.0:33306->3306/tcp"}'
+  exit 0
+fi
+if [[ "$1" == "inspect" && "$2" == "stale-mysql-id" ]]; then
+  exit 1
+fi
+if [[ "$1" == "inspect" && "$2" == "healthy-mysql-id" ]]; then
+  cat <<'JSON'
+[{
+  "Id": "healthy-mysql-id",
+  "Name": "/healthy-mysql",
+  "Config": {
+    "Image": "mysql:8.4",
+    "Env": ["MYSQL_ROOT_PASSWORD=rootsecret"]
+  },
+  "NetworkSettings": {
+    "Ports": {
+      "3306/tcp": [
+        {"HostIp": "0.0.0.0", "HostPort": "33306"}
+      ]
+    }
+  }
+}]
+JSON
   exit 0
 fi
 printf 'unexpected docker args: %s\n' "$*" >&2
