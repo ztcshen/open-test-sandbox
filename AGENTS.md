@@ -3,6 +3,15 @@
 AgentTestBench is a new open-source-oriented project. Keep the core generic,
 agent-native, API-operated, Store-first, and local-first.
 
+## Local Workflow
+
+- Do not trigger the Multica issue workflow for this repository by default.
+  Treat direct user messages in `/Users/zlh/codes/agent-testbench` as local
+  project work unless the user explicitly asks to read, comment on, or update a
+  Multica issue.
+- Do not post Multica comments, change issue status, or fetch issue context for
+  ordinary local AgentTestBench questions and implementation tasks.
+
 ## Core Rules
 
 - Do not hardcode a concrete business domain into core packages.
