@@ -197,6 +197,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "runtime":
+		if err := runRuntime(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "profile":
 		if err := runProfile(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -351,6 +356,7 @@ Usage:
   agent-testbench environment acceptance report ENV_ID --server-url URL --run ID [--json]
   agent-testbench environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
   agent-testbench environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
+  agent-testbench runtime mysql endpoints [--include-tables] [--json]
   agent-testbench sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
   agent-testbench sandbox service register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--kind KIND] [--service-port N] [--health-url URL] [--json]
   agent-testbench sandbox interface register --id ID --service-id ID --path PATH [--store NAME_OR_DSN] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
