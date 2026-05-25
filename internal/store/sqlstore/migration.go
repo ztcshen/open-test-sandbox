@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 9
+	CurrentSchemaVersion = 10
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -94,7 +94,7 @@ func CoreSchemaSQL(d Dialect) []string {
 	timeType := d.TimeType()
 	jsonType := d.JSONType()
 	boolType := d.BoolType()
-	return []string{
+	statements := []string{
 		fmt.Sprintf(`
 create table if not exists schema_versions (
   version integer primary key,
@@ -319,6 +319,7 @@ create table if not exists component_config_assets (
 		d.CreateIndexSQL("idx_component_config_assets_target", "component_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
 		d.CreateIndexSQL("idx_component_config_assets_owner_order", "component_config_assets", []string{"env_id", "owner_component_id", "apply_order", "asset_id"}),
 	}
+	return append(statements, schemaCommentSQL(d)...)
 }
 
 func runIdentifierTextType(d Dialect) string {
@@ -367,6 +368,9 @@ func incrementalSchemaSQL(d Dialect, current int) []string {
 			"alter table `config_read_model` modify column `profile_id` varchar(255) not null, modify column `model_key` varchar(255) not null;",
 			"alter table `profile_catalogs` modify column `profile_id` varchar(255) not null;",
 		)
+	}
+	if current < 10 {
+		statements = append(statements, schemaCommentSQL(d)...)
 	}
 	return statements
 }
