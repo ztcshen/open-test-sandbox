@@ -9,6 +9,7 @@
     "build:frontend": "node control-plane/frontend/build.mjs",
     "demo:api-case": "node tools/examples/api-case-demo.mjs",
     "demo:services": "node tools/examples/demo-service-server.mjs",
+    "guard:duplicates": "bash tools/guardrails/check_duplicate_code.sh",
     "release-check": "bash tools/release-check.sh",
     "release-check:mysql-real": "bash tools/smoke/mysql-real-store-release-check.sh",
     "release-check:mysql-real:preflight": "AGENT_TESTBENCH_REAL_MYSQL_RELEASE_DRY_RUN=1 bash tools/smoke/mysql-real-store-release-check.sh",

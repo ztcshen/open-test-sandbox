@@ -51,6 +51,12 @@ agent-native, API-operated, Store-first, and local-first.
   production or test file approaches roughly 1,200 lines, split cohesive
   behavior into package-local files before adding more logic; do not grow
   already-oversized files except in move-only reduction slices.
+- Do not treat file splitting alone as a successful refactor. Each oversized
+  file slice must also pass a duplicate-code static gate with a mature
+  open-source detector such as Go `dupl`/`golangci-lint dupl` or `jscpd`.
+  When the gate reports meaningful clones introduced or exposed by the slice,
+  extract shared helpers or abstractions before committing instead of leaving
+  copy-paste families in separate files.
 - Use headless/background verification for local browser checks.
 - For any moderately large change, first do web research and ground the design
   in mature open-source projects before editing. This is mandatory when the
