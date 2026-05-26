@@ -127,6 +127,23 @@ test("release-check runs repository Go lint gate", () => {
   assert.match(script, /AGENT_TESTBENCH_SKIP_GO_LINT/);
 });
 
+test("Store-first guardrail scans split CLI command files", () => {
+  const script = readFileSync(path.join(rootDir, "tools", "guardrails", "check_store_first_contracts.sh"), "utf8");
+
+  assert.match(script, /find cmd\/agent-testbench/);
+  assert.match(script, /count_cli_daily_matches/);
+  assert.doesNotMatch(script, /cmd\/agent-testbench\/main\.go \| wc/);
+
+  const result = spawnSync("bash", ["tools/guardrails/check_store_first_contracts.sh"], {
+    cwd: rootDir,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Store-first contract scan passed/);
+});
+
 test("release-check rejects mixed full and scoped modes", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-mixed-scope.sqlite",

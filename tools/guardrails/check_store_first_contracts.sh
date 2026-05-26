@@ -139,17 +139,49 @@ if [[ "$scoped" -eq 0 ]]; then
     violations=1
   fi
 
-  generic_resolver_count=$(rg -n 'resolveStoreReference\(' cmd/agent-testbench/main.go | wc -l | tr -d ' ')
+  cli_daily_files=()
+  while IFS= read -r -d '' path; do
+    cli_daily_files+=("$path")
+  done < <(find cmd/agent-testbench -maxdepth 1 -type f -name '*.go' \
+    ! -name '*_test.go' \
+    ! -name 'store_config.go' \
+    ! -name 'store_copy.go' \
+    -print0)
+
+  count_cli_daily_matches() {
+    local pattern=$1
+    local matches
+    if [[ ${#cli_daily_files[*]} -eq 0 ]]; then
+      echo 0
+      return
+    fi
+    matches=$(rg -n "$pattern" "${cli_daily_files[@]}" || true)
+    if [[ -z "$matches" ]]; then
+      echo 0
+      return
+    fi
+    printf '%s\n' "$matches" | wc -l | tr -d ' '
+  }
+
+  print_cli_daily_matches() {
+    local pattern=$1
+    if [[ ${#cli_daily_files[*]} -eq 0 ]]; then
+      return
+    fi
+    rg -n "$pattern" "${cli_daily_files[@]}" >&2 || true
+  }
+
+  generic_resolver_count=$(count_cli_daily_matches 'resolveStoreReference\(')
   if [[ "$generic_resolver_count" != "4" ]]; then
     echo "Daily command code must not add generic Store resolver calls; use resolveRequiredDailyStoreReference unless the path is Store maintenance, offline review, or migration." >&2
-    rg -n 'resolveStoreReference\(' cmd/agent-testbench/main.go >&2 || true
+    print_cli_daily_matches 'resolveStoreReference\('
     violations=1
   fi
 
-  compat_required_resolver_count=$(rg -n 'resolveRequiredStoreReference\(' cmd/agent-testbench/main.go | wc -l | tr -d ' ')
+  compat_required_resolver_count=$(count_cli_daily_matches 'resolveRequiredStoreReference\(')
   if [[ "$compat_required_resolver_count" != "1" ]]; then
     echo "Only explicit migration/compatibility commands may use resolveRequiredStoreReference in CLI handlers." >&2
-    rg -n 'resolveRequiredStoreReference\(' cmd/agent-testbench/main.go >&2 || true
+    print_cli_daily_matches 'resolveRequiredStoreReference\('
     violations=1
   fi
 fi

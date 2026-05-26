@@ -343,10 +343,10 @@ func safeCaseFileName(caseID string) string {
 	return safeProfileAssetFileName(caseID, "case")
 }
 
-func safeProfileAssetFileName(value string, fallback string) string {
+func safeProfileAssetFileName(value string, defaultName string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return fallback
+		return defaultName
 	}
 	var builder strings.Builder
 	for _, r := range value {
@@ -357,7 +357,7 @@ func safeProfileAssetFileName(value string, fallback string) string {
 		builder.WriteByte('-')
 	}
 	if builder.Len() == 0 {
-		return fallback
+		return defaultName
 	}
 	return builder.String()
 }
