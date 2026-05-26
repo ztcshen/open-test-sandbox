@@ -216,40 +216,47 @@ func environmentBootstrapComposeCommands(compose map[string]any, workspace strin
 
 func stringMapValue(value any) map[string]string {
 	out := map[string]string{}
+	add := func(key string, value any) {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			out[key] = strings.TrimSpace(valueString(value))
+		}
+	}
 	switch typed := value.(type) {
 	case map[string]string:
 		for key, value := range typed {
-			if strings.TrimSpace(key) != "" {
-				out[strings.TrimSpace(key)] = strings.TrimSpace(value)
-			}
+			add(key, value)
 		}
 	case map[string]any:
 		for key, value := range typed {
-			if strings.TrimSpace(key) != "" {
-				out[strings.TrimSpace(key)] = strings.TrimSpace(valueString(value))
-			}
+			add(key, value)
 		}
 	}
 	return out
 }
 
 func stringSliceValue(value any) []string {
-	if typed, ok := value.([]string); ok {
+	switch typed := value.(type) {
+	case []string:
+		return trimNonEmptyStrings(typed)
+	case []any:
 		out := make([]string, 0, len(typed))
 		for _, item := range typed {
-			if strings.TrimSpace(item) != "" {
-				out = append(out, strings.TrimSpace(item))
+			if value := strings.TrimSpace(valueString(item)); value != "" {
+				out = append(out, value)
 			}
 		}
 		return out
-	}
-	values, ok := value.([]any)
-	if !ok {
+	default:
 		return nil
 	}
+}
+
+func trimNonEmptyStrings(values []string) []string {
 	out := make([]string, 0, len(values))
-	for _, item := range values {
-		if value := strings.TrimSpace(valueString(item)); value != "" {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
 			out = append(out, value)
 		}
 	}

@@ -8,9 +8,59 @@ import (
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/environmentsource"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
+
+type environmentRestoreSourcePolicy struct {
+	RemoteOnly bool     `json:"remoteOnly"`
+	OK         bool     `json:"ok"`
+	Violations []string `json:"violations,omitempty"`
+}
+
+type environmentRestorePackageReport struct {
+	Configured bool     `json:"configured"`
+	URL        string   `json:"url,omitempty"`
+	Branch     string   `json:"branch,omitempty"`
+	Ref        string   `json:"ref,omitempty"`
+	Checkout   string   `json:"checkout,omitempty"`
+	Exists     bool     `json:"exists"`
+	Action     string   `json:"action"`
+	Command    []string `json:"command,omitempty"`
+	OK         bool     `json:"ok"`
+	Output     string   `json:"output,omitempty"`
+	Error      string   `json:"error,omitempty"`
+}
+
+type environmentRestorePackageSpec struct {
+	URL      string
+	Branch   string
+	Ref      string
+	Checkout string
+}
+
+type environmentRestoreRepoReport struct {
+	ServiceID string   `json:"serviceId"`
+	URL       string   `json:"url,omitempty"`
+	Branch    string   `json:"branch,omitempty"`
+	Ref       string   `json:"ref,omitempty"`
+	Checkout  string   `json:"checkout"`
+	Exists    bool     `json:"exists"`
+	Action    string   `json:"action"`
+	Command   []string `json:"command,omitempty"`
+	OK        bool     `json:"ok"`
+	Output    string   `json:"output,omitempty"`
+	Error     string   `json:"error,omitempty"`
+}
+
+type environmentRestoreRepoSpec struct {
+	ServiceID string
+	URL       string
+	Branch    string
+	Ref       string
+	Checkout  string
+}
 
 func environmentRestoreRepoSpecs(env store.Environment, workspace string) []environmentRestoreRepoSpec {
 	repoMap := jsonObjectString(env.ReposJSON)
@@ -204,17 +254,7 @@ func environmentRestoreOrderedComponentAssets(envID string, g store.EnvironmentC
 }
 
 func environmentRestoreComponentAssetRemoteRefOK(asset store.ComponentConfigAsset) bool {
-	ref := jsonObjectString(asset.RemoteRefJSON)
-	path := strings.TrimSpace(valueString(ref["path"]))
-	if path == "" {
-		path = strings.TrimSpace(asset.TargetPath)
-	}
-	cleanPath := filepath.Clean(path)
-	if path == "" || filepath.IsAbs(path) || cleanPath == "." || cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(os.PathSeparator)) {
-		return false
-	}
-	rawURL := strings.TrimSpace(valueString(ref["url"]))
-	return environmentRestoreIsRemoteGitURL(rawURL)
+	return environmentsource.ComponentAssetRemoteRefOK(asset.TargetPath, asset.RemoteRefJSON)
 }
 
 func environmentRestoreComposeWithComponentAssets(envID string, compose map[string]any, graph store.EnvironmentComponentGraph) map[string]any {

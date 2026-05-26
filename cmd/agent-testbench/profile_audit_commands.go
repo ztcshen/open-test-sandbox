@@ -14,23 +14,14 @@ import (
 )
 
 func runProfileAudit(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("profile audit", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
-	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
-	if err := flags.Parse(args); err != nil {
+	options, err := parseProfileAuditCommandOptions("profile audit", args)
+	if err != nil {
 		return err
 	}
-	if !*offlineTemplatePackage {
+	if !options.OfflineTemplatePackage {
 		return errors.New("--profile audit reads template packages only for offline review; add --offline-template-package")
 	}
-	resolvedProfilePath, err := materializeProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *force)
+	resolvedProfilePath, err := materializeProfileReference(options.TemplatePackageReference(), options.ProfileHome, options.Force)
 	if err != nil {
 		return err
 	}
@@ -39,11 +30,11 @@ func runProfileAudit(ctx context.Context, args []string) error {
 		return err
 	}
 
-	options := profileaudit.Options{
+	auditOptions := profileaudit.Options{
 		Bundle:     bundle,
 		BundlePath: resolvedProfilePath,
 	}
-	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveStoreReference(options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
 	}
@@ -53,14 +44,14 @@ func runProfileAudit(ctx context.Context, args []string) error {
 			return err
 		}
 		defer closeCLIStore(s)
-		options.Store = s
+		auditOptions.Store = s
 	}
 
-	report, err := profileaudit.Audit(ctx, options)
+	report, err := profileaudit.Audit(ctx, auditOptions)
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if options.JSONOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
@@ -70,7 +61,41 @@ func runProfileAudit(ctx context.Context, args []string) error {
 }
 
 func runProfileAuditPlan(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("profile audit-plan", flag.ContinueOnError)
+	options, err := parseProfileAuditCommandOptions("profile audit-plan", args)
+	if err != nil {
+		return err
+	}
+	if !options.OfflineTemplatePackage {
+		return errors.New("--profile audit-plan reads template packages only for offline review; add --offline-template-package")
+	}
+	resolvedStoreURL, err := resolveStoreReference(options.StoreRef, options.StoreURL)
+	if err != nil {
+		return err
+	}
+	report, err := profileAuditRepairPlan(ctx, options.TemplatePackageReference(), options.ProfileHome, resolvedStoreURL, options.Force)
+	if err != nil {
+		return err
+	}
+	if options.JSONOutput {
+		return writeIndentedJSON(report)
+	}
+	printProfileAuditRepairPlan(report)
+	return nil
+}
+
+type profileAuditCommandOptions struct {
+	ProfilePath            string
+	TemplatePackagePath    string
+	ProfileHome            string
+	StoreRef               string
+	StoreURL               string
+	OfflineTemplatePackage bool
+	JSONOutput             bool
+	Force                  bool
+}
+
+func parseProfileAuditCommandOptions(command string, args []string) (profileAuditCommandOptions, error) {
+	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
 	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
@@ -81,24 +106,22 @@ func runProfileAuditPlan(ctx context.Context, args []string) error {
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return profileAuditCommandOptions{}, err
 	}
-	if !*offlineTemplatePackage {
-		return errors.New("--profile audit-plan reads template packages only for offline review; add --offline-template-package")
-	}
-	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	report, err := profileAuditRepairPlan(ctx, templatePackageReference(*templatePackagePath, *profilePath), *profileHome, resolvedStoreURL, *force)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(report)
-	}
-	printProfileAuditRepairPlan(report)
-	return nil
+	return profileAuditCommandOptions{
+		ProfilePath:            *profilePath,
+		TemplatePackagePath:    *templatePackagePath,
+		ProfileHome:            *profileHome,
+		StoreRef:               *storeRef,
+		StoreURL:               *storeURL,
+		OfflineTemplatePackage: *offlineTemplatePackage,
+		JSONOutput:             *jsonOutput,
+		Force:                  *force,
+	}, nil
+}
+
+func (options profileAuditCommandOptions) TemplatePackageReference() string {
+	return templatePackageReference(options.TemplatePackagePath, options.ProfilePath)
 }
 
 func profileAuditRepairPlan(ctx context.Context, profilePath string, profileHome string, storeURL string, force bool) (profileaudit.RepairPlanReport, error) {

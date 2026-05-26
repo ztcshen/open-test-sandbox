@@ -143,21 +143,11 @@ func printWorkflowAudit(report workflowaudit.Report) {
 }
 
 func runWorkflowPlan(args []string) error {
-	flags := flag.NewFlagSet("workflow plan", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	workflowID := flags.String("workflow", "", "Workflow id")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	options, err := parseProfileWorkflowStoreCommandOptions("workflow plan", args, true)
+	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(*workflowID) == "" {
-		return errors.New("--workflow is required")
-	}
-	bundle, runtime, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(context.Background(), *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, runtime, _, cleanup, err := options.loadRequiredBundle(context.Background())
 	if err != nil {
 		return err
 	}
@@ -166,18 +156,18 @@ func runWorkflowPlan(args []string) error {
 	if runtime != nil {
 		planStore = runtime
 	}
-	payload, ok, err := controlplane.WorkflowPlanPayload(context.Background(), bundle, *workflowID, planStore)
+	payload, ok, err := controlplane.WorkflowPlanPayload(context.Background(), bundle, options.WorkflowID, planStore)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("workflow not found: %s", *workflowID)
+		return fmt.Errorf("workflow not found: %s", options.WorkflowID)
 	}
-	if *jsonOutput {
+	if options.JSONOutput {
 		return writeIndentedJSON(payload)
 	}
 
-	fmt.Printf("Workflow: %s\n", *workflowID)
+	fmt.Printf("Workflow: %s\n", options.WorkflowID)
 	for _, raw := range listFromReportAny(payload["steps"]) {
 		step := mapFromReportAny(raw)
 		fmt.Printf("Step: %s\n", valueString(step["stepId"]))

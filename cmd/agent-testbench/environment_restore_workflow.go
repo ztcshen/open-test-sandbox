@@ -10,6 +10,40 @@ import (
 	"agent-testbench/internal/store"
 )
 
+type environmentRestoreWorkflowRun struct {
+	OK         bool                                 `json:"ok"`
+	Action     string                               `json:"action"`
+	WorkflowID string                               `json:"workflowId"`
+	RunID      string                               `json:"runId,omitempty"`
+	OutputDir  string                               `json:"outputDir,omitempty"`
+	ReportURL  string                               `json:"reportUrl,omitempty"`
+	Counts     workflowCaseReportCounts             `json:"counts,omitempty"`
+	Acceptance environmentRestoreWorkflowAcceptance `json:"acceptance,omitempty"`
+	Error      string                               `json:"error,omitempty"`
+}
+
+type environmentRestoreWorkflowAcceptance struct {
+	OK               bool   `json:"ok"`
+	TemplateID       string `json:"templateId,omitempty"`
+	WorkflowID       string `json:"workflowId,omitempty"`
+	ExpectedSteps    int    `json:"expectedSteps,omitempty"`
+	CompletedSteps   int    `json:"completedSteps,omitempty"`
+	PassedSteps      int    `json:"passedSteps,omitempty"`
+	FailedSteps      int    `json:"failedSteps,omitempty"`
+	TopologyProvider string `json:"topologyProvider,omitempty"`
+}
+
+type environmentRestoreWorkflowOptions struct {
+	Run            bool
+	EnvironmentID  string
+	StoreRef       string
+	StoreURL       string
+	ServerURL      string
+	BaseURL        string
+	OutputDir      string
+	TimeoutSeconds int
+}
+
 func environmentRestoreRunWorkflow(ctx context.Context, workflowID string, workspace string, options environmentRestoreWorkflowOptions) environmentRestoreWorkflowRun {
 	report := environmentRestoreWorkflowRun{
 		WorkflowID: workflowID,

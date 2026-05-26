@@ -9,6 +9,56 @@ import (
 	"strings"
 )
 
+type environmentRestoreDockerReport struct {
+	OK            bool                                  `json:"ok"`
+	Action        string                                `json:"action"`
+	ComposeFile   string                                `json:"composeFile,omitempty"`
+	Workdir       string                                `json:"workdir,omitempty"`
+	Generated     []environmentRestoreGeneratedFile     `json:"generatedFiles,omitempty"`
+	AppliedAssets []environmentRestoreAppliedAsset      `json:"appliedAssets,omitempty"`
+	Cleanup       environmentRestoreDockerCleanupReport `json:"cleanup,omitempty"`
+	Commands      [][]string                            `json:"commands,omitempty"`
+	Output        []string                              `json:"output,omitempty"`
+	Error         string                                `json:"error,omitempty"`
+	HealthChecks  []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
+}
+
+type environmentRestoreGeneratedFile struct {
+	Path   string `json:"path"`
+	Bytes  int    `json:"bytes"`
+	Action string `json:"action"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+}
+
+type environmentRestoreDockerCleanupReport struct {
+	Requested      bool       `json:"requested,omitempty"`
+	Allowed        bool       `json:"allowed,omitempty"`
+	IncludeImages  bool       `json:"includeImages,omitempty"`
+	Action         string     `json:"action,omitempty"`
+	BackupCommands [][]string `json:"backupCommands,omitempty"`
+	Commands       [][]string `json:"commands,omitempty"`
+	Output         []string   `json:"output,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	Warning        string     `json:"warning,omitempty"`
+}
+
+type environmentRestoreHealthCheckReport struct {
+	ID         string `json:"id,omitempty"`
+	Kind       string `json:"kind"`
+	URL        string `json:"url"`
+	Address    string `json:"address,omitempty"`
+	Command    string `json:"command,omitempty"`
+	Service    string `json:"service,omitempty"`
+	Container  string `json:"container,omitempty"`
+	OK         bool   `json:"ok"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	State      string `json:"state,omitempty"`
+	Health     string `json:"health,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
 func environmentRestoreDockerPlan(compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreDockerReport, []string) {
 	report := environmentRestoreDockerReport{OK: true, Workdir: workspace}
 	composeFiles := environmentRestoreComposeFiles(compose)

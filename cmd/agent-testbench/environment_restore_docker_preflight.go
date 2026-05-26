@@ -9,6 +9,24 @@ import (
 	"time"
 )
 
+type environmentRestorePreflight struct {
+	OK                 bool                              `json:"ok"`
+	AssumeCleanDocker  bool                              `json:"assumeCleanDocker,omitempty"`
+	Tools              []environmentRestorePreflightTool `json:"tools"`
+	HeavySteps         []string                          `json:"heavySteps,omitempty"`
+	ContainerConflicts []string                          `json:"containerConflicts,omitempty"`
+	StartupAssets      []environmentRestoreStartupAsset  `json:"startupAssets,omitempty"`
+	Notes              []string                          `json:"notes,omitempty"`
+}
+
+type environmentRestorePreflightTool struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	OK       bool   `json:"ok"`
+	Path     string `json:"path,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 func environmentRestoreContainerNameConflicts(compose map[string]any, workspace string) []string {
 	wanted := environmentRestoreContainerNames(compose, workspace)
 	if len(wanted) == 0 {

@@ -282,59 +282,85 @@ func interfaceNodeCoverageGapsPayload(workflowID string, source map[string]strin
 }
 
 func interfaceNodeCoverageRows(bundle profile.Bundle, workflowID string) []map[string]any {
-	nodeByID := make(map[string]profile.InterfaceNode, len(bundle.InterfaceNodes))
+	nodeByID := make(map[string]interfaceNodeCoverageNode, len(bundle.InterfaceNodes))
 	for _, node := range bundle.InterfaceNodes {
-		nodeByID[node.ID] = node
+		nodeByID[node.ID] = interfaceNodeCoverageNode{
+			ID:          node.ID,
+			DisplayName: node.DisplayName,
+			ServiceID:   node.ServiceID,
+		}
 	}
-	caseByID := make(map[string]profile.APICase, len(bundle.APICases))
+	caseByID := make(map[string]interfaceNodeCoverageCase, len(bundle.APICases))
 	for _, item := range bundle.APICases {
-		caseByID[item.ID] = item
+		caseByID[item.ID] = interfaceNodeCoverageCase{DisplayName: item.DisplayName}
 	}
 
-	rows := make([]map[string]any, 0)
+	bindings := make([]interfaceNodeCoverageBinding, 0, len(bundle.WorkflowBindings))
 	for _, binding := range bundle.WorkflowBindings {
-		if workflowID != "" && binding.WorkflowID != workflowID {
-			continue
-		}
-		node, mapped := nodeByID[binding.NodeID]
-		item := caseByID[binding.CaseID]
-		row := map[string]any{
-			"workflowId":      binding.WorkflowID,
-			"stepId":          binding.StepID,
-			"nodeId":          binding.NodeID,
-			"caseId":          binding.CaseID,
-			"caseDisplayName": item.DisplayName,
-			"required":        binding.Required,
-			"mapped":          mapped,
-			"admissionStatus": "pending",
-		}
-		if mapped {
-			row["nodeDisplayName"] = node.DisplayName
-			row["serviceId"] = node.ServiceID
-			row["href"] = "/interface-node.html?id=" + node.ID
-		}
-		rows = append(rows, row)
+		bindings = append(bindings, interfaceNodeCoverageBinding{
+			WorkflowID: binding.WorkflowID,
+			StepID:     binding.StepID,
+			NodeID:     binding.NodeID,
+			CaseID:     binding.CaseID,
+			Required:   binding.Required,
+		})
 	}
-	sort.SliceStable(rows, func(i int, j int) bool {
-		left := valueString(rows[i]["workflowId"]) + "\x00" + valueString(rows[i]["stepId"])
-		right := valueString(rows[j]["workflowId"]) + "\x00" + valueString(rows[j]["stepId"])
-		return left < right
-	})
-	return rows
+	return buildInterfaceNodeCoverageRows(nodeByID, caseByID, bindings, workflowID)
 }
 
 func interfaceNodeCoverageRowsFromCatalog(catalog store.ProfileCatalog, workflowID string) []map[string]any {
-	nodeByID := make(map[string]store.CatalogInterfaceNode, len(catalog.InterfaceNodes))
+	nodeByID := make(map[string]interfaceNodeCoverageNode, len(catalog.InterfaceNodes))
 	for _, node := range catalog.InterfaceNodes {
-		nodeByID[node.ID] = node
+		nodeByID[node.ID] = interfaceNodeCoverageNode{
+			ID:          node.ID,
+			DisplayName: node.DisplayName,
+			ServiceID:   node.ServiceID,
+		}
 	}
-	caseByID := make(map[string]store.CatalogAPICase, len(catalog.APICases))
+	caseByID := make(map[string]interfaceNodeCoverageCase, len(catalog.APICases))
 	for _, item := range catalog.APICases {
-		caseByID[item.ID] = item
+		caseByID[item.ID] = interfaceNodeCoverageCase{DisplayName: item.DisplayName}
 	}
 
-	rows := make([]map[string]any, 0)
+	bindings := make([]interfaceNodeCoverageBinding, 0, len(catalog.WorkflowBindings))
 	for _, binding := range catalog.WorkflowBindings {
+		bindings = append(bindings, interfaceNodeCoverageBinding{
+			WorkflowID: binding.WorkflowID,
+			StepID:     binding.StepID,
+			NodeID:     binding.NodeID,
+			CaseID:     binding.CaseID,
+			Required:   binding.Required,
+		})
+	}
+	return buildInterfaceNodeCoverageRows(nodeByID, caseByID, bindings, workflowID)
+}
+
+type interfaceNodeCoverageNode struct {
+	ID          string
+	DisplayName string
+	ServiceID   string
+}
+
+type interfaceNodeCoverageCase struct {
+	DisplayName string
+}
+
+type interfaceNodeCoverageBinding struct {
+	WorkflowID string
+	StepID     string
+	NodeID     string
+	CaseID     string
+	Required   bool
+}
+
+func buildInterfaceNodeCoverageRows(
+	nodeByID map[string]interfaceNodeCoverageNode,
+	caseByID map[string]interfaceNodeCoverageCase,
+	bindings []interfaceNodeCoverageBinding,
+	workflowID string,
+) []map[string]any {
+	rows := make([]map[string]any, 0)
+	for _, binding := range bindings {
 		if workflowID != "" && binding.WorkflowID != workflowID {
 			continue
 		}

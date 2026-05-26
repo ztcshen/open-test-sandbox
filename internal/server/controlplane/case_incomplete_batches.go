@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 		})
 		return
 	}
-	passed, latest, err := apiCaseRunStatusByCase(r, runtime)
+	passed, latest, err := apiCaseRunStatusByCase(r.Context(), runtime)
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -51,28 +52,38 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 	})
 }
 
-func apiCaseRunStatusByCase(r *http.Request, runtime store.Store) (map[string]bool, map[string]string, error) {
-	runs, err := runtime.ListRuns(r.Context())
+func apiCaseRunStatusByCase(ctx context.Context, runtime store.Store) (map[string]bool, map[string]string, error) {
+	passed := map[string]bool{}
+	latest := map[string]string{}
+	err := visitLatestAPICaseRuns(ctx, runtime, func(item store.APICaseRun) {
+		if latest[item.CaseID] == "" {
+			latest[item.CaseID] = item.Status
+		}
+		if strings.EqualFold(item.Status, store.StatusPassed) {
+			passed[item.CaseID] = true
+		}
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	passed := map[string]bool{}
-	latest := map[string]string{}
+	return passed, latest, nil
+}
+
+func visitLatestAPICaseRuns(ctx context.Context, runtime store.Store, visit func(store.APICaseRun)) error {
+	runs, err := runtime.ListRuns(ctx)
+	if err != nil {
+		return err
+	}
 	for i := len(runs) - 1; i >= 0; i-- {
-		caseRuns, err := runtime.ListAPICaseRuns(r.Context(), runs[i].ID)
+		caseRuns, err := runtime.ListAPICaseRuns(ctx, runs[i].ID)
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
 		for _, item := range caseRuns {
-			if latest[item.CaseID] == "" {
-				latest[item.CaseID] = item.Status
-			}
-			if strings.EqualFold(item.Status, store.StatusPassed) {
-				passed[item.CaseID] = true
-			}
+			visit(item)
 		}
 	}
-	return passed, latest, nil
+	return nil
 }
 
 func apiCaseSuggestedCommand(item profile.APICase) string {
@@ -81,11 +92,15 @@ func apiCaseSuggestedCommand(item profile.APICase) string {
 		return ""
 	}
 	parts := []string{"agent-testbench case run --case " + strconv.Quote(casePath)}
-	if strings.TrimSpace(item.BaseURL) != "" {
-		parts = append(parts, "--base-url "+strconv.Quote(item.BaseURL))
-	}
-	if strings.TrimSpace(item.EvidenceDir) != "" {
-		parts = append(parts, "--evidence-dir "+strconv.Quote(item.EvidenceDir))
-	}
+	parts = appendShellFlag(parts, "--base-url", item.BaseURL)
+	parts = appendShellFlag(parts, "--evidence-dir", item.EvidenceDir)
 	return strings.Join(parts, " ")
+}
+
+func appendShellFlag(parts []string, flag string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return parts
+	}
+	return append(parts, flag+" "+strconv.Quote(value))
 }

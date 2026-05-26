@@ -438,57 +438,36 @@ func workflowValueAtPath(root any, path string) any {
 }
 
 func writeWorkflowCaseReportFiles(outputDir string, report *workflowCaseReport) error {
-	jsonPath := filepath.Join(outputDir, "report.json")
-	htmlPath := filepath.Join(outputDir, "report.html")
+	jsonPath, htmlPath := reportArtifactPaths(outputDir)
 	report.JSONReportURL = jsonPath
 	report.ReportURL = htmlPath
-	raw, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(jsonPath, append(raw, '\n'), 0o644); err != nil {
-		return err
-	}
-	return os.WriteFile(htmlPath, []byte(renderWorkflowCaseReportHTML(*report)), 0o644)
+	return writeJSONAndHTMLReportArtifacts(jsonPath, htmlPath, report, renderWorkflowCaseReportHTML(*report))
 }
 
 func renderWorkflowCaseReportHTML(report workflowCaseReport) string {
 	var b strings.Builder
-	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><title>Workflow Report</title><style>`)
-	b.WriteString(`body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:24px;color:#111827;background:#f8fafc}main{max-width:1280px;margin:auto}h1{font-size:24px;margin:0 0 4px}.meta{color:#4b5563;margin-bottom:16px}.summary{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.pill{border:1px solid #d1d5db;background:white;border-radius:6px;padding:6px 10px;font-size:13px}.ok{color:#047857}.bad{color:#b91c1c}table{width:100%;border-collapse:collapse;background:white;border:1px solid #d1d5db}th,td{border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;padding:7px 8px;font-size:13px}th{background:#f3f4f6;color:#374151}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.wrap{word-break:break-all}.small{font-size:12px;color:#6b7280}`)
-	b.WriteString(`</style></head><body><main>`)
-	b.WriteString(`<h1>` + html.EscapeString(report.WorkflowName) + `</h1>`)
-	b.WriteString(`<div class="meta">` + html.EscapeString(report.WorkflowID))
-	if report.RunID != "" {
-		b.WriteString(` · ` + html.EscapeString(report.RunID))
-	}
-	b.WriteString(`</div><div class="summary">`)
-	b.WriteString(reportPill("status", statusText(report.OK)))
-	b.WriteString(reportPill("steps", strconv.Itoa(report.Counts.Total)))
-	b.WriteString(reportPill("passed", strconv.Itoa(report.Counts.Passed)))
-	b.WriteString(reportPill("failed", strconv.Itoa(report.Counts.Failed)))
-	b.WriteString(reportPill("elapsed", fmt.Sprintf("%d ms", report.ElapsedMs)))
-	b.WriteString(`</div><table><thead><tr><th>#</th><th>Step</th><th>Case</th><th>Status</th><th>HTTP</th><th>Elapsed</th><th>Evidence</th><th>Request</th><th>Error</th></tr></thead><tbody>`)
+	writeReportHTMLStart(&b, "Workflow Report", 1280)
+	writeReportHeading(&b, report.WorkflowName, report.WorkflowID, report.RunID)
+	writeReportSummary(&b,
+		reportHTMLPill{"status", statusText(report.OK)},
+		reportHTMLPill{"steps", strconv.Itoa(report.Counts.Total)},
+		reportHTMLPill{"passed", strconv.Itoa(report.Counts.Passed)},
+		reportHTMLPill{"failed", strconv.Itoa(report.Counts.Failed)},
+		reportHTMLPill{"elapsed", reportElapsedText(report.ElapsedMs)},
+	)
+	b.WriteString(`<table><thead><tr><th>#</th><th>Step</th><th>Case</th><th>Status</th><th>HTTP</th><th>Elapsed</th><th>Evidence</th><th>Request</th><th>Error</th></tr></thead><tbody>`)
 	for index, item := range report.Steps {
-		statusClass := "bad"
-		if item.Status == store.StatusPassed {
-			statusClass = "ok"
-		}
-		b.WriteString(`<tr><td class="mono">` + strconv.Itoa(index+1) + `</td>`)
+		writeReportIndexCell(&b, index)
 		b.WriteString(`<td><div>` + html.EscapeString(item.Title) + `</div><div class="mono small wrap">` + html.EscapeString(item.StepID) + `</div></td>`)
-		b.WriteString(`<td class="mono wrap">` + html.EscapeString(item.CaseID) + `</td>`)
-		b.WriteString(`<td class="` + statusClass + `">` + html.EscapeString(item.Status) + `</td>`)
-		b.WriteString(`<td class="mono">` + strconv.Itoa(item.HTTPCode) + `</td>`)
-		b.WriteString(`<td class="mono">` + fmt.Sprintf("%d ms", item.ElapsedMs) + `</td>`)
-		b.WriteString(`<td class="mono wrap">`)
-		if item.DetailURL != "" {
-			b.WriteString(`<a href="` + html.EscapeString(item.DetailURL) + `">caseRunId</a><br>`)
-		}
-		b.WriteString(html.EscapeString(item.CaseRunID))
-		b.WriteString(`</td>`)
-		b.WriteString(`<td class="mono wrap">` + html.EscapeString(strings.TrimSpace(item.Method+" "+item.FullURL)) + `</td>`)
-		b.WriteString(`<td class="wrap">` + html.EscapeString(item.Error) + `</td></tr>`)
+		writeReportTextCell(&b, "mono wrap", item.CaseID)
+		writeReportStatusCell(&b, item.Status)
+		writeReportIntCell(&b, item.HTTPCode)
+		writeReportElapsedCell(&b, item.ElapsedMs)
+		writeReportEvidenceCell(&b, item.DetailURL, item.CaseRunID)
+		writeReportRequestCell(&b, item.Method, item.FullURL)
+		writeReportTextCell(&b, "wrap", item.Error)
+		b.WriteString(`</tr>`)
 	}
-	b.WriteString(`</tbody></table></main></body></html>`)
+	finishReportHTMLTable(&b)
 	return b.String()
 }

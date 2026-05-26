@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
 )
 
@@ -114,10 +115,10 @@ func dockerRuntimeByCatalogService(ctx context.Context, services []store.Catalog
 }
 
 func configuredRuntimeByService(ctx context.Context, bundle profile.Bundle) map[string]serviceRuntime {
-	env := runtimeEnv(bundle)
+	env := profilecatalog.RuntimeEnvFromBundle(bundle)
 	out := make(map[string]serviceRuntime, len(bundle.Services))
 	for _, service := range bundle.Services {
-		sourcePath := serviceSourcePath(env, service)
+		sourcePath := profilecatalog.ServiceSourcePath(env, service)
 		branchName, commitID := sourcePathRevision(ctx, sourcePath)
 		if branchName == "" {
 			branchName = strings.TrimSpace(service.GitBranch)
@@ -157,67 +158,12 @@ func mergeRuntime(configured serviceRuntime, observed serviceRuntime) serviceRun
 	return configured
 }
 
-func runtimeEnv(bundle profile.Bundle) map[string]string {
-	env := map[string]string{}
-	for _, item := range os.Environ() {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
-			env[key] = value
-		}
-	}
-	for _, path := range bundle.RuntimeEnvFiles {
-		for key, value := range loadRuntimeEnvFile(resolveProfilePath(bundle.BaseDir, path)) {
-			env[key] = value
-		}
-	}
-	return env
-}
-
-func loadRuntimeEnvFile(path string) map[string]string {
-	out := map[string]string{}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return out
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		if key != "" {
-			out[key] = value
-		}
-	}
-	return out
-}
-
 func resolveProfilePath(baseDir string, path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" || filepath.IsAbs(path) || baseDir == "" {
 		return path
 	}
 	return filepath.Clean(filepath.Join(baseDir, path))
-}
-
-func serviceSourcePath(env map[string]string, service profile.Service) string {
-	if value := strings.TrimSpace(service.SourcePath); value != "" {
-		return value
-	}
-	repoEnv := strings.TrimSpace(service.RepoEnv)
-	if repoEnv == "" {
-		return ""
-	}
-	if value := strings.TrimSpace(env["DOCKER_"+repoEnv]); value != "" {
-		return value
-	}
-	return strings.TrimSpace(env[repoEnv])
 }
 
 func listDockerContainers(ctx context.Context) ([]dockerContainerRow, error) {

@@ -20,23 +20,27 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		return
 	}
 	request := apiCaseBatchRunRequest{
-		RequestID:      strings.TrimSpace(valueString(payload["requestId"])),
-		EnvironmentID:  strings.TrimSpace(valueString(payload["environmentId"])),
-		CaseIDs:        stringListValue(payload["caseIds"]),
-		NodeIDs:        stringListValue(payload["nodeIds"]),
-		WorkflowID:     strings.TrimSpace(valueString(payload["workflowId"])),
-		Suite:          apiCaseBatchSuiteSelectorValue(payload["suite"]),
-		BaseURL:        strings.TrimSpace(valueString(payload["baseUrl"])),
-		EvidenceDir:    strings.TrimSpace(valueString(payload["evidenceDir"])),
-		TimeoutSeconds: intValue(payload["timeoutSeconds"]),
-		Overrides:      mapValue(payload["overrides"]),
+		RequestID:     strings.TrimSpace(valueString(payload["requestId"])),
+		EnvironmentID: strings.TrimSpace(valueString(payload["environmentId"])),
+		CaseIDs:       stringListValue(payload["caseIds"]),
+		NodeIDs:       stringListValue(payload["nodeIds"]),
+		WorkflowID:    strings.TrimSpace(valueString(payload["workflowId"])),
+		Suite:         apiCaseBatchSuiteSelectorValue(payload["suite"]),
 	}
+	applyAPICaseBatchRunOptionsFromPayload(&request, payload)
 	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request, collector)
 	if err != nil {
 		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
 	writeJSONStatus(w, http.StatusAccepted, report)
+}
+
+func applyAPICaseBatchRunOptionsFromPayload(request *apiCaseBatchRunRequest, payload map[string]any) {
+	request.BaseURL = strings.TrimSpace(valueString(payload["baseUrl"]))
+	request.EvidenceDir = strings.TrimSpace(valueString(payload["evidenceDir"]))
+	request.TimeoutSeconds = intValue(payload["timeoutSeconds"])
+	request.Overrides = mapValue(payload["overrides"])
 }
 
 func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner, request apiCaseBatchRunRequest, collector traceCollector) (apiCaseBatchRunReport, int, error) {

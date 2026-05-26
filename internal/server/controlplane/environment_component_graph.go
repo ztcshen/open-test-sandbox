@@ -4,11 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/environmentsource"
 	"agent-testbench/internal/store"
 
 	gonumgraph "gonum.org/v1/gonum/graph"
@@ -475,27 +474,5 @@ func environmentComponentCycleText(cycles [][]string) string {
 }
 
 func environmentComponentAssetRemoteRefOK(asset store.ComponentConfigAsset) bool {
-	ref := jsonObject(asset.RemoteRefJSON)
-	path := strings.TrimSpace(valueString(ref["path"]))
-	if path == "" {
-		path = strings.TrimSpace(asset.TargetPath)
-	}
-	cleanPath := filepath.Clean(path)
-	if path == "" || filepath.IsAbs(path) || cleanPath == "." || cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(os.PathSeparator)) {
-		return false
-	}
-	return environmentComponentIsRemoteGitURL(strings.TrimSpace(valueString(ref["url"])))
-}
-
-func environmentComponentIsRemoteGitURL(rawURL string) bool {
-	rawURL = strings.TrimSpace(rawURL)
-	lower := strings.ToLower(rawURL)
-	for _, prefix := range []string{"https://", "http://", "ssh://", "git://"} {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	at := strings.Index(rawURL, "@")
-	colon := strings.Index(rawURL, ":")
-	return at > 0 && colon > at+1
+	return environmentsource.ComponentAssetRemoteRefOK(asset.TargetPath, asset.RemoteRefJSON)
 }

@@ -131,29 +131,17 @@ func runInterfaceNode(args []string) error {
 }
 
 func runInterfaceNodeDiscover(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("interface-node discover", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
-	filter := flags.String("filter", "", "Filter by id, display name, or operation")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	discoveryProfileRef, resolvedStoreURL, err := resolveDiscoveryInputs(*profilePath, *storeRef, *storeURL, *offlineTemplatePackage)
+	options, err := parseProfileDiscoveryCommandOptions("interface-node discover", "Filter by id, display name, or operation", args)
 	if err != nil {
 		return err
 	}
-	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, discoveryProfileRef, *profileHome, resolvedStoreURL)
+	bundle, cleanup, err := options.loadDiscoveryBundle(ctx)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	report := interfaceNodeList(bundle, *filter)
-	if *jsonOutput {
+	report := interfaceNodeList(bundle, options.Filter)
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	for _, item := range report.Items {
@@ -167,18 +155,11 @@ func runInterfaceNodeCoverage(ctx context.Context, args []string, gapsOnly bool)
 	if gapsOnly {
 		name = "interface-node coverage-gaps"
 	}
-	flags := flag.NewFlagSet(name, flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	workflowID := flags.String("workflow", "", "Workflow id")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	options, err := parseProfileWorkflowStoreCommandOptions(name, args, false)
+	if err != nil {
 		return err
 	}
-	bundle, runtime, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
+	bundle, runtime, _, cleanup, err := options.loadRequiredBundle(ctx)
 	if err != nil {
 		return err
 	}
@@ -186,14 +167,14 @@ func runInterfaceNodeCoverage(ctx context.Context, args []string, gapsOnly bool)
 
 	var payload map[string]any
 	if gapsOnly {
-		payload, err = controlplane.InterfaceNodeCoverageGapsPayload(ctx, bundle, *workflowID, runtime)
+		payload, err = controlplane.InterfaceNodeCoverageGapsPayload(ctx, bundle, options.WorkflowID, runtime)
 	} else {
-		payload, err = controlplane.InterfaceNodeCoveragePayload(ctx, bundle, *workflowID, runtime)
+		payload, err = controlplane.InterfaceNodeCoveragePayload(ctx, bundle, options.WorkflowID, runtime)
 	}
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if options.JSONOutput {
 		return writeIndentedJSON(payload)
 	}
 	printInterfaceNodeCoverage(payload, gapsOnly)

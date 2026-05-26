@@ -102,43 +102,7 @@ func printProfileGenerationPlan(title string, report profileGenerationPlanReport
 }
 
 func writeProfileGenerationPlanOutput(outputDir string, report profileGenerationPlanReport) ([]string, error) {
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create generation plan output directory: %w", err)
-	}
-	written := []string{"generation-plan.json"}
-	for _, item := range []profile.Service{report.Plan.Service} {
-		relative := filepath.Join("services", safeImportPlanFileName(item.ID)+".json")
-		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
-			return nil, err
-		}
-		written = append(written, filepath.ToSlash(relative))
-	}
-	for _, item := range report.Plan.InterfaceNodes {
-		relative := filepath.Join("interface-nodes", safeImportPlanFileName(item.ID)+".json")
-		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
-			return nil, err
-		}
-		written = append(written, filepath.ToSlash(relative))
-	}
-	for _, item := range report.Plan.APICases {
-		relative := filepath.Join("cases", safeImportPlanFileName(item.ID)+".json")
-		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
-			return nil, err
-		}
-		written = append(written, filepath.ToSlash(relative))
-	}
-	for _, item := range report.Plan.CaseFiles {
-		relative, err := safeBundleRelativePath(item.Path)
-		if err != nil {
-			return nil, err
-		}
-		if err := writeImportPlanRawJSON(outputDir, relative, item.Body); err != nil {
-			return nil, err
-		}
-		written = append(written, filepath.ToSlash(relative))
-	}
-	sort.Strings(written)
-	return written, nil
+	return writeProfilePlanAssetTree(outputDir, "generation-plan.json", generationPlanAssets(report.Plan))
 }
 
 func writeProfileGenerationPlanManifest(outputDir string, report profileGenerationPlanReport) error {
@@ -289,67 +253,76 @@ func printProfileImportPlan(title string, report profileImportPlanReport) {
 }
 
 func importPlanAssetsFromOpenAPI(plan profileimportopenapi.PlanResult) profileImportPlanAssets {
-	files := make([]profileImportPlanCaseFile, 0, len(plan.CaseFiles))
-	for _, item := range plan.CaseFiles {
-		files = append(files, profileImportPlanCaseFile{Path: item.Path, Body: item.Body})
-	}
-	return profileImportPlanAssets{
-		Service:          plan.Service,
-		InterfaceNodes:   plan.InterfaceNodes,
-		RequestTemplates: plan.RequestTemplates,
-		APICases:         plan.APICases,
-		CaseFiles:        files,
-	}
+	return newProfileImportPlanAssets(plan.Service, plan.InterfaceNodes, plan.RequestTemplates, plan.APICases, len(plan.CaseFiles), func(index int) (string, json.RawMessage) {
+		return plan.CaseFiles[index].Path, plan.CaseFiles[index].Body
+	})
 }
 
 func importPlanAssetsFromHTTPCapture(plan profileimporthttpcapture.PlanResult) profileImportPlanAssets {
-	files := make([]profileImportPlanCaseFile, 0, len(plan.CaseFiles))
-	for _, item := range plan.CaseFiles {
-		files = append(files, profileImportPlanCaseFile{Path: item.Path, Body: item.Body})
+	return newProfileImportPlanAssets(plan.Service, plan.InterfaceNodes, plan.RequestTemplates, plan.APICases, len(plan.CaseFiles), func(index int) (string, json.RawMessage) {
+		return plan.CaseFiles[index].Path, plan.CaseFiles[index].Body
+	})
+}
+
+func newProfileImportPlanAssets(service profile.Service, nodes []profile.InterfaceNode, templates []profile.RequestTemplate, cases []profile.APICase, caseFileCount int, caseFileAt func(int) (string, json.RawMessage)) profileImportPlanAssets {
+	files := make([]profileImportPlanCaseFile, 0, caseFileCount)
+	for index := 0; index < caseFileCount; index++ {
+		path, body := caseFileAt(index)
+		files = append(files, profileImportPlanCaseFile{Path: path, Body: body})
 	}
 	return profileImportPlanAssets{
-		Service:          plan.Service,
-		InterfaceNodes:   plan.InterfaceNodes,
-		RequestTemplates: plan.RequestTemplates,
-		APICases:         plan.APICases,
+		Service:          service,
+		InterfaceNodes:   nodes,
+		RequestTemplates: templates,
+		APICases:         cases,
 		CaseFiles:        files,
 	}
 }
 
 func writeProfileImportPlanOutput(outputDir string, report profileImportPlanReport) ([]string, error) {
+	return writeProfilePlanAssetTree(outputDir, "import-plan.json", report.Plan)
+}
+
+func generationPlanAssets(plan profilegenerateopenapi.PlanResult) profileImportPlanAssets {
+	return newProfileImportPlanAssets(plan.Service, plan.InterfaceNodes, nil, plan.APICases, len(plan.CaseFiles), func(index int) (string, json.RawMessage) {
+		return plan.CaseFiles[index].Path, plan.CaseFiles[index].Body
+	})
+}
+
+func writeProfilePlanAssetTree(outputDir string, manifestName string, assets profileImportPlanAssets) ([]string, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create import plan output directory: %w", err)
 	}
-	written := []string{"import-plan.json"}
-	for _, item := range []profile.Service{report.Plan.Service} {
+	written := []string{manifestName}
+	for _, item := range []profile.Service{assets.Service} {
 		relative := filepath.Join("services", safeImportPlanFileName(item.ID)+".json")
 		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
 			return nil, err
 		}
 		written = append(written, filepath.ToSlash(relative))
 	}
-	for _, item := range report.Plan.InterfaceNodes {
+	for _, item := range assets.InterfaceNodes {
 		relative := filepath.Join("interface-nodes", safeImportPlanFileName(item.ID)+".json")
 		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
 			return nil, err
 		}
 		written = append(written, filepath.ToSlash(relative))
 	}
-	for _, item := range report.Plan.RequestTemplates {
+	for _, item := range assets.RequestTemplates {
 		relative := filepath.Join("request-templates", safeImportPlanFileName(item.ID)+".json")
 		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
 			return nil, err
 		}
 		written = append(written, filepath.ToSlash(relative))
 	}
-	for _, item := range report.Plan.APICases {
+	for _, item := range assets.APICases {
 		relative := filepath.Join("cases", safeImportPlanFileName(item.ID)+".json")
 		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
 			return nil, err
 		}
 		written = append(written, filepath.ToSlash(relative))
 	}
-	for _, item := range report.Plan.CaseFiles {
+	for _, item := range assets.CaseFiles {
 		relative, err := safeBundleRelativePath(item.Path)
 		if err != nil {
 			return nil, err

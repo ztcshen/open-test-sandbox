@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -233,20 +231,12 @@ func caseSuiteReportItems(results []interfaceNodeCaseReportItem, cases []profile
 }
 
 func writeCaseSuiteReportFiles(outputDir string, report *caseSuiteReport) error {
-	jsonPath := filepath.Join(outputDir, "report.json")
-	htmlPath := filepath.Join(outputDir, "report.html")
+	jsonPath, htmlPath := reportArtifactPaths(outputDir)
 	junitPath := filepath.Join(outputDir, "report.junit.xml")
 	report.JSONReportURL = jsonPath
 	report.ReportURL = htmlPath
 	report.JUnitReportURL = junitPath
-	raw, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(jsonPath, append(raw, '\n'), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(htmlPath, []byte(renderCaseSuiteReportHTML(*report)), 0o644); err != nil {
+	if err := writeJSONAndHTMLReportArtifacts(jsonPath, htmlPath, report, renderCaseSuiteReportHTML(*report)); err != nil {
 		return err
 	}
 	junitRaw, err := renderCaseSuiteJUnit(*report)
@@ -273,54 +263,20 @@ func renderCaseSuiteJUnit(report caseSuiteReport) ([]byte, error) {
 
 func renderCaseSuiteReportHTML(report caseSuiteReport) string {
 	var b strings.Builder
-	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><title>Case Suite Report</title><style>`)
-	b.WriteString(`body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:24px;color:#111827;background:#f8fafc}main{max-width:1320px;margin:auto}h1{font-size:24px;margin:0 0 4px}.meta{color:#4b5563;margin-bottom:16px}.summary{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.pill{border:1px solid #d1d5db;background:white;border-radius:6px;padding:6px 10px;font-size:13px}.ok{color:#047857}.bad{color:#b91c1c}table{width:100%;border-collapse:collapse;background:white;border:1px solid #d1d5db}th,td{border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;padding:7px 8px;font-size:13px}th{background:#f3f4f6;color:#374151}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.wrap{word-break:break-all}.small{font-size:12px;color:#6b7280}`)
-	b.WriteString(`</style></head><body><main>`)
-	b.WriteString(`<h1>Case Suite Report</h1>`)
-	b.WriteString(`<div class="meta">` + html.EscapeString(report.ProfileID) + `</div><div class="summary">`)
-	b.WriteString(reportPill("status", statusText(report.OK)))
-	b.WriteString(reportPill("total", strconv.Itoa(report.Counts.Total)))
-	b.WriteString(reportPill("passed", strconv.Itoa(report.Counts.Passed)))
-	b.WriteString(reportPill("failed", strconv.Itoa(report.Counts.Failed)))
-	b.WriteString(reportPill("derived configs", strconv.Itoa(report.Counts.DerivedConfigs)))
-	b.WriteString(reportPill("elapsed", fmt.Sprintf("%d ms", report.ElapsedMs)))
-	if len(report.Filters.Tags) > 0 {
-		b.WriteString(reportPill("tags", strings.Join(report.Filters.Tags, ",")))
-	}
-	if report.Filters.Owner != "" {
-		b.WriteString(reportPill("owner", report.Filters.Owner))
-	}
-	if report.Filters.Priority != "" {
-		b.WriteString(reportPill("priority", report.Filters.Priority))
-	}
-	b.WriteString(`</div><table><thead><tr><th>#</th><th>Case</th><th>Node</th><th>Maintainer</th><th>Status</th><th>HTTP</th><th>Elapsed</th><th>Evidence</th><th>Request</th><th>Response</th><th>Error</th></tr></thead><tbody>`)
+	writeReportHTMLStart(&b, "Case Suite Report", 1320)
+	writeReportHeading(&b, "Case Suite Report", report.ProfileID)
+	pills := caseExecutionReportPills(report.OK, report.Counts, report.ElapsedMs)
+	writeReportSummary(&b, appendCaseListFilterReportPills(pills, report.Filters)...)
+	b.WriteString(`<table><thead><tr><th>#</th><th>Case</th><th>Node</th><th>Maintainer</th><th>Status</th><th>HTTP</th><th>Elapsed</th><th>Evidence</th><th>Request</th><th>Response</th><th>Error</th></tr></thead><tbody>`)
 	for index, item := range report.Results {
-		statusClass := "bad"
-		if item.Status == store.StatusPassed {
-			statusClass = "ok"
-		}
-		b.WriteString(`<tr><td class="mono">` + strconv.Itoa(index+1) + `</td>`)
-		b.WriteString(`<td><div>` + html.EscapeString(item.Title) + `</div><div class="mono small wrap">` + html.EscapeString(item.CaseID) + `</div>`)
-		if item.Description != "" {
-			b.WriteString(`<div class="small">` + html.EscapeString(item.Description) + `</div>`)
-		}
-		b.WriteString(`</td>`)
+		writeReportIndexCell(&b, index)
+		writeReportCaseTitleCell(&b, item.Title, item.CaseID, item.Description)
 		b.WriteString(`<td><div>` + html.EscapeString(item.NodeName) + `</div><div class="mono small wrap">` + html.EscapeString(item.NodeID) + `</div></td>`)
 		b.WriteString(`<td><div>` + html.EscapeString(item.Owner) + `</div><div class="small">` + html.EscapeString(item.Priority) + `</div><div class="small">` + html.EscapeString(strings.Join(item.Tags, ", ")) + `</div></td>`)
-		b.WriteString(`<td class="` + statusClass + `">` + html.EscapeString(item.Status) + `</td>`)
-		b.WriteString(`<td class="mono">` + strconv.Itoa(item.HTTPCode) + `</td>`)
-		b.WriteString(`<td class="mono">` + fmt.Sprintf("%d ms", item.ElapsedMs) + `</td>`)
-		b.WriteString(`<td class="mono wrap">`)
-		if item.DetailURL != "" {
-			b.WriteString(`<a href="` + html.EscapeString(item.DetailURL) + `">caseRunId</a><br>`)
-		}
-		b.WriteString(html.EscapeString(item.CaseRunID))
-		b.WriteString(`</td>`)
-		b.WriteString(`<td class="mono wrap">` + html.EscapeString(strings.TrimSpace(item.Method+" "+item.FullURL)) + `</td>`)
-		b.WriteString(`<td class="mono wrap">` + html.EscapeString(item.BodyPreview) + `</td>`)
-		b.WriteString(`<td class="wrap">` + html.EscapeString(item.Error) + `</td></tr>`)
+		writeReportCaseExecutionCells(&b, newReportCaseExecutionCells(item.Status, item.HTTPCode, item.ElapsedMs, item.DetailURL, item.CaseRunID, item.Method, item.FullURL, item.BodyPreview, item.Error))
+		b.WriteString(`</tr>`)
 	}
-	b.WriteString(`</tbody></table></main></body></html>`)
+	finishReportHTMLTable(&b)
 	return b.String()
 }
 

@@ -207,18 +207,11 @@ func loadCatalogAPICases(baseDir string) ([]APICase, error) {
 	type fileShape struct {
 		InterfaceNodeCases []json.RawMessage `json:"interfaceNodeCases"`
 	}
-	path := filepath.Join(baseDir, catalogName)
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+	payload, err := loadCatalogAsset[fileShape](baseDir)
 	if err != nil {
-		return nil, fmt.Errorf("read profile catalog asset %s: %w", path, err)
+		return nil, err
 	}
-	var payload fileShape
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("decode profile catalog asset %s: %w", path, err)
-	}
+	path := filepath.Join(baseDir, catalogName)
 	out := make([]APICase, 0, len(payload.InterfaceNodeCases))
 	for _, raw := range payload.InterfaceNodeCases {
 		var apiCase APICase
@@ -247,17 +240,9 @@ func loadCatalogNodeConfigs(baseDir string) ([]Service, error) {
 	type fileShape struct {
 		NodeConfigs []catalogNodeConfig `json:"nodeConfigs"`
 	}
-	path := filepath.Join(baseDir, catalogName)
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+	payload, err := loadCatalogAsset[fileShape](baseDir)
 	if err != nil {
-		return nil, fmt.Errorf("read profile catalog asset %s: %w", path, err)
-	}
-	var payload fileShape
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("decode profile catalog asset %s: %w", path, err)
+		return nil, err
 	}
 	out := make([]Service, 0, len(payload.NodeConfigs))
 	for _, item := range payload.NodeConfigs {
@@ -452,19 +437,27 @@ func loadCatalogTemplateConfigs(baseDir string) ([]TemplateConfig, error) {
 	type fileShape struct {
 		TemplateConfigs []TemplateConfig `json:"templateConfigs"`
 	}
+	payload, err := loadCatalogAsset[fileShape](baseDir)
+	if err != nil {
+		return nil, err
+	}
+	return payload.TemplateConfigs, nil
+}
+
+func loadCatalogAsset[T any](baseDir string) (T, error) {
+	var out T
 	path := filepath.Join(baseDir, catalogName)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return out, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read profile catalog asset %s: %w", path, err)
+		return out, fmt.Errorf("read profile catalog asset %s: %w", path, err)
 	}
-	var payload fileShape
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("decode profile catalog asset %s: %w", path, err)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, fmt.Errorf("decode profile catalog asset %s: %w", path, err)
 	}
-	return payload.TemplateConfigs, nil
+	return out, nil
 }
 
 func loadAgentTestProfiles(baseDir string) ([]AgentTestProfile, error) {
@@ -498,6 +491,41 @@ func loadOptionalJSON[T any](baseDir string, name string) (T, error) {
 }
 
 func loadAssetDir[T any](baseDir string, name string) ([]T, error) {
+	paths, err := profileAssetJSONPaths(baseDir, name)
+	if err != nil {
+		return nil, err
+	}
+	assets := make([]T, 0, len(paths))
+	for _, path := range paths {
+		asset, err := decodeProfileAsset[T](path)
+		if err != nil {
+			return nil, err
+		}
+		assets = append(assets, asset)
+	}
+	return assets, nil
+}
+
+func loadAPICaseAssets(baseDir string) ([]APICase, error) {
+	paths, err := profileAssetJSONPaths(baseDir, "cases")
+	if err != nil {
+		return nil, err
+	}
+	cases := make([]APICase, 0, len(paths))
+	for _, path := range paths {
+		item, err := decodeProfileAsset[APICase](path)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(item.CasePath) == "" {
+			item.CasePath = relativeBundlePath(baseDir, path)
+		}
+		cases = append(cases, item)
+	}
+	return cases, nil
+}
+
+func profileAssetJSONPaths(baseDir string, name string) ([]string, error) {
 	dir := filepath.Join(baseDir, name)
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -506,8 +534,7 @@ func loadAssetDir[T any](baseDir string, name string) ([]T, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read profile asset directory %s: %w", dir, err)
 	}
-
-	var paths []string
+	paths := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -515,61 +542,21 @@ func loadAssetDir[T any](baseDir string, name string) ([]T, error) {
 		paths = append(paths, filepath.Join(dir, entry.Name()))
 	}
 	sort.Strings(paths)
-
-	assets := make([]T, 0, len(paths))
-	for _, path := range paths {
-		var asset T
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read profile asset %s: %w", path, err)
-		}
-		decoder := json.NewDecoder(strings.NewReader(string(raw)))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&asset); err != nil {
-			return nil, fmt.Errorf("decode profile asset %s: %w", path, err)
-		}
-		assets = append(assets, asset)
-	}
-	return assets, nil
+	return paths, nil
 }
 
-func loadAPICaseAssets(baseDir string) ([]APICase, error) {
-	dir := filepath.Join(baseDir, "cases")
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+func decodeProfileAsset[T any](path string) (T, error) {
+	var out T
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read profile asset directory %s: %w", dir, err)
+		return out, fmt.Errorf("read profile asset %s: %w", path, err)
 	}
-
-	var paths []string
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		paths = append(paths, filepath.Join(dir, entry.Name()))
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&out); err != nil {
+		return out, fmt.Errorf("decode profile asset %s: %w", path, err)
 	}
-	sort.Strings(paths)
-
-	cases := make([]APICase, 0, len(paths))
-	for _, path := range paths {
-		var item APICase
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read profile asset %s: %w", path, err)
-		}
-		decoder := json.NewDecoder(strings.NewReader(string(raw)))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&item); err != nil {
-			return nil, fmt.Errorf("decode profile asset %s: %w", path, err)
-		}
-		if strings.TrimSpace(item.CasePath) == "" {
-			item.CasePath = relativeBundlePath(baseDir, path)
-		}
-		cases = append(cases, item)
-	}
-	return cases, nil
+	return out, nil
 }
 
 func relativeBundlePath(baseDir string, path string) string {

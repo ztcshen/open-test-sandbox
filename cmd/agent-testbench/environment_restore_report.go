@@ -8,6 +8,21 @@ import (
 	"agent-testbench/internal/domain/redaction"
 )
 
+type environmentRestoreReadiness struct {
+	OK                         bool                              `json:"ok"`
+	Action                     string                            `json:"action"`
+	PauseBeforeHeavyValidation bool                              `json:"pauseBeforeHeavyValidation"`
+	NextStep                   string                            `json:"nextStep"`
+	Items                      []environmentRestoreReadinessItem `json:"items"`
+}
+
+type environmentRestoreReadinessItem struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	OK       bool   `json:"ok"`
+	Detail   string `json:"detail,omitempty"`
+}
+
 func environmentRestoreSummaryTools(tools []environmentRestorePreflightTool) []map[string]any {
 	out := make([]map[string]any, 0, len(tools))
 	for _, item := range tools {

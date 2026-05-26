@@ -141,21 +141,9 @@ func runStoreConfigList(args []string) error {
 }
 
 func runStoreConfigRemove(args []string) error {
-	flags := flag.NewFlagSet("store config remove", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if flags.NArg() != 1 {
-		return errors.New("store name is required")
-	}
-	name := strings.TrimSpace(flags.Arg(0))
-	cfg, err := loadStoreConfig()
+	cfg, name, err := loadNamedStoreConfigFromArgs("store config remove", args)
 	if err != nil {
 		return err
-	}
-	if _, ok := cfg.Stores[name]; !ok {
-		return fmt.Errorf("store config %q not found", name)
 	}
 	delete(cfg.Stores, name)
 	if cfg.Active == name {
@@ -169,21 +157,9 @@ func runStoreConfigRemove(args []string) error {
 }
 
 func runStoreUse(args []string) error {
-	flags := flag.NewFlagSet("store use", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if flags.NArg() != 1 {
-		return errors.New("store name is required")
-	}
-	name := strings.TrimSpace(flags.Arg(0))
-	cfg, err := loadStoreConfig()
+	cfg, name, err := loadNamedStoreConfigFromArgs("store use", args)
 	if err != nil {
 		return err
-	}
-	if _, ok := cfg.Stores[name]; !ok {
-		return fmt.Errorf("store config %q not found", name)
 	}
 	cfg.Active = name
 	if err := saveStoreConfig(cfg); err != nil {
@@ -191,6 +167,26 @@ func runStoreUse(args []string) error {
 	}
 	fmt.Printf("Active store: %s\n", name)
 	return nil
+}
+
+func loadNamedStoreConfigFromArgs(command string, args []string) (storeConfigFile, string, error) {
+	flags := flag.NewFlagSet(command, flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	if err := flags.Parse(args); err != nil {
+		return storeConfigFile{}, "", err
+	}
+	if flags.NArg() != 1 {
+		return storeConfigFile{}, "", errors.New("store name is required")
+	}
+	name := strings.TrimSpace(flags.Arg(0))
+	cfg, err := loadStoreConfig()
+	if err != nil {
+		return storeConfigFile{}, "", err
+	}
+	if _, ok := cfg.Stores[name]; !ok {
+		return storeConfigFile{}, "", fmt.Errorf("store config %q not found", name)
+	}
+	return cfg, name, nil
 }
 
 func runStoreCurrent(args []string) error {

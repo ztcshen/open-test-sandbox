@@ -14,7 +14,7 @@ import (
 const ReadModelInterfaceNodes = "interface-nodes"
 
 func FromBundle(bundle profile.Bundle, indexedAt time.Time) domaincatalog.ProfileCatalog {
-	runtimeEnv := runtimeEnvFromBundle(bundle)
+	runtimeEnv := RuntimeEnvFromBundle(bundle)
 	return domaincatalog.ProfileCatalog{
 		ProfileID:        bundle.ID,
 		IndexedAt:        indexedAt,
@@ -205,7 +205,8 @@ func jsonMap(raw string) map[string]any {
 	return out
 }
 
-func runtimeEnvFromBundle(bundle profile.Bundle) map[string]string {
+// RuntimeEnvFromBundle merges process environment values with bundle-declared runtime env files.
+func RuntimeEnvFromBundle(bundle profile.Bundle) map[string]string {
 	env := map[string]string{}
 	for _, item := range os.Environ() {
 		key, value, ok := strings.Cut(item, "=")
@@ -222,6 +223,11 @@ func runtimeEnvFromBundle(bundle profile.Bundle) map[string]string {
 }
 
 func serviceSourcePath(env map[string]string, service profile.Service) string {
+	return ServiceSourcePath(env, service)
+}
+
+// ServiceSourcePath resolves the configured checkout path for a profile service.
+func ServiceSourcePath(env map[string]string, service profile.Service) string {
 	if value := strings.TrimSpace(service.SourcePath); value != "" {
 		return value
 	}

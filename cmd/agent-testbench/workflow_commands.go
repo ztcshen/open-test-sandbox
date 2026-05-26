@@ -516,29 +516,17 @@ type workflowListItem struct {
 }
 
 func runWorkflowDiscover(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("workflow discover", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	filter := flags.String("filter", "", "Filter by id, display name, or description")
-	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	discoveryProfileRef, resolvedStoreURL, err := resolveDiscoveryInputs(*profilePath, *storeRef, *storeURL, *offlineTemplatePackage)
+	options, err := parseProfileDiscoveryCommandOptions("workflow discover", "Filter by id, display name, or description", args)
 	if err != nil {
 		return err
 	}
-	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, discoveryProfileRef, *profileHome, resolvedStoreURL)
+	bundle, cleanup, err := options.loadDiscoveryBundle(ctx)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	report := workflowList(bundle, *filter)
-	if *jsonOutput {
+	report := workflowList(bundle, options.Filter)
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	for _, item := range report.Items {

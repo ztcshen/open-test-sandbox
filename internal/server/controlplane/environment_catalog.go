@@ -148,14 +148,11 @@ func handleEnvironmentAcceptanceRunStart(w http.ResponseWriter, r *http.Request,
 		requestID = "env-acceptance-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	}
 	request := apiCaseBatchRunRequest{
-		RequestID:      requestID,
-		EnvironmentID:  env.ID,
-		WorkflowID:     env.VerificationWorkflowID,
-		BaseURL:        strings.TrimSpace(valueString(payload["baseUrl"])),
-		EvidenceDir:    strings.TrimSpace(valueString(payload["evidenceDir"])),
-		TimeoutSeconds: intValue(payload["timeoutSeconds"]),
-		Overrides:      mapValue(payload["overrides"]),
+		RequestID:     requestID,
+		EnvironmentID: env.ID,
+		WorkflowID:    env.VerificationWorkflowID,
 	}
+	applyAPICaseBatchRunOptionsFromPayload(&request, payload)
 	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request, collector)
 	if err != nil {
 		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error()})

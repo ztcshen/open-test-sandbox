@@ -20,25 +20,45 @@ const (
 )
 
 type Store interface {
-	Close() error
+	Closer
+	RunStore
+	APICaseRunStore
+	EvidenceStore
+	BaselineGateStore
+	ProfileCatalogStore
+	EnvironmentStore
+}
 
+type Closer interface {
+	Close() error
+}
+
+type RunStore interface {
 	CreateRun(context.Context, Run) (Run, error)
 	GetRun(context.Context, string) (Run, error)
 	ListRuns(context.Context) ([]Run, error)
+}
 
+type APICaseRunStore interface {
 	RecordAPICaseRun(context.Context, APICaseRun) (APICaseRun, error)
 	ListAPICaseRuns(context.Context, string) ([]APICaseRun, error)
+}
 
+type EvidenceStore interface {
 	RecordEvidence(context.Context, EvidenceRecord) (EvidenceRecord, error)
 	ListEvidence(context.Context, string) ([]EvidenceRecord, error)
 	SaveTraceTopology(context.Context, TraceTopology) (TraceTopology, error)
 	ListTraceTopologies(context.Context, string) ([]TraceTopology, error)
 	RecordPostProcessTask(context.Context, PostProcessTask) (PostProcessTask, error)
 	ListPostProcessTasks(context.Context, string) ([]PostProcessTask, error)
+}
 
+type BaselineGateStore interface {
 	UpsertBaselineGate(context.Context, BaselineGate) (BaselineGate, error)
 	GetBaselineGate(context.Context, string, string) (BaselineGate, error)
+}
 
+type ProfileCatalogStore interface {
 	UpsertProfileIndex(context.Context, ProfileIndex) (ProfileIndex, error)
 	GetProfileIndex(context.Context, string) (ProfileIndex, error)
 	UpsertConfigVersion(context.Context, ConfigVersion) (ConfigVersion, error)
@@ -48,7 +68,9 @@ type Store interface {
 	ReplaceProfileCatalog(context.Context, ProfileCatalog) error
 	GetProfileCatalog(context.Context) (ProfileCatalog, error)
 	GetProfileCatalogIndex(context.Context) (ProfileCatalogIndex, error)
+}
 
+type EnvironmentStore interface {
 	UpsertEnvironment(context.Context, Environment) (Environment, error)
 	GetEnvironment(context.Context, string) (Environment, error)
 	ListEnvironments(context.Context) ([]Environment, error)

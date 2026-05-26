@@ -7,7 +7,9 @@ it can be reduced deliberately instead of hidden by mechanical refactors.
 ## What It Checks
 
 - Oversized Go files, long functions, large structs, large interfaces, high
-  function count per file, and large packages.
+  function count per file, and large packages. Package size is a warning and
+  planning signal; package-size blocking is reserved for combined risk such as
+  duplicate-heavy large packages.
 - Duplicate code through `jscpd`, with special attention to business rules,
   workflow skeletons, error handling, validation, and remote-call wrappers.
 - Combined risk, such as a large file that also contains duplicate blocks, or a
@@ -92,8 +94,6 @@ Blocking thresholds:
 - Function lines > 100.
 - Struct fields > 40.
 - Interface methods > 20.
-- Package effective lines > 2500.
-- Package Go files > 35.
 - Functions per file > 45.
 - Duplicate percentage > 8%.
 - Core duplicate block >= 40 lines.

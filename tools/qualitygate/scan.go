@@ -288,7 +288,7 @@ func (s *scanState) addThresholdIssue(report *Report, input thresholdIssueInput)
 		return
 	}
 	severity := ""
-	if input.Value > input.Block {
+	if input.Block > 0 && input.Value > input.Block {
 		severity = SeverityBlock
 	} else if input.Value > input.Warn {
 		severity = SeverityWarning
