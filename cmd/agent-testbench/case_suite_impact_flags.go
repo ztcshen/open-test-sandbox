@@ -12,7 +12,7 @@ type caseSuiteImpactFlags struct {
 	changes        stringListFlag
 }
 
-func addCaseSuiteImpactFlags(selection caseSelectionCLIFlags, baseURLHelp string, timeoutDefault int, timeoutHelp string) caseSuiteImpactFlags {
+func addCaseSuiteImpactFlags(selection *caseSelectionCLIFlags, baseURLHelp string, timeoutDefault int, timeoutHelp string) caseSuiteImpactFlags {
 	out := caseSuiteImpactFlags{
 		requestID:      selection.flags.String("request-id", "", "Request id for the generated batch request"),
 		baseURL:        selection.flags.String("base-url", "", baseURLHelp),

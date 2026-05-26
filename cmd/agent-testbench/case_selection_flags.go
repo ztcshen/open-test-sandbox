@@ -23,14 +23,14 @@ type caseSelectionCLIFlags struct {
 	tags        stringListFlag
 }
 
-func newCaseSelectionCLIFlags(commandName string, defaultStatus string) caseSelectionCLIFlags {
+func newCaseSelectionCLIFlags(commandName string, defaultStatus string) *caseSelectionCLIFlags {
 	return newCaseSelectionCLIFlagsWithFilterHelp(commandName, defaultStatus, "Filter by id, display name, scenario, description, tag, owner, or priority")
 }
 
-func newCaseSelectionCLIFlagsWithFilterHelp(commandName string, defaultStatus string, filterHelp string) caseSelectionCLIFlags {
+func newCaseSelectionCLIFlagsWithFilterHelp(commandName string, defaultStatus string, filterHelp string) *caseSelectionCLIFlags {
 	flags := flag.NewFlagSet(commandName, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	out := caseSelectionCLIFlags{flags: flags}
+	out := &caseSelectionCLIFlags{flags: flags}
 	out.profilePath = flags.String("profile", "", "Profile bundle path or installed profile id")
 	out.profileHome = flags.String("profile-home", "", "Installed profile bundle home")
 	out.storeRef = flags.String("store", "", "Named Store config or Store DSN")
@@ -44,11 +44,11 @@ func newCaseSelectionCLIFlagsWithFilterHelp(commandName string, defaultStatus st
 	return out
 }
 
-func (f caseSelectionCLIFlags) parse(args []string) error {
+func (f *caseSelectionCLIFlags) parse(args []string) error {
 	return f.flags.Parse(args)
 }
 
-func (f caseSelectionCLIFlags) caseListFilter() caseListFilter {
+func (f *caseSelectionCLIFlags) caseListFilter() caseListFilter {
 	return caseListFilter{
 		Filter:   *f.filter,
 		NodeID:   *f.nodeID,
@@ -59,6 +59,6 @@ func (f caseSelectionCLIFlags) caseListFilter() caseListFilter {
 	}
 }
 
-func (f caseSelectionCLIFlags) loadRequiredBundle(ctx context.Context) (profile.Bundle, store.Store, string, func(), error) {
+func (f *caseSelectionCLIFlags) loadRequiredBundle(ctx context.Context) (profile.Bundle, store.Store, string, func(), error) {
 	return loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx, *f.profilePath, *f.profileHome, *f.storeRef, *f.storeURL)
 }

@@ -16,7 +16,7 @@ type selectedCaseSuite struct {
 	cleanup        func()
 }
 
-func loadSelectedCaseSuite(ctx context.Context, selection caseSelectionCLIFlags) (selectedCaseSuite, error) {
+func loadSelectedCaseSuite(ctx context.Context, selection *caseSelectionCLIFlags) (selectedCaseSuite, error) {
 	bundle, sourceStore, sourceStoreURL, cleanup, err := selection.loadRequiredBundle(ctx)
 	if err != nil {
 		return selectedCaseSuite{}, err

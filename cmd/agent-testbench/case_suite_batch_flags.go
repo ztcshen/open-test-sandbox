@@ -16,7 +16,7 @@ type caseSuiteBatchRequestFlags struct {
 	changes        stringListFlag
 }
 
-func addCaseSuiteBatchRequestFlags(selection caseSelectionCLIFlags) caseSuiteBatchRequestFlags {
+func addCaseSuiteBatchRequestFlags(selection *caseSelectionCLIFlags) caseSuiteBatchRequestFlags {
 	out := caseSuiteBatchRequestFlags{
 		requestID:      selection.flags.String("request-id", "", "Request id for the generated batch request"),
 		baseURL:        selection.flags.String("base-url", "", "Base URL for the generated batch request"),
