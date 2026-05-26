@@ -6,6 +6,8 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const topologyPayloadField = "topology"
+
 type topologyEvidenceViewInput struct {
 	RunID        string
 	CaseID       string
@@ -41,7 +43,7 @@ func topologyEvidenceViewForCase(input topologyEvidenceViewInput) map[string]any
 	if topology := skyWalkingTopologyEvidenceMap(input.SavedSummary["traceTopology"]); len(topology) > 0 {
 		return topology
 	}
-	if topology := skyWalkingTopologyEvidenceMap(input.SavedSummary["topology"]); len(topology) > 0 {
+	if topology := skyWalkingTopologyEvidenceMap(input.SavedSummary[topologyPayloadField]); len(topology) > 0 {
 		return topology
 	}
 	return unavailableTraceTopologyEvidence(input.RunID, input.CaseID)

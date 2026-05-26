@@ -48,6 +48,19 @@ type configReadModelDialectExpectation struct {
 	readModelUpsertFragments     []string
 }
 
+const (
+	configReadModelProfileID      = "profile.alpha"
+	configReadModelBundlePath     = "stores/profile.alpha"
+	configReadModelBundleDigest   = "sha256:profile"
+	configReadModelSummaryJSON    = `{"services":2}`
+	configReadModelVersionID      = "config-001"
+	configReadModelSourcePath     = "stores/profile.alpha/catalog.json"
+	configReadModelVersionDigest  = "sha256:config"
+	configReadModelVersionSummary = `{"cases":5}`
+	configReadModelKey            = "workflow-discovery"
+	configReadModelPayloadJSON    = `{"workflows":[{"id":"workflow.alpha"}]}`
+)
+
 func exerciseStoreUpsertsConfigIndexAndReadModels(t *testing.T, tt configReadModelDialectExpectation) {
 	t.Helper()
 
@@ -57,13 +70,22 @@ func exerciseStoreUpsertsConfigIndexAndReadModels(t *testing.T, tt configReadMod
 	s := sqlstore.New(db, tt.dialect)
 	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
 
-	profileIndex, err := s.UpsertProfileIndex(ctx, store.ProfileIndex{
-		ProfileID:    "profile.alpha",
-		BundlePath:   "stores/profile.alpha",
-		BundleDigest: "sha256:profile",
-		SummaryJSON:  `{"services":2}`,
-		ImportedAt:   now,
-	})
+	assertProfileIndexUpsertAndLookup(t, ctx, s, state, now, tt)
+	assertConfigVersionUpsertAndActiveLookup(t, ctx, s, state, now, tt)
+	assertConfigReadModelUpsertAndLookup(t, ctx, s, state, now, tt)
+}
+
+func assertProfileIndexUpsertAndLookup(
+	t *testing.T,
+	ctx context.Context,
+	s *sqlstore.Store,
+	state *fakeSQLState,
+	now time.Time,
+	tt configReadModelDialectExpectation,
+) {
+	t.Helper()
+
+	profileIndex, err := s.UpsertProfileIndex(ctx, profileIndexFixture(now))
 	if err != nil {
 		t.Fatalf("upsert profile index: %v", err)
 	}
@@ -71,33 +93,38 @@ func exerciseStoreUpsertsConfigIndexAndReadModels(t *testing.T, tt configReadMod
 	assertSQLContains(t, exec.query, "profile index query", "insert into profile_indexes", sqlValuesClause(tt.dialect, 6))
 	assertSQLContains(t, exec.query, "profile index query", tt.profileIndexUpsertFragments...)
 	assertSQLOmits(t, exec.query, "profile index query", tt.reject)
-	if profileIndex.UpdatedAt.IsZero() || exec.args[0] != "profile.alpha" || exec.args[3] != `{"services":2}` {
+	if profileIndex.UpdatedAt.IsZero() || exec.args[0] != configReadModelProfileID || exec.args[3] != configReadModelSummaryJSON {
 		t.Fatalf("profile index/args = %#v %#v", profileIndex, exec.args)
 	}
 
 	queueProfileIndexRow(state, now, profileIndex.UpdatedAt)
-	loadedIndex, err := s.GetProfileIndex(ctx, "profile.alpha")
+	loadedIndex, err := s.GetProfileIndex(ctx, configReadModelProfileID)
 	if err != nil {
 		t.Fatalf("get profile index: %v", err)
 	}
-	if loadedIndex.ProfileID != "profile.alpha" || loadedIndex.BundleDigest != "sha256:profile" || !loadedIndex.ImportedAt.Equal(now) {
+	if loadedIndex.ProfileID != configReadModelProfileID ||
+		loadedIndex.BundleDigest != configReadModelBundleDigest ||
+		!loadedIndex.ImportedAt.Equal(now) {
 		t.Fatalf("loaded profile index = %#v", loadedIndex)
 	}
 	query := state.lastQuery(t)
 	assertSQLContains(t, query.query, "profile index get query", "from profile_indexes where profile_id = "+tt.dialect.BindVar(1))
-	if query.args[0] != "profile.alpha" {
+	if query.args[0] != configReadModelProfileID {
 		t.Fatalf("profile index get query = %#v", query)
 	}
+}
 
-	configVersion, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
-		ID:           "config-001",
-		ProfileID:    "profile.alpha",
-		SourcePath:   "stores/profile.alpha/catalog.json",
-		BundleDigest: "sha256:config",
-		SummaryJSON:  `{"cases":5}`,
-		Active:       true,
-		PublishedAt:  now.Add(1 * time.Minute),
-	})
+func assertConfigVersionUpsertAndActiveLookup(
+	t *testing.T,
+	ctx context.Context,
+	s *sqlstore.Store,
+	state *fakeSQLState,
+	now time.Time,
+	tt configReadModelDialectExpectation,
+) {
+	t.Helper()
+
+	configVersion, err := s.UpsertConfigVersion(ctx, configVersionFixture(now))
 	if err != nil {
 		t.Fatalf("upsert config version: %v", err)
 	}
@@ -113,7 +140,7 @@ func exerciseStoreUpsertsConfigIndexAndReadModels(t *testing.T, tt configReadMod
 	assertSQLContains(t, execs[1].query, "config version insert query", "insert into config_versions", sqlValuesClause(tt.dialect, 8))
 	assertSQLContains(t, execs[1].query, "config version insert query", tt.configVersionUpsertFragments...)
 	assertSQLOmits(t, execs[1].query, "config version insert query", tt.reject)
-	if execs[1].args[0] != "config-001" || execs[1].args[5] != true {
+	if execs[1].args[0] != configReadModelVersionID || execs[1].args[5] != true {
 		t.Fatalf("config version upsert args/query = %#v %s", execs[1].args, execs[1].query)
 	}
 
@@ -122,30 +149,35 @@ func exerciseStoreUpsertsConfigIndexAndReadModels(t *testing.T, tt configReadMod
 	if err != nil {
 		t.Fatalf("get active config version: %v", err)
 	}
-	if active.ID != "config-001" || !active.Active || active.BundleDigest != "sha256:config" {
+	if active.ID != configReadModelVersionID || !active.Active || active.BundleDigest != configReadModelVersionDigest {
 		t.Fatalf("active config version = %#v", active)
 	}
-	query = state.lastQuery(t)
+	query := state.lastQuery(t)
 	assertSQLContains(t, query.query, "active config query", "from config_versions", "where active = "+tt.dialect.BindVar(1))
 	if query.args[0] != true {
 		t.Fatalf("active config query = %#v", query)
 	}
+}
 
-	readModel, err := s.UpsertReadModel(ctx, store.ReadModel{
-		ProfileID:       "profile.alpha",
-		Key:             "workflow-discovery",
-		ConfigVersionID: "config-001",
-		PayloadJSON:     `{"workflows":[{"id":"workflow.alpha"}]}`,
-		GeneratedAt:     now.Add(2 * time.Minute),
-	})
+func assertConfigReadModelUpsertAndLookup(
+	t *testing.T,
+	ctx context.Context,
+	s *sqlstore.Store,
+	state *fakeSQLState,
+	now time.Time,
+	tt configReadModelDialectExpectation,
+) {
+	t.Helper()
+
+	readModel, err := s.UpsertReadModel(ctx, readModelFixture(now))
 	if err != nil {
 		t.Fatalf("upsert read model: %v", err)
 	}
-	exec = state.lastExec(t)
+	exec := state.lastExec(t)
 	assertSQLContains(t, exec.query, "read model query", "insert into config_read_model", sqlValuesClause(tt.dialect, 6))
 	assertSQLContains(t, exec.query, "read model query", tt.readModelUpsertFragments...)
 	assertSQLOmits(t, exec.query, "read model query", tt.reject)
-	if exec.args[1] != "workflow-discovery" {
+	if exec.args[1] != configReadModelKey {
 		t.Fatalf("read model upsert args/query = %#v %s", exec.args, exec.query)
 	}
 	if readModel.UpdatedAt.IsZero() {
@@ -153,17 +185,51 @@ func exerciseStoreUpsertsConfigIndexAndReadModels(t *testing.T, tt configReadMod
 	}
 
 	queueReadModelRow(state, readModel)
-	loadedReadModel, err := s.GetReadModel(ctx, "profile.alpha", "workflow-discovery")
+	loadedReadModel, err := s.GetReadModel(ctx, configReadModelProfileID, configReadModelKey)
 	if err != nil {
 		t.Fatalf("get read model: %v", err)
 	}
-	if loadedReadModel.ProfileID != "profile.alpha" || loadedReadModel.Key != "workflow-discovery" || loadedReadModel.ConfigVersionID != "config-001" {
+	if loadedReadModel.ProfileID != configReadModelProfileID ||
+		loadedReadModel.Key != configReadModelKey ||
+		loadedReadModel.ConfigVersionID != configReadModelVersionID {
 		t.Fatalf("loaded read model = %#v", loadedReadModel)
 	}
-	query = state.lastQuery(t)
+	query := state.lastQuery(t)
 	assertSQLContains(t, query.query, "read model get query", "from config_read_model", "where profile_id = "+tt.dialect.BindVar(1)+" and model_key = "+tt.dialect.BindVar(2))
-	if query.args[0] != "profile.alpha" || query.args[1] != "workflow-discovery" {
+	if query.args[0] != configReadModelProfileID || query.args[1] != configReadModelKey {
 		t.Fatalf("read model get query = %#v", query)
+	}
+}
+
+func profileIndexFixture(importedAt time.Time) store.ProfileIndex {
+	return store.ProfileIndex{
+		ProfileID:    configReadModelProfileID,
+		BundlePath:   configReadModelBundlePath,
+		BundleDigest: configReadModelBundleDigest,
+		SummaryJSON:  configReadModelSummaryJSON,
+		ImportedAt:   importedAt,
+	}
+}
+
+func configVersionFixture(now time.Time) store.ConfigVersion {
+	return store.ConfigVersion{
+		ID:           configReadModelVersionID,
+		ProfileID:    configReadModelProfileID,
+		SourcePath:   configReadModelSourcePath,
+		BundleDigest: configReadModelVersionDigest,
+		SummaryJSON:  configReadModelVersionSummary,
+		Active:       true,
+		PublishedAt:  now.Add(1 * time.Minute),
+	}
+}
+
+func readModelFixture(now time.Time) store.ReadModel {
+	return store.ReadModel{
+		ProfileID:       configReadModelProfileID,
+		Key:             configReadModelKey,
+		ConfigVersionID: configReadModelVersionID,
+		PayloadJSON:     configReadModelPayloadJSON,
+		GeneratedAt:     now.Add(2 * time.Minute),
 	}
 }
 
@@ -171,7 +237,7 @@ func queueProfileIndexRow(state *fakeSQLState, importedAt, updatedAt time.Time) 
 	state.queueRows(fakeRows{
 		columns: []string{"profile_id", "bundle_path", "bundle_digest", "summary_json", "imported_at", "updated_at"},
 		values: [][]driver.Value{{
-			"profile.alpha", "stores/profile.alpha", "sha256:profile", `{"services":2}`,
+			configReadModelProfileID, configReadModelBundlePath, configReadModelBundleDigest, configReadModelSummaryJSON,
 			importedAt.Format(time.RFC3339Nano), updatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -181,7 +247,7 @@ func queueConfigVersionRow(state *fakeSQLState, version store.ConfigVersion) {
 	state.queueRows(fakeRows{
 		columns: []string{"id", "profile_id", "source_path", "bundle_digest", "summary_json", "active", "published_at", "created_at"},
 		values: [][]driver.Value{{
-			"config-001", "profile.alpha", "stores/profile.alpha/catalog.json", "sha256:config", `{"cases":5}`,
+			configReadModelVersionID, configReadModelProfileID, configReadModelSourcePath, configReadModelVersionDigest, configReadModelVersionSummary,
 			true, version.PublishedAt.Format(time.RFC3339Nano), version.CreatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -191,7 +257,7 @@ func queueReadModelRow(state *fakeSQLState, readModel store.ReadModel) {
 	state.queueRows(fakeRows{
 		columns: []string{"profile_id", "model_key", "config_version_id", "payload_json", "generated_at", "updated_at"},
 		values: [][]driver.Value{{
-			"profile.alpha", "workflow-discovery", "config-001", `{"workflows":[{"id":"workflow.alpha"}]}`,
+			configReadModelProfileID, configReadModelKey, configReadModelVersionID, configReadModelPayloadJSON,
 			readModel.GeneratedAt.Format(time.RFC3339Nano), readModel.UpdatedAt.Format(time.RFC3339Nano),
 		}},
 	})

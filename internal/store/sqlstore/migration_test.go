@@ -2,6 +2,7 @@ package sqlstore_test
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -11,6 +12,114 @@ import (
 
 	"agent-testbench/internal/store/sqlstore"
 )
+
+type migrationDB struct {
+	ctx   context.Context
+	db    *sql.DB
+	state *fakeSQLState
+}
+
+func newMigrationDB(t *testing.T) *migrationDB {
+	t.Helper()
+
+	db, state := openFakeSQLDB(t)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	return &migrationDB{
+		ctx:   context.Background(),
+		db:    db,
+		state: state,
+	}
+}
+
+func (m *migrationDB) queueMissingSchemaVersionTable() {
+	m.state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(0)}},
+	})
+}
+
+func (m *migrationDB) queueExistingSchemaVersion(version int) {
+	m.state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	m.state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(version)}},
+	})
+}
+
+func (m *migrationDB) queueBootstrapFromEmptySchema() {
+	m.queueMissingSchemaVersionTable()
+	m.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
+}
+
+func (m *migrationDB) queueUpgradeFromSchemaVersion(version int) {
+	m.queueExistingSchemaVersion(version)
+	m.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
+}
+
+func (m *migrationDB) schemaStatus(t *testing.T, dialect sqlstore.Dialect) sqlstore.SchemaStatusResult {
+	t.Helper()
+
+	status, err := sqlstore.SchemaStatus(m.ctx, m.db, dialect)
+	if err != nil {
+		t.Fatalf("schema status: %v", err)
+	}
+	return status
+}
+
+func (m *migrationDB) upgradeSchema(t *testing.T, dialect sqlstore.Dialect, context string) sqlstore.SchemaStatusResult {
+	t.Helper()
+
+	status, err := sqlstore.UpgradeSchema(m.ctx, m.db, dialect)
+	if err != nil {
+		t.Fatalf("%s: %v", context, err)
+	}
+	return status
+}
+
+func (m *migrationDB) execSQL() string {
+	return joinedSQLExecs(m.state.execsSnapshot())
+}
+
+func assertPendingCoreSchema(t *testing.T, status sqlstore.SchemaStatusResult, context string) {
+	t.Helper()
+
+	if status.CurrentVersion != 0 || status.TargetVersion != sqlstore.CurrentSchemaVersion || !status.HasPending() {
+		t.Fatalf("%s = %#v", context, status)
+	}
+}
+
+func assertAppliedCoreSchema(t *testing.T, status sqlstore.SchemaStatusResult, context string) {
+	t.Helper()
+
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+		t.Fatalf("%s = %#v", context, status)
+	}
+}
+
+func assertLatestCoreSchema(t *testing.T, status sqlstore.SchemaStatusResult, context string) {
+	t.Helper()
+
+	if status.AppliedCount != 0 || status.HasPending() {
+		t.Fatalf("%s = %#v", context, status)
+	}
+}
+
+func assertCoreSchemaVersionInsertArgs(t *testing.T, call fakeSQLCall) {
+	t.Helper()
+
+	if fmt.Sprint(call.args[0]) != fmt.Sprint(sqlstore.CurrentSchemaVersion) || call.args[1] != sqlstore.CoreSchemaName {
+		t.Fatalf("version insert args = %#v", call.args)
+	}
+	if _, ok := call.args[2].(time.Time); !ok {
+		t.Fatalf("version insert applied_at arg = %#v, want time.Time", call.args[2])
+	}
+}
 
 func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 	tests := []struct {
@@ -74,16 +183,8 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 				t.Fatalf("core schema statements = %d, want at least 4", len(statements))
 			}
 			joined := strings.Join(statements, "\n")
-			for _, want := range tt.want {
-				if !strings.Contains(joined, want) {
-					t.Fatalf("core schema missing %q:\n%s", want, joined)
-				}
-			}
-			for _, unwanted := range tt.mustNot {
-				if strings.Contains(joined, unwanted) {
-					t.Fatalf("core schema unexpectedly contained %q:\n%s", unwanted, joined)
-				}
-			}
+			assertSQLContains(t, joined, tt.name+" core schema", tt.want...)
+			assertSQLOmits(t, joined, tt.name+" core schema", tt.mustNot...)
 		})
 	}
 }
@@ -91,7 +192,7 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 func TestCoreSchemaSQLKeepsSharedIndexesStable(t *testing.T) {
 	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
 	joined := strings.Join(statements, "\n")
-	for _, want := range []string{
+	assertSQLContains(t, joined, "core schema shared indexes",
 		"idx_api_case_runs_run_id_created_at",
 		"idx_evidence_records_run_id_created_at",
 		"idx_trace_topologies_workflow_run_id_created_at",
@@ -99,11 +200,7 @@ func TestCoreSchemaSQLKeepsSharedIndexesStable(t *testing.T) {
 		"idx_config_versions_active_published",
 		"idx_environments_verified_status",
 		"idx_environments_verification",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("core schema missing index %q:\n%s", want, joined)
-		}
-	}
+	)
 }
 
 func TestCoreSchemaSQLUsesMySQLCompatibleIndexDDL(t *testing.T) {
@@ -123,7 +220,7 @@ func TestCoreSchemaSQLUsesMySQLCompatibleIndexDDL(t *testing.T) {
 func TestCoreSchemaSQLIncludesEnvironmentCatalog(t *testing.T) {
 	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
 	joined := strings.Join(statements, "\n")
-	for _, want := range []string{
+	assertSQLContains(t, joined, "core schema environment catalog",
 		"create table if not exists environments",
 		"id text primary key",
 		"verified boolean not null",
@@ -133,17 +230,13 @@ func TestCoreSchemaSQLIncludesEnvironmentCatalog(t *testing.T) {
 		"health_checks_json jsonb not null",
 		"last_verified_at timestamptz",
 		"summary_json jsonb not null",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("core schema missing environment catalog DDL %q:\n%s", want, joined)
-		}
-	}
+	)
 }
 
 func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
 	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
 	joined := strings.Join(statements, "\n")
-	for _, want := range []string{
+	assertSQLContains(t, joined, "core schema environment component assets",
 		"create table if not exists environment_components",
 		"component_id text not null",
 		"kind text not null",
@@ -167,21 +260,13 @@ func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
 		`"sensitive" boolean not null`,
 		"idx_component_config_assets_target",
 		"idx_component_config_assets_owner_order",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("core schema missing environment component asset DDL %q:\n%s", want, joined)
-		}
-	}
-	for _, unwanted := range []string{
+	)
+	assertSQLOmits(t, joined, "core schema environment component assets",
 		"create table if not exists service_dependencies",
 		"create table if not exists service_config_assets",
 		"idx_service_config_assets_target",
 		"idx_service_config_assets_service_order",
-	} {
-		if strings.Contains(joined, unwanted) {
-			t.Fatalf("core schema should not contain legacy service asset DDL %q:\n%s", unwanted, joined)
-		}
-	}
+	)
 }
 
 func TestCoreSchemaSQLDoesNotApplyCommentsBeforeIncrementalMigrations(t *testing.T) {
@@ -189,16 +274,12 @@ func TestCoreSchemaSQLDoesNotApplyCommentsBeforeIncrementalMigrations(t *testing
 		t.Run(dialect.Name(), func(t *testing.T) {
 			statements := sqlstore.CoreSchemaSQL(dialect)
 			joined := strings.Join(statements, "\n")
-			for _, unwanted := range []string{
+			assertSQLOmits(t, joined, dialect.Name()+" core schema comments",
 				"comment on table",
 				"comment on column",
 				" comment = ",
 				" comment '",
-			} {
-				if strings.Contains(joined, unwanted) {
-					t.Fatalf("core schema should not contain comment DDL before incremental migrations %q:\n%s", unwanted, joined)
-				}
-			}
+			)
 		})
 	}
 }
@@ -206,32 +287,24 @@ func TestCoreSchemaSQLDoesNotApplyCommentsBeforeIncrementalMigrations(t *testing
 func TestSchemaDDLIncludesPostgreSQLComments(t *testing.T) {
 	statements := sqlstore.SchemaDDL(sqlstore.PostgresDialect{})
 	joined := strings.Join(statements, "\n")
-	for _, want := range []string{
+	assertSQLContains(t, joined, "postgres schema comments",
 		`comment on table "runs" is 'Workflow run records and their execution summary.'`,
 		`comment on column "runs"."summary_json" is 'Machine-readable run summary used by APIs and reports.'`,
 		`comment on table "environment_components" is 'Runtime components that make up a registered environment.'`,
 		`comment on column "component_config_assets"."content_inline" is 'Inline asset content when the asset is stored directly in the Store.'`,
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("postgres schema comments missing %q:\n%s", want, joined)
-		}
-	}
+	)
 }
 
 func TestSchemaDDLIncludesMySQLComments(t *testing.T) {
 	statements := sqlstore.SchemaDDL(sqlstore.MySQLDialect{})
 	joined := strings.Join(statements, "\n")
-	for _, want := range []string{
+	assertSQLContains(t, joined, "mysql schema comments",
 		"alter table `runs` comment = 'Workflow run records and their execution summary.'",
 		"alter table `runs` modify column `environment_id` varchar(128) not null default '' comment 'Environment where the workflow run executed.'",
 		"alter table `runs` modify column `summary_json` json not null comment 'Machine-readable run summary used by APIs and reports.'",
 		"alter table `environment_components` comment = 'Runtime components that make up a registered environment.'",
 		"alter table `component_config_assets` modify column `content_inline` mediumtext not null comment 'Inline asset content when the asset is stored directly in the Store.'",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("mysql schema comments missing %q:\n%s", want, joined)
-		}
-	}
+	)
 }
 
 func TestUpgradeSchemaAddsCommentsFromVersionNine(t *testing.T) {
@@ -259,44 +332,12 @@ func TestUpgradeSchemaAddsCommentsFromVersionNine(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			db, state := openFakeSQLDB(t)
-			defer db.Close()
+			migration := newMigrationDB(t)
+			migration.queueUpgradeFromSchemaVersion(9)
 
-			state.queueRows(fakeRows{
-				columns: []string{"exists"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"version"},
-				values:  [][]driver.Value{{int64(9)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"exists"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"version"},
-				values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-			})
-
-			status, err := sqlstore.UpgradeSchema(ctx, db, tt.dialect)
-			if err != nil {
-				t.Fatalf("upgrade v9 schema: %v", err)
-			}
-			if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-				t.Fatalf("upgraded v9 schema status = %#v", status)
-			}
-			joinedExecs := strings.Builder{}
-			for _, exec := range state.execsSnapshot() {
-				joinedExecs.WriteString(exec.query)
-				joinedExecs.WriteByte('\n')
-			}
-			for _, want := range tt.want {
-				if !strings.Contains(joinedExecs.String(), want) {
-					t.Fatalf("%s v9 upgrade missing schema comment %q:\n%s", tt.name, want, joinedExecs.String())
-				}
-			}
+			status := migration.upgradeSchema(t, tt.dialect, "upgrade v9 schema")
+			assertAppliedCoreSchema(t, status, "upgraded v9 schema status")
+			assertSQLContains(t, migration.execSQL(), tt.name+" v9 upgrade comments", tt.want...)
 		})
 	}
 }
@@ -323,32 +364,12 @@ func TestUpgradeSchemaAppliesCommentsAfterLegacyColumnMigrations(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			db, state := openFakeSQLDB(t)
-			defer db.Close()
+			migration := newMigrationDB(t)
+			migration.queueUpgradeFromSchemaVersion(5)
 
-			state.queueRows(fakeRows{
-				columns: []string{"exists"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"version"},
-				values:  [][]driver.Value{{int64(5)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"exists"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"version"},
-				values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-			})
+			migration.upgradeSchema(t, tt.dialect, "upgrade v5 schema")
 
-			if _, err := sqlstore.UpgradeSchema(ctx, db, tt.dialect); err != nil {
-				t.Fatalf("upgrade v5 schema: %v", err)
-			}
-
-			execs := state.execsSnapshot()
+			execs := migration.state.execsSnapshot()
 			addIndex := -1
 			commentIndex := -1
 			commentCount := 0
@@ -364,230 +385,91 @@ func TestUpgradeSchemaAppliesCommentsAfterLegacyColumnMigrations(t *testing.T) {
 				}
 			}
 			if addIndex == -1 {
-				t.Fatalf("%s v5 upgrade missing add-column migration:\n%s", tt.name, joinExecQueries(execs))
+				t.Fatalf("%s v5 upgrade missing add-column migration:\n%s", tt.name, joinedSQLExecs(execs))
 			}
 			if commentIndex == -1 {
-				t.Fatalf("%s v5 upgrade missing environment_id comment migration:\n%s", tt.name, joinExecQueries(execs))
+				t.Fatalf("%s v5 upgrade missing environment_id comment migration:\n%s", tt.name, joinedSQLExecs(execs))
 			}
 			if commentIndex < addIndex {
-				t.Fatalf("%s v5 upgrade commented environment_id before adding it: add=%d comment=%d\n%s", tt.name, addIndex, commentIndex, joinExecQueries(execs))
+				t.Fatalf("%s v5 upgrade commented environment_id before adding it: add=%d comment=%d\n%s", tt.name, addIndex, commentIndex, joinedSQLExecs(execs))
 			}
 			if commentCount != 1 {
-				t.Fatalf("%s v5 upgrade applied environment_id comment %d times, want 1:\n%s", tt.name, commentCount, joinExecQueries(execs))
+				t.Fatalf("%s v5 upgrade applied environment_id comment %d times, want 1:\n%s", tt.name, commentCount, joinedSQLExecs(execs))
 			}
 		})
 	}
 }
 
-func joinExecQueries(execs []fakeSQLCall) string {
-	var joined strings.Builder
-	for _, exec := range execs {
-		joined.WriteString(exec.query)
-		joined.WriteByte('\n')
-	}
-	return joined.String()
-}
-
-func TestSchemaStatusAndUpgradeSchemaUseSharedDatabaseSQLMigrations(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
-	dialect := sqlstore.PostgresDialect{}
-
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(0)}},
-	})
-	status, err := sqlstore.SchemaStatus(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("schema status: %v", err)
-	}
-	if status.CurrentVersion != 0 || status.TargetVersion != sqlstore.CurrentSchemaVersion || !status.HasPending() {
-		t.Fatalf("empty schema status = %#v", status)
-	}
-	query := state.lastQuery(t)
-	if !strings.Contains(query.query, "information_schema.tables") || !strings.Contains(query.query, "schema_versions") {
-		t.Fatalf("schema status table existence query = %#v", query)
+func TestSchemaStatusAndUpgradeSchemaUseDialectMigrations(t *testing.T) {
+	tests := []struct {
+		name                  string
+		dialect               sqlstore.Dialect
+		tableProbeFragments   []string
+		firstDDLFragments     []string
+		versionInsertContains []string
+		versionInsertOmits    []string
+		versionUpsertContains []string
+	}{
+		{
+			name:                  "postgres",
+			dialect:               sqlstore.PostgresDialect{},
+			tableProbeFragments:   []string{"information_schema.tables", "schema_versions"},
+			firstDDLFragments:     []string{"create table if not exists schema_versions"},
+			versionInsertContains: []string{"insert into schema_versions", "values ($1, $2, $3)"},
+		},
+		{
+			name:                  "mysql",
+			dialect:               sqlstore.MySQLDialect{},
+			tableProbeFragments:   []string{"information_schema.tables", "table_schema = database()", "schema_versions"},
+			firstDDLFragments:     []string{"create table if not exists schema_versions", "applied_at datetime(6) not null"},
+			versionInsertContains: []string{"insert into schema_versions", "values (?, ?, ?)"},
+			versionInsertOmits:    []string{"$1"},
+			versionUpsertContains: []string{"on duplicate key update", "applied_at = values(applied_at)"},
+		},
 	}
 
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(0)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
-	upgraded, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade schema: %v", err)
-	}
-	if upgraded.CurrentVersion != sqlstore.CurrentSchemaVersion || upgraded.AppliedCount != 1 || upgraded.HasPending() {
-		t.Fatalf("upgraded schema status = %#v", upgraded)
-	}
-	execs := state.execsSnapshot()
-	if len(execs) < len(sqlstore.CoreSchemaSQL(dialect))+1 {
-		t.Fatalf("exec count = %d, want at least ddl + version insert", len(execs))
-	}
-	if !strings.Contains(execs[0].query, "create table if not exists schema_versions") {
-		t.Fatalf("first upgrade statement = %s", execs[0].query)
-	}
-	last := execs[len(execs)-1]
-	if !strings.Contains(last.query, "insert into schema_versions") || !strings.Contains(last.query, "values ($1, $2, $3)") {
-		t.Fatalf("version insert query = %s", last.query)
-	}
-	if fmt.Sprint(last.args[0]) != fmt.Sprint(sqlstore.CurrentSchemaVersion) || last.args[1] != sqlstore.CoreSchemaName {
-		t.Fatalf("version insert args = %#v", last.args)
-	}
-	if _, ok := last.args[2].(time.Time); !ok {
-		t.Fatalf("version insert applied_at arg = %#v, want time.Time", last.args[2])
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			migration := newMigrationDB(t)
 
-	state.clearExecs()
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
-	latest, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade latest schema: %v", err)
-	}
-	if latest.AppliedCount != 0 || latest.HasPending() {
-		t.Fatalf("latest schema status = %#v", latest)
-	}
-	if execs := state.execsSnapshot(); len(execs) != 0 {
-		t.Fatalf("latest schema should not execute DDL: %#v", execs)
-	}
-}
+			migration.queueMissingSchemaVersionTable()
+			status := migration.schemaStatus(t, tt.dialect)
+			assertPendingCoreSchema(t, status, "empty schema status")
+			assertSQLContains(t, migration.state.lastQuery(t).query, tt.name+" schema status table existence query", tt.tableProbeFragments...)
 
-func TestSchemaStatusAndUpgradeSchemaUseMySQLMigrations(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
-	dialect := sqlstore.MySQLDialect{}
+			migration.queueBootstrapFromEmptySchema()
+			upgraded := migration.upgradeSchema(t, tt.dialect, "upgrade schema")
+			assertAppliedCoreSchema(t, upgraded, "upgraded schema status")
+			execs := migration.state.execsSnapshot()
+			if len(execs) < len(sqlstore.CoreSchemaSQL(tt.dialect))+1 {
+				t.Fatalf("exec count = %d, want at least ddl + version insert", len(execs))
+			}
+			assertSQLContains(t, execs[0].query, tt.name+" first upgrade statement", tt.firstDDLFragments...)
+			last := execs[len(execs)-1]
+			assertSQLContains(t, last.query, tt.name+" version insert query", tt.versionInsertContains...)
+			assertSQLOmits(t, last.query, tt.name+" version insert query", tt.versionInsertOmits...)
+			assertSQLContains(t, last.query, tt.name+" version insert upsert", tt.versionUpsertContains...)
+			assertCoreSchemaVersionInsertArgs(t, last)
 
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(0)}},
-	})
-	status, err := sqlstore.SchemaStatus(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("schema status: %v", err)
-	}
-	if status.CurrentVersion != 0 || status.TargetVersion != sqlstore.CurrentSchemaVersion || !status.HasPending() {
-		t.Fatalf("empty schema status = %#v", status)
-	}
-	query := state.lastQuery(t)
-	if !strings.Contains(query.query, "information_schema.tables") || !strings.Contains(query.query, "table_schema = database()") || !strings.Contains(query.query, "schema_versions") {
-		t.Fatalf("mysql schema status table existence query = %#v", query)
-	}
-
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(0)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
-	upgraded, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade schema: %v", err)
-	}
-	if upgraded.CurrentVersion != sqlstore.CurrentSchemaVersion || upgraded.AppliedCount != 1 || upgraded.HasPending() {
-		t.Fatalf("upgraded schema status = %#v", upgraded)
-	}
-	execs := state.execsSnapshot()
-	if len(execs) < len(sqlstore.CoreSchemaSQL(dialect))+1 {
-		t.Fatalf("exec count = %d, want at least ddl + version insert", len(execs))
-	}
-	if !strings.Contains(execs[0].query, "create table if not exists schema_versions") || !strings.Contains(execs[0].query, "applied_at datetime(6) not null") {
-		t.Fatalf("first mysql upgrade statement = %s", execs[0].query)
-	}
-	last := execs[len(execs)-1]
-	if !strings.Contains(last.query, "insert into schema_versions") || !strings.Contains(last.query, "values (?, ?, ?)") || strings.Contains(last.query, "$1") {
-		t.Fatalf("mysql version insert query = %s", last.query)
-	}
-	if !strings.Contains(last.query, "on duplicate key update") || !strings.Contains(last.query, "applied_at = values(applied_at)") {
-		t.Fatalf("mysql version insert should use mysql upsert: %s", last.query)
-	}
-	if fmt.Sprint(last.args[0]) != fmt.Sprint(sqlstore.CurrentSchemaVersion) || last.args[1] != sqlstore.CoreSchemaName {
-		t.Fatalf("version insert args = %#v", last.args)
-	}
-	if _, ok := last.args[2].(time.Time); !ok {
-		t.Fatalf("version insert applied_at arg = %#v, want time.Time", last.args[2])
-	}
-
-	state.clearExecs()
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
-	latest, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade latest schema: %v", err)
-	}
-	if latest.AppliedCount != 0 || latest.HasPending() {
-		t.Fatalf("latest schema status = %#v", latest)
-	}
-	if execs := state.execsSnapshot(); len(execs) != 0 {
-		t.Fatalf("latest schema should not execute DDL: %#v", execs)
+			migration.state.clearExecs()
+			migration.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
+			latest := migration.upgradeSchema(t, tt.dialect, "upgrade latest schema")
+			assertLatestCoreSchema(t, latest, "latest schema status")
+			if execs := migration.state.execsSnapshot(); len(execs) != 0 {
+				t.Fatalf("latest schema should not execute DDL: %#v", execs)
+			}
+		})
 	}
 }
 
 func TestUpgradeSchemaWidensMySQLRuntimeIdentifiersFromVersionFour(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
+	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
+	migration.queueUpgradeFromSchemaVersion(4)
 
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(4)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
-
-	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade mysql v4 schema: %v", err)
-	}
-	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-		t.Fatalf("upgraded mysql v4 schema status = %#v", status)
-	}
-
-	joinedExecs := strings.Builder{}
-	for _, exec := range state.execsSnapshot() {
-		joinedExecs.WriteString(exec.query)
-		joinedExecs.WriteByte('\n')
-	}
-	for _, want := range []string{
+	status := migration.upgradeSchema(t, dialect, "upgrade mysql v4 schema")
+	assertAppliedCoreSchema(t, status, "upgraded mysql v4 schema status")
+	assertSQLContains(t, migration.execSQL(), "mysql v4 upgrade",
 		"alter table `runs` modify column `id` varchar(255) not null",
 		"alter table `api_case_runs` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null",
 		"alter table `evidence_records` modify column `id` varchar(255) not null",
@@ -596,11 +478,7 @@ func TestUpgradeSchemaWidensMySQLRuntimeIdentifiersFromVersionFour(t *testing.T)
 		"alter table `runs` add column `environment_id` varchar(128) not null default ''",
 		"drop table if exists `service_config_assets`",
 		"drop table if exists `service_dependencies`",
-	} {
-		if !strings.Contains(joinedExecs.String(), want) {
-			t.Fatalf("mysql v4 upgrade missing %q:\n%s", want, joinedExecs.String())
-		}
-	}
+	)
 }
 
 func TestUpgradeSchemaAddsRunEnvironmentAndDropsLegacyServiceGraphTables(t *testing.T) {
@@ -630,210 +508,72 @@ func TestUpgradeSchemaAddsRunEnvironmentAndDropsLegacyServiceGraphTables(t *test
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			db, state := openFakeSQLDB(t)
-			defer db.Close()
+			migration := newMigrationDB(t)
+			migration.queueUpgradeFromSchemaVersion(5)
 
-			state.queueRows(fakeRows{
-				columns: []string{"exists"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"version"},
-				values:  [][]driver.Value{{int64(5)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"exists"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"version"},
-				values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-			})
-
-			status, err := sqlstore.UpgradeSchema(ctx, db, tt.dialect)
-			if err != nil {
-				t.Fatalf("upgrade v5 schema: %v", err)
-			}
-			if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-				t.Fatalf("upgraded v5 schema status = %#v", status)
-			}
-			joinedExecs := strings.Builder{}
-			for _, exec := range state.execsSnapshot() {
-				joinedExecs.WriteString(exec.query)
-				joinedExecs.WriteByte('\n')
-			}
-			for _, want := range tt.want {
-				if !strings.Contains(joinedExecs.String(), want) {
-					t.Fatalf("%s v5 upgrade missing %q:\n%s", tt.name, want, joinedExecs.String())
-				}
-			}
+			status := migration.upgradeSchema(t, tt.dialect, "upgrade v5 schema")
+			assertAppliedCoreSchema(t, status, "upgraded v5 schema status")
+			assertSQLContains(t, migration.execSQL(), tt.name+" v5 upgrade", tt.want...)
 		})
 	}
 }
 
 func TestUpgradeSchemaWidensMySQLTextColumnsFromVersionSix(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
+	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
+	migration.queueUpgradeFromSchemaVersion(6)
 
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(6)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
-
-	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade mysql v6 schema: %v", err)
-	}
-	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-		t.Fatalf("upgraded mysql v6 schema status = %#v", status)
-	}
-	joinedExecs := strings.Builder{}
-	for _, exec := range state.execsSnapshot() {
-		joinedExecs.WriteString(exec.query)
-		joinedExecs.WriteByte('\n')
-	}
-	for _, want := range []string{
+	status := migration.upgradeSchema(t, dialect, "upgrade mysql v6 schema")
+	assertAppliedCoreSchema(t, status, "upgraded mysql v6 schema status")
+	assertSQLContains(t, migration.execSQL(), "mysql v6 upgrade",
 		"alter table `runs` modify column `evidence_root` mediumtext not null",
 		"alter table `component_config_assets` modify column `target_path` mediumtext not null",
 		"alter table `component_config_assets` modify column `content_inline` mediumtext not null",
 		"alter table `component_config_assets` modify column `sha256` mediumtext not null",
-	} {
-		if !strings.Contains(joinedExecs.String(), want) {
-			t.Fatalf("mysql v6 upgrade missing %q:\n%s", want, joinedExecs.String())
-		}
-	}
+	)
 }
 
 func TestUpgradeSchemaWidensMySQLConfigVersionIdentifiersFromVersionSeven(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
+	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
+	migration.queueUpgradeFromSchemaVersion(7)
 
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(7)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
-
-	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade mysql v7 schema: %v", err)
-	}
-	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-		t.Fatalf("upgraded mysql v7 schema status = %#v", status)
-	}
-	joinedExecs := strings.Builder{}
-	for _, exec := range state.execsSnapshot() {
-		joinedExecs.WriteString(exec.query)
-		joinedExecs.WriteByte('\n')
-	}
-	for _, want := range []string{
+	status := migration.upgradeSchema(t, dialect, "upgrade mysql v7 schema")
+	assertAppliedCoreSchema(t, status, "upgraded mysql v7 schema status")
+	assertSQLContains(t, migration.execSQL(), "mysql v7 upgrade",
 		"alter table `config_versions` modify column `id` varchar(255) not null",
 		"alter table `config_read_model` modify column `config_version_id` varchar(255) not null",
-	} {
-		if !strings.Contains(joinedExecs.String(), want) {
-			t.Fatalf("mysql v7 upgrade missing %q:\n%s", want, joinedExecs.String())
-		}
-	}
+	)
 }
 
 func TestUpgradeSchemaTreatsDuplicateMySQLIndexAsIdempotent(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
+	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
+	migration.queueExistingSchemaVersion(4)
 
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(4)}},
-	})
 	for i := 0; i < 3; i++ {
-		state.queueExecError(nil)
+		migration.state.queueExecError(nil)
 	}
-	state.queueExecError(fmt.Errorf("Error 1061 (42000): Duplicate key name 'idx_api_case_runs_run_id_created_at'"))
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
+	migration.state.queueExecError(fmt.Errorf("Error 1061 (42000): Duplicate key name 'idx_api_case_runs_run_id_created_at'"))
+	migration.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
 
-	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade mysql schema should tolerate duplicate index replay: %v", err)
-	}
-	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-		t.Fatalf("upgraded mysql schema status = %#v", status)
-	}
+	status := migration.upgradeSchema(t, dialect, "upgrade mysql schema should tolerate duplicate index replay")
+	assertAppliedCoreSchema(t, status, "upgraded mysql schema status")
 }
 
 func TestUpgradeSchemaIgnoresExistingMySQLIndexesDuringReplay(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
+	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
+	migration.queueExistingSchemaVersion(4)
 
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(4)}},
-	})
-	state.queueExecError(nil)
-	state.queueExecError(nil)
-	state.queueExecError(nil)
-	state.queueExecError(errors.New("Error 1061 (42000): Duplicate key name 'idx_api_case_runs_run_id_created_at'"))
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
+	migration.state.queueExecError(nil)
+	migration.state.queueExecError(nil)
+	migration.state.queueExecError(nil)
+	migration.state.queueExecError(errors.New("Error 1061 (42000): Duplicate key name 'idx_api_case_runs_run_id_created_at'"))
+	migration.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
 
-	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade mysql v4 schema with existing index: %v", err)
-	}
-	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-		t.Fatalf("upgraded mysql v4 schema status = %#v", status)
-	}
+	status := migration.upgradeSchema(t, dialect, "upgrade mysql v4 schema with existing index")
+	assertAppliedCoreSchema(t, status, "upgraded mysql v4 schema status")
 }
 
 func TestUpgradeSchemaAppliesEnvironmentCatalogToVersionOneDatabase(t *testing.T) {
@@ -847,42 +587,15 @@ func TestUpgradeSchemaAppliesEnvironmentCatalogToVersionOneDatabase(t *testing.T
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			db, state := openFakeSQLDB(t)
-			defer db.Close()
+			migration := newMigrationDB(t)
+			migration.queueUpgradeFromSchemaVersion(1)
 
-			state.queueRows(fakeRows{
-				columns: []string{"exists"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"version"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"exists"},
-				values:  [][]driver.Value{{int64(1)}},
-			})
-			state.queueRows(fakeRows{
-				columns: []string{"version"},
-				values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-			})
-
-			status, err := sqlstore.UpgradeSchema(ctx, db, tt.dialect)
-			if err != nil {
-				t.Fatalf("upgrade v1 schema: %v", err)
-			}
-			if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-				t.Fatalf("upgraded v1 schema status = %#v", status)
-			}
-			joinedExecs := strings.Builder{}
-			for _, exec := range state.execsSnapshot() {
-				joinedExecs.WriteString(exec.query)
-				joinedExecs.WriteByte('\n')
-			}
-			if !strings.Contains(joinedExecs.String(), "create table if not exists environments") || !strings.Contains(joinedExecs.String(), tt.wantColumn) {
-				t.Fatalf("%s v1 upgrade did not apply environment catalog DDL:\n%s", tt.name, joinedExecs.String())
-			}
+			status := migration.upgradeSchema(t, tt.dialect, "upgrade v1 schema")
+			assertAppliedCoreSchema(t, status, "upgraded v1 schema status")
+			assertSQLContains(t, migration.execSQL(), tt.name+" v1 environment catalog DDL",
+				"create table if not exists environments",
+				tt.wantColumn,
+			)
 		})
 	}
 }

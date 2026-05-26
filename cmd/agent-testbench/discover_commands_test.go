@@ -225,7 +225,25 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 	t.Helper()
 	traceID := "trace." + runLabel + ".daily"
 	requestID := "request." + runLabel + ".daily"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newDailyWorkflowTargetServer()
+	defer server.Close()
+	provider := newDailyWorkflowTraceProvider(t, traceID)
+	defer provider.Close()
+
+	profileDir := writeWorkflowBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", profileDir)
+
+	requireDailyWorkflowDiscover(t, label)
+	requireDailyWorkflowPlan(t, label)
+	requireDailyWorkflowBaseline(t, label)
+	report := requireDailyWorkflowReport(t, label, server.URL)
+	requireDailyWorkflowCaseRuns(t, label, report.RunID)
+	requireDailyWorkflowTraceTopology(t, label, report.RunID, requestID, traceID, provider.URL)
+	requireDailyWorkflowEvidence(t, label, report.RunID, traceID)
+}
+
+func newDailyWorkflowTargetServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/first":
 			w.WriteHeader(http.StatusOK)
@@ -237,8 +255,11 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer server.Close()
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+}
+
+func newDailyWorkflowTraceProvider(t *testing.T, traceID string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
 			Query string `json:"query"`
 		}
@@ -251,10 +272,10 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 		}
 		_, _ = fmt.Fprintf(w, `{"data":{"queryTrace":{"spans":[{"traceId":%q,"segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/first","type":"Entry","component":"Tomcat"},{"traceId":%q,"segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":%q,"parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"GET:/first","type":"Entry","component":"Server"}]}}}`, traceID, traceID, traceID)
 	}))
-	defer provider.Close()
+}
 
-	profileDir := writeWorkflowBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+func requireDailyWorkflowDiscover(t *testing.T, label string) {
+	t.Helper()
 	workflowOut := runCLI(t, "workflow", "discover", "--filter", "Workflow Alpha", "--json")
 	var workflowList struct {
 		Items []struct {
@@ -267,7 +288,10 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 	if len(workflowList.Items) != 1 || workflowList.Items[0].ID != "workflow.alpha" {
 		t.Fatalf("%s workflow discover via active SQL Store = %#v", label, workflowList.Items)
 	}
+}
 
+func requireDailyWorkflowPlan(t *testing.T, label string) {
+	t.Helper()
 	planOut := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha", "--json")
 	var plan struct {
 		Counts struct {
@@ -280,43 +304,59 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 	if plan.Counts.Steps != 2 {
 		t.Fatalf("%s workflow plan via active SQL Store = %#v", label, plan)
 	}
+}
 
+func requireDailyWorkflowBaseline(t *testing.T, label string) {
+	t.Helper()
 	runCLI(t, "baseline", "set", "--profile", "sample", "--subject", "workflow.alpha", "--status", "passed", "--required")
 	baselineOut := runCLI(t, "baseline", "get", "--profile", "sample", "--subject", "workflow.alpha")
 	if !strings.Contains(baselineOut, "Status: passed") || !strings.Contains(baselineOut, "Required: true") {
 		t.Fatalf("%s baseline get via active SQL Store = %q", label, baselineOut)
 	}
+}
 
+type dailyWorkflowReportForTest struct {
+	OK     bool   `json:"ok"`
+	RunID  string `json:"runId"`
+	Counts struct {
+		Total  int `json:"total"`
+		Passed int `json:"passed"`
+		Failed int `json:"failed"`
+	} `json:"counts"`
+}
+
+func requireDailyWorkflowReport(t *testing.T, label string, serverURL string) dailyWorkflowReportForTest {
+	t.Helper()
 	reportOut := runCLI(t,
 		"workflow", "report",
 		"--workflow", "workflow.alpha",
-		"--base-url", server.URL,
+		"--base-url", serverURL,
 		"--output-dir", filepath.Join(t.TempDir(), "workflow-report"),
 		"--json",
 	)
-	var report struct {
-		OK     bool   `json:"ok"`
-		RunID  string `json:"runId"`
-		Counts struct {
-			Total  int `json:"total"`
-			Passed int `json:"passed"`
-			Failed int `json:"failed"`
-		} `json:"counts"`
-	}
+	var report dailyWorkflowReportForTest
 	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
 		t.Fatalf("decode %s workflow report json: %v\n%s", label, err, reportOut)
 	}
 	if !report.OK || report.RunID == "" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 {
 		t.Fatalf("%s workflow report via active SQL Store = %#v", label, report)
 	}
+	return report
+}
 
-	caseRunsOut := runCLI(t, "case", "runs", "--run", report.RunID, "--json")
+func requireDailyWorkflowCaseRuns(t *testing.T, label string, runID string) {
+	t.Helper()
+	caseRunsOut := runCLI(t, "case", "runs", "--run", runID, "--json")
 	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
 		t.Fatalf("%s case runs via active SQL Store = %s", label, caseRunsOut)
 	}
+}
+
+func requireDailyWorkflowTraceTopology(t *testing.T, label string, runID string, requestID string, traceID string, providerURL string) {
+	t.Helper()
 	traceOut := runCLI(t, "trace", "topology", "collect",
-		"--trace-graphql-url", provider.URL,
-		"--run", report.RunID,
+		"--trace-graphql-url", providerURL,
+		"--run", runID,
 		"--step", "first",
 		"--case", "case.first",
 		"--request", requestID,
@@ -326,7 +366,11 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 	if !strings.Contains(traceOut, `"provider":"skywalking"`) && !strings.Contains(traceOut, `"provider": "skywalking"`) || !strings.Contains(traceOut, `"status":"complete"`) && !strings.Contains(traceOut, `"status": "complete"`) || !strings.Contains(traceOut, traceID) {
 		t.Fatalf("%s trace topology via active SQL Store = %s", label, traceOut)
 	}
-	evidenceOut := runCLI(t, "case", "evidence", "--run", report.RunID, "--case-id", "case.first", "--step-id", "first", "--json")
+}
+
+func requireDailyWorkflowEvidence(t *testing.T, label string, runID string, traceID string) {
+	t.Helper()
+	evidenceOut := runCLI(t, "case", "evidence", "--run", runID, "--case-id", "case.first", "--step-id", "first", "--json")
 	if !strings.Contains(evidenceOut, `"provider":"skywalking"`) && !strings.Contains(evidenceOut, `"provider": "skywalking"`) || !strings.Contains(evidenceOut, traceID) {
 		t.Fatalf("%s case evidence via active SQL Store = %s", label, evidenceOut)
 	}

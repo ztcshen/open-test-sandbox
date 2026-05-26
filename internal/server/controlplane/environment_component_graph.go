@@ -153,18 +153,30 @@ func EnvironmentComponentStartupPlanReport(envID string, graph store.Environment
 	if !plan.Configured || !plan.OK {
 		return plan
 	}
+	componentByID := environmentComponentsByID(graph.Components)
+	levelByID, waitForByID := environmentComponentStartupLevels(readiness.BlockingOrder, graph.Dependencies)
+	plan.Batches = environmentComponentStartupBatches(readiness.BlockingOrder, componentByID, levelByID, waitForByID)
+	plan.HealthGates = environmentComponentStartupHealthGates(readiness.BlockingOrder, componentByID)
+	return plan
+}
+
+func environmentComponentsByID(components []store.EnvironmentComponent) map[string]store.EnvironmentComponent {
 	componentByID := map[string]store.EnvironmentComponent{}
-	for _, component := range graph.Components {
+	for _, component := range components {
 		id := strings.TrimSpace(component.ComponentID)
 		if id != "" {
 			componentByID[id] = component
 		}
 	}
+	return componentByID
+}
+
+func environmentComponentStartupLevels(blockingOrder []string, dependencies []store.ComponentDependency) (map[string]int, map[string][]string) {
 	levelByID := map[string]int{}
 	waitForByID := map[string][]string{}
-	for _, id := range readiness.BlockingOrder {
+	for _, id := range blockingOrder {
 		level := 0
-		for _, dep := range graph.Dependencies {
+		for _, dep := range dependencies {
 			if strings.EqualFold(strings.TrimSpace(dep.Phase), "runtime") {
 				continue
 			}
@@ -183,8 +195,12 @@ func EnvironmentComponentStartupPlanReport(envID string, graph store.Environment
 		sort.Strings(waitForByID[id])
 		levelByID[id] = level
 	}
+	return levelByID, waitForByID
+}
+
+func environmentComponentStartupBatches(blockingOrder []string, componentByID map[string]store.EnvironmentComponent, levelByID map[string]int, waitForByID map[string][]string) []EnvironmentComponentStartupBatch {
 	batchByLevel := map[int][]EnvironmentComponentStartupUnit{}
-	for _, id := range readiness.BlockingOrder {
+	for _, id := range blockingOrder {
 		component := componentByID[id]
 		batchByLevel[levelByID[id]] = append(batchByLevel[levelByID[id]], EnvironmentComponentStartupUnit{
 			ComponentID:    id,
@@ -195,15 +211,13 @@ func EnvironmentComponentStartupPlanReport(envID string, graph store.Environment
 			Image:          strings.TrimSpace(component.Image),
 			Required:       component.Required,
 		})
-		if gate, ok := environmentComponentHealthGate(component); ok {
-			plan.HealthGates = append(plan.HealthGates, gate)
-		}
 	}
 	levels := make([]int, 0, len(batchByLevel))
 	for level := range batchByLevel {
 		levels = append(levels, level)
 	}
 	sort.Ints(levels)
+	batches := make([]EnvironmentComponentStartupBatch, 0, len(levels))
 	for _, level := range levels {
 		components := batchByLevel[level]
 		sort.SliceStable(components, func(i, j int) bool {
@@ -220,16 +234,26 @@ func EnvironmentComponentStartupPlanReport(envID string, graph store.Environment
 			}
 		}
 		sort.Strings(waitFor)
-		plan.Batches = append(plan.Batches, EnvironmentComponentStartupBatch{
-			Index:      len(plan.Batches) + 1,
+		batches = append(batches, EnvironmentComponentStartupBatch{
+			Index:      len(batches) + 1,
 			Components: components,
 			WaitFor:    waitFor,
 		})
 	}
-	sort.SliceStable(plan.HealthGates, func(i, j int) bool {
-		return plan.HealthGates[i].ComponentID < plan.HealthGates[j].ComponentID
+	return batches
+}
+
+func environmentComponentStartupHealthGates(blockingOrder []string, componentByID map[string]store.EnvironmentComponent) []EnvironmentComponentHealthGate {
+	gates := []EnvironmentComponentHealthGate{}
+	for _, id := range blockingOrder {
+		if gate, ok := environmentComponentHealthGate(componentByID[id]); ok {
+			gates = append(gates, gate)
+		}
+	}
+	sort.SliceStable(gates, func(i, j int) bool {
+		return gates[i].ComponentID < gates[j].ComponentID
 	})
-	return plan
+	return gates
 }
 
 func normalizeEnvironmentComponentHealthCheck(component store.EnvironmentComponent) (map[string]any, string) {

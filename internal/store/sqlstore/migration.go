@@ -11,6 +11,8 @@ import (
 const (
 	CurrentSchemaVersion = 11
 	CoreSchemaName       = "create shared sql store schema"
+	mysqlVarchar255Type  = "varchar(255)"
+	sha256ColumnName     = "sha256"
 )
 
 type SchemaStatusResult struct {
@@ -92,22 +94,43 @@ func currentSchemaVersion(ctx context.Context, db *sql.DB, d Dialect) (int, erro
 }
 
 func CoreSchemaSQL(d Dialect) []string {
-	text := d.TextType()
-	keyText := d.KeyTextType()
-	profileIDText := profileIdentifierTextType(d)
-	runIDText := runIdentifierTextType(d)
-	configVersionIDText := configVersionIdentifierTextType(d)
-	intType := "integer"
-	timeType := d.TimeType()
-	jsonType := d.JSONType()
-	boolType := d.BoolType()
+	types := coreSchemaTypes{
+		text:                d.TextType(),
+		keyText:             d.KeyTextType(),
+		profileIDText:       profileIdentifierTextType(d),
+		runIDText:           runIdentifierTextType(d),
+		configVersionIDText: configVersionIdentifierTextType(d),
+		intType:             "integer",
+		timeType:            d.TimeType(),
+		jsonType:            d.JSONType(),
+		boolType:            d.BoolType(),
+	}
+	statements := coreRunSchemaSQL(d, types)
+	statements = append(statements, coreObservabilitySchemaSQL(d, types)...)
+	statements = append(statements, coreProfileConfigSchemaSQL(d, types)...)
+	return append(statements, coreEnvironmentCatalogSchemaSQL(d, types)...)
+}
+
+type coreSchemaTypes struct {
+	text                string
+	keyText             string
+	profileIDText       string
+	runIDText           string
+	configVersionIDText string
+	intType             string
+	timeType            string
+	jsonType            string
+	boolType            string
+}
+
+func coreRunSchemaSQL(d Dialect, types coreSchemaTypes) []string {
 	return []string{
 		fmt.Sprintf(`
 create table if not exists schema_versions (
   version integer primary key,
   name %s not null,
   applied_at %s not null
-);`, text, timeType),
+);`, types.text, types.timeType),
 		fmt.Sprintf(`
 create table if not exists runs (
   id %s primary key,
@@ -121,7 +144,7 @@ create table if not exists runs (
   finished_at %s,
   created_at %s not null,
   updated_at %s not null
-);`, runIDText, keyText, keyText, keyText, keyText, text, jsonType, timeType, timeType, timeType, timeType),
+);`, types.runIDText, types.keyText, types.keyText, types.keyText, types.keyText, types.text, types.jsonType, types.timeType, types.timeType, types.timeType, types.timeType),
 		fmt.Sprintf(`
 create table if not exists api_case_runs (
   id %s primary key,
@@ -133,7 +156,7 @@ create table if not exists api_case_runs (
   started_at %s,
   finished_at %s,
   created_at %s not null
-);`, runIDText, runIDText, keyText, keyText, jsonType, jsonType, timeType, timeType, timeType),
+);`, types.runIDText, types.runIDText, types.keyText, types.keyText, types.jsonType, types.jsonType, types.timeType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_api_case_runs_run_id_created_at", "api_case_runs", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists evidence_records (
@@ -151,8 +174,13 @@ create table if not exists evidence_records (
   visibility %s not null,
   labels_json %s not null,
   created_at %s not null
-);`, runIDText, runIDText, runIDText, keyText, keyText, text, text, text, intType, text, keyText, keyText, jsonType, timeType),
+);`, types.runIDText, types.runIDText, types.runIDText, types.keyText, types.keyText, types.text, types.text, types.text, types.intType, types.text, types.keyText, types.keyText, types.jsonType, types.timeType),
 		d.CreateIndexSQL("idx_evidence_records_run_id_created_at", "evidence_records", []string{"run_id", "created_at", "id"}),
+	}
+}
+
+func coreObservabilitySchemaSQL(d Dialect, types coreSchemaTypes) []string {
+	return []string{
 		fmt.Sprintf(`
 create table if not exists trace_topologies (
   id %s primary key,
@@ -166,7 +194,7 @@ create table if not exists trace_topologies (
   topology_json %s not null,
   text_topology %s not null,
   created_at %s not null
-);`, runIDText, runIDText, keyText, keyText, keyText, runIDText, runIDText, keyText, jsonType, text, timeType),
+);`, types.runIDText, types.runIDText, types.keyText, types.keyText, types.keyText, types.runIDText, types.runIDText, types.keyText, types.jsonType, types.text, types.timeType),
 		d.CreateIndexSQL("idx_trace_topologies_workflow_run_id_created_at", "trace_topologies", []string{"workflow_run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists post_process_tasks (
@@ -183,7 +211,7 @@ create table if not exists post_process_tasks (
   error %s not null,
   summary_json %s not null,
   created_at %s not null
-);`, runIDText, runIDText, keyText, keyText, keyText, keyText, keyText, timeType, timeType, intType, text, jsonType, timeType),
+);`, types.runIDText, types.runIDText, types.keyText, types.keyText, types.keyText, types.keyText, types.keyText, types.timeType, types.timeType, types.intType, types.text, types.jsonType, types.timeType),
 		d.CreateIndexSQL("idx_post_process_tasks_run_id_created_at", "post_process_tasks", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists baseline_gates (
@@ -195,7 +223,12 @@ create table if not exists baseline_gates (
   checked_at %s,
   updated_at %s not null,
   primary key (profile_id, subject_id)
-);`, profileIDText, keyText, keyText, boolType, jsonType, timeType, timeType),
+);`, types.profileIDText, types.keyText, types.keyText, types.boolType, types.jsonType, types.timeType, types.timeType),
+	}
+}
+
+func coreProfileConfigSchemaSQL(d Dialect, types coreSchemaTypes) []string {
+	return []string{
 		fmt.Sprintf(`
 create table if not exists profile_indexes (
   profile_id %s primary key,
@@ -204,7 +237,7 @@ create table if not exists profile_indexes (
   summary_json %s not null,
   imported_at %s,
   updated_at %s not null
-);`, profileIDText, text, text, jsonType, timeType, timeType),
+);`, types.profileIDText, types.text, types.text, types.jsonType, types.timeType, types.timeType),
 		fmt.Sprintf(`
 create table if not exists config_versions (
   id %s primary key,
@@ -215,7 +248,7 @@ create table if not exists config_versions (
   active %s not null,
   published_at %s not null,
   created_at %s not null
-);`, configVersionIDText, profileIDText, text, text, jsonType, boolType, timeType, timeType),
+);`, types.configVersionIDText, types.profileIDText, types.text, types.text, types.jsonType, types.boolType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_config_versions_active_published", "config_versions", []string{"active", "published_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists config_read_model (
@@ -226,7 +259,7 @@ create table if not exists config_read_model (
   generated_at %s not null,
   updated_at %s not null,
   primary key (profile_id, model_key)
-);`, profileIDText, configVersionIDText, configVersionIDText, jsonType, timeType, timeType),
+);`, types.profileIDText, types.configVersionIDText, types.configVersionIDText, types.jsonType, types.timeType, types.timeType),
 		fmt.Sprintf(`
 create table if not exists profile_catalogs (
   profile_id %s primary key,
@@ -242,7 +275,12 @@ create table if not exists profile_catalogs (
   fixtures %s not null,
   templates %s not null,
   template_configs %s not null
-);`, profileIDText, timeType, jsonType, intType, intType, intType, intType, intType, intType, intType, intType, intType, intType),
+);`, types.profileIDText, types.timeType, types.jsonType, types.intType, types.intType, types.intType, types.intType, types.intType, types.intType, types.intType, types.intType, types.intType, types.intType),
+	}
+}
+
+func coreEnvironmentCatalogSchemaSQL(d Dialect, types coreSchemaTypes) []string {
+	return []string{
 		fmt.Sprintf(`
 create table if not exists environments (
   id %s primary key,
@@ -263,7 +301,7 @@ create table if not exists environments (
   summary_json %s not null,
   created_at %s not null,
   updated_at %s not null
-);`, keyText, text, text, keyText, boolType, jsonType, jsonType, jsonType, jsonType, keyText, runIDText, keyText, boolType, boolType, timeType, jsonType, timeType, timeType),
+);`, types.keyText, types.text, types.text, types.keyText, types.boolType, types.jsonType, types.jsonType, types.jsonType, types.jsonType, types.keyText, types.runIDText, types.keyText, types.boolType, types.boolType, types.timeType, types.jsonType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_environments_verified_status", "environments", []string{"verified", "status", "updated_at", "id"}),
 		d.CreateIndexSQL("idx_environments_verification", "environments", []string{"verification_workflow_id", "last_verification_status", "updated_at", "id"}),
 		fmt.Sprintf(`
@@ -283,7 +321,7 @@ create table if not exists environment_components (
   updated_at %s not null,
   primary key (env_id, component_id),
   foreign key (env_id) references environments(id) on delete cascade
-);`, keyText, keyText, text, keyText, keyText, keyText, text, boolType, jsonType, jsonType, jsonType, timeType, timeType),
+);`, types.keyText, types.keyText, types.text, types.keyText, types.keyText, types.keyText, types.text, types.boolType, types.jsonType, types.jsonType, types.jsonType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_environment_components_kind", "environment_components", []string{"env_id", "kind", "role", "component_id"}),
 		fmt.Sprintf(`
 create table if not exists component_dependencies (
@@ -299,7 +337,7 @@ create table if not exists component_dependencies (
   primary key (env_id, consumer_component_id, provider_component_id, phase, capability),
   foreign key (env_id, consumer_component_id) references environment_components(env_id, component_id) on delete cascade,
   foreign key (env_id, provider_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, keyText, keyText, keyText, keyText, keyText, boolType, jsonType, timeType, timeType),
+);`, types.keyText, types.keyText, types.keyText, types.keyText, types.keyText, types.boolType, types.jsonType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_component_dependencies_provider", "component_dependencies", []string{"env_id", "provider_component_id", "phase", "capability", "consumer_component_id"}),
 		d.CreateIndexSQL("idx_component_dependencies_phase", "component_dependencies", []string{"env_id", "phase", "capability", "consumer_component_id", "provider_component_id"}),
 		fmt.Sprintf(`
@@ -322,7 +360,7 @@ create table if not exists component_config_assets (
   primary key (env_id, owner_component_id, asset_id),
   foreign key (env_id, owner_component_id) references environment_components(env_id, component_id) on delete cascade,
   foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, keyText, keyText, keyText, keyText, keyText, text, text, jsonType, text, intType, intType, d.QuoteIdent("sensitive"), boolType, jsonType, timeType, timeType),
+);`, types.keyText, types.keyText, types.keyText, types.keyText, types.keyText, types.text, types.text, types.jsonType, types.text, types.intType, types.intType, d.QuoteIdent("sensitive"), types.boolType, types.jsonType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_component_config_assets_target", "component_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
 		d.CreateIndexSQL("idx_component_config_assets_owner_order", "component_config_assets", []string{"env_id", "owner_component_id", "apply_order", "asset_id"}),
 	}
@@ -335,7 +373,7 @@ func SchemaDDL(d Dialect) []string {
 
 func runIdentifierTextType(d Dialect) string {
 	if d.Name() == "mysql" {
-		return "varchar(255)"
+		return mysqlVarchar255Type
 	}
 	return d.KeyTextType()
 }
@@ -385,14 +423,14 @@ func incrementalSchemaSQL(d Dialect, current int) []string {
 
 func profileIdentifierTextType(d Dialect) string {
 	if d.Name() == "mysql" {
-		return "varchar(255)"
+		return mysqlVarchar255Type
 	}
 	return d.KeyTextType()
 }
 
 func configVersionIdentifierTextType(d Dialect) string {
 	if d.Name() == "mysql" {
-		return "varchar(255)"
+		return mysqlVarchar255Type
 	}
 	return d.KeyTextType()
 }
@@ -407,7 +445,7 @@ func mysqlMediumTextMigrationSQL() []string {
 		{"runs", "evidence_root"},
 		{"evidence_records", "uri"},
 		{"evidence_records", "media_type"},
-		{"evidence_records", "sha256"},
+		{"evidence_records", sha256ColumnName},
 		{"evidence_records", "summary"},
 		{"trace_topologies", "text_topology"},
 		{"post_process_tasks", "error"},
@@ -421,7 +459,7 @@ func mysqlMediumTextMigrationSQL() []string {
 		{"environment_components", "image"},
 		{"component_config_assets", "target_path"},
 		{"component_config_assets", "content_inline"},
-		{"component_config_assets", "sha256"},
+		{"component_config_assets", sha256ColumnName},
 	}
 	statements := make([]string, 0, len(columns))
 	d := MySQLDialect{}

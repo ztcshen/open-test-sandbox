@@ -16,6 +16,13 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const (
+	apiCaseEvidenceKindRequest    = "request"
+	apiCaseEvidenceKindResponse   = "response"
+	apiCaseEvidenceKindAssertions = "assertions"
+	apiCaseEvidenceKindSummary    = "summary"
+)
+
 func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
 	payload, err := readJSONPayload(r)
 	if err != nil {
@@ -77,12 +84,7 @@ func recordAPICaseRun(ctx context.Context, runtime store.Store, profileID string
 }
 
 func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runContext recordAPICaseRunContext, result apicase.RunResult) error {
-	now := time.Now().UTC()
-	startedAt := apiCaseResultTime(result.StartedAt, now)
-	finishedAt := apiCaseResultTime(result.FinishedAt, now)
-	if finishedAt.Before(startedAt) {
-		finishedAt = startedAt
-	}
+	times := apiCaseRunRecordTimesFromResult(result, time.Now().UTC())
 	requestSummary, assertionSummary, err := apiCaseEvidenceSummaries(result)
 	if err != nil {
 		return err
@@ -92,6 +94,31 @@ func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runCo
 	if stepID != "" {
 		requestSummary = compactJSONObjectWithFields(requestSummary, map[string]any{"stepId": stepID})
 	}
+	if err := recordWorkflowRunForAPICase(ctx, runtime, runContext, result, workflowID, stepID, times); err != nil {
+		return err
+	}
+	caseRunID, err := recordAPICaseRunRow(ctx, runtime, result, requestSummary, assertionSummary, times)
+	if err != nil {
+		return err
+	}
+	return recordAPICaseEvidenceRecords(ctx, runtime, result, caseRunID, stepID, times.FinishedAt)
+}
+
+type apiCaseRunRecordTimes struct {
+	StartedAt  time.Time
+	FinishedAt time.Time
+}
+
+func apiCaseRunRecordTimesFromResult(result apicase.RunResult, now time.Time) apiCaseRunRecordTimes {
+	startedAt := apiCaseResultTime(result.StartedAt, now)
+	finishedAt := apiCaseResultTime(result.FinishedAt, now)
+	if finishedAt.Before(startedAt) {
+		finishedAt = startedAt
+	}
+	return apiCaseRunRecordTimes{StartedAt: startedAt, FinishedAt: finishedAt}
+}
+
+func recordWorkflowRunForAPICase(ctx context.Context, runtime store.Store, runContext recordAPICaseRunContext, result apicase.RunResult, workflowID string, stepID string, times apiCaseRunRecordTimes) error {
 	runSummary := apiCaseRunReport(result)
 	if workflowID != "" {
 		runSummary["workflow_id"] = workflowID
@@ -101,7 +128,7 @@ func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runCo
 		runSummary["step_id"] = stepID
 		runSummary["stepId"] = stepID
 	}
-	if _, err := runtime.CreateRun(ctx, store.Run{
+	_, err := runtime.CreateRun(ctx, store.Run{
 		ID:            result.RunID,
 		ProfileID:     runContext.ProfileID,
 		EnvironmentID: strings.TrimSpace(runContext.EnvironmentID),
@@ -109,13 +136,15 @@ func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runCo
 		Status:        result.Status,
 		EvidenceRoot:  result.EvidencePath,
 		SummaryJSON:   compactJSON(runSummary),
-		StartedAt:     startedAt,
-		FinishedAt:    finishedAt,
-		CreatedAt:     startedAt,
-		UpdatedAt:     finishedAt,
-	}); err != nil {
-		return err
-	}
+		StartedAt:     times.StartedAt,
+		FinishedAt:    times.FinishedAt,
+		CreatedAt:     times.StartedAt,
+		UpdatedAt:     times.FinishedAt,
+	})
+	return err
+}
+
+func recordAPICaseRunRow(ctx context.Context, runtime store.Store, result apicase.RunResult, requestSummary string, assertionSummary string, times apiCaseRunRecordTimes) (string, error) {
 	caseRunID := apiCaseRunRecordID(result.RunID)
 	if _, err := runtime.RecordAPICaseRun(ctx, store.APICaseRun{
 		ID:                   caseRunID,
@@ -124,12 +153,16 @@ func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runCo
 		Status:               result.Status,
 		RequestSummaryJSON:   requestSummary,
 		AssertionSummaryJSON: assertionSummary,
-		StartedAt:            startedAt,
-		FinishedAt:           finishedAt,
-		CreatedAt:            startedAt,
+		StartedAt:            times.StartedAt,
+		FinishedAt:           times.FinishedAt,
+		CreatedAt:            times.StartedAt,
 	}); err != nil {
-		return err
+		return "", err
 	}
+	return caseRunID, nil
+}
+
+func recordAPICaseEvidenceRecords(ctx context.Context, runtime store.Store, result apicase.RunResult, caseRunID string, stepID string, createdAt time.Time) error {
 	for _, name := range []string{"case.json", "request.json", "response.json", "assertions.json", "summary.json"} {
 		path := filepath.Join(result.EvidencePath, name)
 		info, err := os.Stat(path)
@@ -165,7 +198,7 @@ func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runCo
 			Category:   apiCaseEvidenceCategory(kind),
 			Visibility: "public",
 			LabelsJSON: compactJSON(labels),
-			CreatedAt:  finishedAt,
+			CreatedAt:  createdAt,
 		}); err != nil {
 			return err
 		}
@@ -185,11 +218,11 @@ func compactJSONObjectWithFields(raw string, fields map[string]any) string {
 
 func apiCaseEvidenceCategory(kind string) string {
 	switch kind {
-	case "request", "response":
+	case apiCaseEvidenceKindRequest, apiCaseEvidenceKindResponse:
 		return "http-exchange"
-	case "assertions":
+	case apiCaseEvidenceKindAssertions:
 		return "assertion-result"
-	case "summary":
+	case apiCaseEvidenceKindSummary:
 		return "run-summary"
 	default:
 		return "runtime-attachment"
@@ -197,12 +230,12 @@ func apiCaseEvidenceCategory(kind string) string {
 }
 
 func apiCaseEvidenceSummaries(result apicase.RunResult) (string, string, error) {
-	requestSummary, err := apiCaseEvidenceSummary(filepath.Join(result.EvidencePath, "request.json"), "request", 0)
+	requestSummary, err := apiCaseEvidenceSummary(filepath.Join(result.EvidencePath, "request.json"), apiCaseEvidenceKindRequest, 0)
 	if err != nil {
 		return "", "", err
 	}
 	assertionPath := filepath.Join(result.EvidencePath, "assertions.json")
-	assertionSummary, err := apiCaseEvidenceSummary(assertionPath, "assertions", 0)
+	assertionSummary, err := apiCaseEvidenceSummary(assertionPath, apiCaseEvidenceKindAssertions, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		assertionSummary = compactJSON(map[string]any{"status": result.Status, "errorCount": 0})
 		err = nil
@@ -220,7 +253,7 @@ func apiCaseEvidenceSummary(path string, kind string, defaultSize int64) (string
 		return "", err
 	}
 	switch kind {
-	case "request":
+	case apiCaseEvidenceKindRequest:
 		headers, _ := item["headers"].(map[string]any)
 		_, hasBody := item["body"]
 		return compactJSON(map[string]any{
@@ -229,14 +262,14 @@ func apiCaseEvidenceSummary(path string, kind string, defaultSize int64) (string
 			"headerCount": len(headers),
 			"hasBody":     hasBody,
 		}), nil
-	case "response":
+	case apiCaseEvidenceKindResponse:
 		headers, _ := item["headers"].(map[string]any)
 		return compactJSON(map[string]any{
 			"statusCode":  intValue(item["statusCode"]),
 			"headerCount": len(headers),
 			"bodyBytes":   len(valueString(item["body"])),
 		}), nil
-	case "assertions":
+	case apiCaseEvidenceKindAssertions:
 		errorsValue, _ := item["errors"].([]any)
 		return compactJSON(map[string]any{
 			"status":     valueString(item["status"]),

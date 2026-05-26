@@ -253,7 +253,28 @@ func TestProfileAuditPlanCommandSuggestsRepairActions(t *testing.T) {
 	}
 }
 
+const (
+	catalogOpenAPIImportServiceID   = "service.catalog"
+	catalogOpenAPIImportEvidenceDir = ".runtime/openapi"
+)
+
 func TestProfileImportPlanOpenAPICommand(t *testing.T) {
+	fixture := writeCatalogOpenAPIImportPlanFixture(t)
+
+	report := runCatalogOpenAPIImportPlanJSON(t, fixture)
+	requireCatalogOpenAPIImportPlanSummary(t, fixture, report)
+	requireCatalogOpenAPIImportRunnableCase(t, report.Plan.CaseFiles[1].Body)
+	requireCatalogOpenAPIImportTextOutput(t, fixture)
+	requireCatalogOpenAPIImportWrittenFiles(t, fixture)
+}
+
+type catalogOpenAPIImportPlanFixture struct {
+	specPath string
+}
+
+func writeCatalogOpenAPIImportPlanFixture(t *testing.T) catalogOpenAPIImportPlanFixture {
+	t.Helper()
+
 	specPath := filepath.Join(t.TempDir(), "catalog-openapi.json")
 	writeFile(t, specPath, `{
   "openapi": "3.0.3",
@@ -283,40 +304,54 @@ func TestProfileImportPlanOpenAPICommand(t *testing.T) {
   }
 }`)
 
-	out := runCLI(t, "profile", "import-plan", "openapi", "--from", specPath, "--service-id", "service.catalog", "--evidence-dir", ".runtime/openapi", "--json")
-	var report struct {
-		Kind       string `json:"kind"`
-		SourcePath string `json:"sourcePath"`
-		Plan       struct {
-			Service struct {
-				ID          string `json:"id"`
-				DisplayName string `json:"displayName"`
-				Status      string `json:"status"`
-			} `json:"service"`
-			InterfaceNodes []struct {
-				ID     string `json:"id"`
-				Method string `json:"method"`
-				Path   string `json:"path"`
-				Status string `json:"status"`
-			} `json:"interfaceNodes"`
-			APICases []struct {
-				ID          string   `json:"id"`
-				CasePath    string   `json:"casePath"`
-				Status      string   `json:"status"`
-				EvidenceDir string   `json:"evidenceDir"`
-				Tags        []string `json:"tags"`
-			} `json:"apiCases"`
-			CaseFiles []struct {
-				Path string          `json:"path"`
-				Body json.RawMessage `json:"body"`
-			} `json:"caseFiles"`
-			WrittenFiles []string `json:"writtenFiles"`
-		} `json:"plan"`
-	}
+	return catalogOpenAPIImportPlanFixture{specPath: specPath}
+}
+
+type catalogOpenAPIImportPlanReport struct {
+	Kind       string `json:"kind"`
+	SourcePath string `json:"sourcePath"`
+	Plan       struct {
+		Service struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"displayName"`
+			Status      string `json:"status"`
+		} `json:"service"`
+		InterfaceNodes []struct {
+			ID     string `json:"id"`
+			Method string `json:"method"`
+			Path   string `json:"path"`
+			Status string `json:"status"`
+		} `json:"interfaceNodes"`
+		APICases []struct {
+			ID          string   `json:"id"`
+			CasePath    string   `json:"casePath"`
+			Status      string   `json:"status"`
+			EvidenceDir string   `json:"evidenceDir"`
+			Tags        []string `json:"tags"`
+		} `json:"apiCases"`
+		CaseFiles []struct {
+			Path string          `json:"path"`
+			Body json.RawMessage `json:"body"`
+		} `json:"caseFiles"`
+		WrittenFiles []string `json:"writtenFiles"`
+	} `json:"plan"`
+}
+
+func runCatalogOpenAPIImportPlanJSON(t *testing.T, fixture catalogOpenAPIImportPlanFixture) catalogOpenAPIImportPlanReport {
+	t.Helper()
+
+	out := runCLI(t, "profile", "import-plan", "openapi", "--from", fixture.specPath, "--service-id", catalogOpenAPIImportServiceID, "--evidence-dir", catalogOpenAPIImportEvidenceDir, "--json")
+	var report catalogOpenAPIImportPlanReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode profile import plan json: %v\n%s", err, out)
 	}
-	if report.Kind != "openapi" || report.SourcePath != specPath || report.Plan.Service.ID != "service.catalog" || report.Plan.Service.Status != "draft" {
+	return report
+}
+
+func requireCatalogOpenAPIImportPlanSummary(t *testing.T, fixture catalogOpenAPIImportPlanFixture, report catalogOpenAPIImportPlanReport) {
+	t.Helper()
+
+	if report.Kind != "openapi" || report.SourcePath != fixture.specPath || report.Plan.Service.ID != catalogOpenAPIImportServiceID || report.Plan.Service.Status != "draft" {
 		t.Fatalf("import plan summary = %#v", report)
 	}
 	if len(report.Plan.InterfaceNodes) != 2 || len(report.Plan.APICases) != 2 || len(report.Plan.CaseFiles) != 2 {
@@ -325,35 +360,50 @@ func TestProfileImportPlanOpenAPICommand(t *testing.T) {
 	if report.Plan.InterfaceNodes[0].ID != "node.service.catalog.list-items" || report.Plan.InterfaceNodes[0].Method != "GET" || report.Plan.InterfaceNodes[0].Path != "/items" || report.Plan.InterfaceNodes[0].Status != "draft" {
 		t.Fatalf("first interface node = %#v", report.Plan.InterfaceNodes[0])
 	}
-	if report.Plan.APICases[1].ID != "case.service.catalog.create-item" || report.Plan.APICases[1].CasePath != "api-cases/case.service.catalog.create-item.json" || report.Plan.APICases[1].EvidenceDir != ".runtime/openapi" || strings.Join(report.Plan.APICases[1].Tags, ",") != "openapi,catalog,write" {
+	if report.Plan.APICases[1].ID != "case.service.catalog.create-item" || report.Plan.APICases[1].CasePath != "api-cases/case.service.catalog.create-item.json" || report.Plan.APICases[1].EvidenceDir != catalogOpenAPIImportEvidenceDir || strings.Join(report.Plan.APICases[1].Tags, ",") != "openapi,catalog,write" {
 		t.Fatalf("second api case = %#v", report.Plan.APICases[1])
 	}
-	var runnable struct {
-		Request struct {
-			Method string         `json:"method"`
-			Path   string         `json:"path"`
-			Body   map[string]any `json:"body"`
-		} `json:"request"`
-		Assertions struct {
-			ExpectedStatusCodes []int `json:"expectedStatusCodes"`
-		} `json:"assertions"`
-	}
-	if err := json.Unmarshal(report.Plan.CaseFiles[1].Body, &runnable); err != nil {
-		t.Fatalf("decode generated case body: %v\n%s", err, string(report.Plan.CaseFiles[1].Body))
+}
+
+type catalogOpenAPIImportRunnableCase struct {
+	Request struct {
+		Method string         `json:"method"`
+		Path   string         `json:"path"`
+		Body   map[string]any `json:"body"`
+	} `json:"request"`
+	Assertions struct {
+		ExpectedStatusCodes []int `json:"expectedStatusCodes"`
+	} `json:"assertions"`
+}
+
+func requireCatalogOpenAPIImportRunnableCase(t *testing.T, body json.RawMessage) {
+	t.Helper()
+
+	var runnable catalogOpenAPIImportRunnableCase
+	if err := json.Unmarshal(body, &runnable); err != nil {
+		t.Fatalf("decode generated case body: %v\n%s", err, string(body))
 	}
 	if runnable.Request.Method != "POST" || runnable.Request.Path != "/items" || runnable.Request.Body["id"] != "item-001" || len(runnable.Assertions.ExpectedStatusCodes) != 1 || runnable.Assertions.ExpectedStatusCodes[0] != 201 {
 		t.Fatalf("generated runnable case = %#v", runnable)
 	}
+}
 
-	textOut := runCLI(t, "profile", "import-plan", "openapi", "--from", specPath, "--service-id", "service.catalog")
-	for _, want := range []string{"OpenAPI Import Plan", "Source: " + specPath, "Service: service.catalog", "Interface Nodes: 2", "API Cases: 2", "Case Files: 2"} {
+func requireCatalogOpenAPIImportTextOutput(t *testing.T, fixture catalogOpenAPIImportPlanFixture) {
+	t.Helper()
+
+	textOut := runCLI(t, "profile", "import-plan", "openapi", "--from", fixture.specPath, "--service-id", catalogOpenAPIImportServiceID)
+	for _, want := range []string{"OpenAPI Import Plan", "Source: " + fixture.specPath, "Service: service.catalog", "Interface Nodes: 2", "API Cases: 2", "Case Files: 2"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("import plan text missing %q:\n%s", want, textOut)
 		}
 	}
+}
+
+func requireCatalogOpenAPIImportWrittenFiles(t *testing.T, fixture catalogOpenAPIImportPlanFixture) {
+	t.Helper()
 
 	outputDir := filepath.Join(t.TempDir(), "review-plan")
-	textOut = runCLI(t, "profile", "import-plan", "openapi", "--from", specPath, "--service-id", "service.catalog", "--evidence-dir", ".runtime/openapi", "--output-dir", outputDir)
+	textOut := runCLI(t, "profile", "import-plan", "openapi", "--from", fixture.specPath, "--service-id", catalogOpenAPIImportServiceID, "--evidence-dir", catalogOpenAPIImportEvidenceDir, "--output-dir", outputDir)
 	if !strings.Contains(textOut, "Output Dir: "+outputDir) {
 		t.Fatalf("import plan output-dir text = %q", textOut)
 	}
@@ -378,6 +428,7 @@ func TestProfileImportPlanOpenAPICommand(t *testing.T) {
 	if metadataCase.ID != "case.service.catalog.create-item" || metadataCase.CasePath != "api-cases/case.service.catalog.create-item.json" || metadataCase.Status != "draft" {
 		t.Fatalf("written metadata case = %#v", metadataCase)
 	}
+	var runnable catalogOpenAPIImportRunnableCase
 	readTestJSONFile(t, filepath.Join(outputDir, "api-cases", "case.service.catalog.create-item.json"), &runnable)
 	if runnable.Request.Method != "POST" || runnable.Request.Path != "/items" || runnable.Request.Body["id"] != "item-001" {
 		t.Fatalf("written runnable case = %#v", runnable)

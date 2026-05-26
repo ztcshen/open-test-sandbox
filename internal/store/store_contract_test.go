@@ -49,14 +49,41 @@ func TestSQLiteStoreCanBeDisabledForPostgresOnlyValidation(t *testing.T) {
 	}
 }
 
+const (
+	contractProfileID  = "empty"
+	contractRunID      = "run-001"
+	contractWorkflowID = "workflow.smoke"
+	contractCaseRunID  = "case-run-001"
+	contractCaseID     = "case.health"
+	contractStepID     = "step.health"
+)
+
 func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	t.Helper()
 
 	started := time.Date(2026, 5, 14, 9, 30, 0, 0, time.UTC)
+	requireRunContract(t, ctx, s, started)
+	requireAPICaseRunContract(t, ctx, s, started)
+	requireEvidenceContract(t, ctx, s)
+	requirePostProcessTaskContract(t, ctx, s)
+	requireTraceTopologyContract(t, ctx, s, started)
+	env := requireEnvironmentContract(t, ctx, s, started)
+	requireEnvironmentComponentGraphContract(t, ctx, s, env.ID)
+	requireBaselineGateContract(t, ctx, s, started)
+	requireProfileIndexContract(t, ctx, s, started)
+	activeVersion := requireConfigVersionContract(t, ctx, s, started)
+	requireReadModelContract(t, ctx, s, activeVersion, started)
+	requireProfileCatalogContract(t, ctx, s, started)
+	requireMissingRunError(t, ctx, s)
+}
+
+func requireRunContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) {
+	t.Helper()
+
 	run, err := s.CreateRun(ctx, store.Run{
-		ID:           "run-001",
-		ProfileID:    "empty",
-		WorkflowID:   "workflow.smoke",
+		ID:           contractRunID,
+		ProfileID:    contractProfileID,
+		WorkflowID:   contractWorkflowID,
 		Status:       store.StatusRunning,
 		EvidenceRoot: "evidence/run-001",
 		SummaryJSON:  `{"stepCount":1}`,
@@ -69,11 +96,11 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("created run should have CreatedAt: %#v", run)
 	}
 
-	loadedRun, err := s.GetRun(ctx, "run-001")
+	loadedRun, err := s.GetRun(ctx, contractRunID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if loadedRun.ProfileID != "empty" || loadedRun.WorkflowID != "workflow.smoke" || loadedRun.Status != store.StatusRunning {
+	if loadedRun.ProfileID != contractProfileID || loadedRun.WorkflowID != contractWorkflowID || loadedRun.Status != store.StatusRunning {
 		t.Fatalf("loaded run = %#v", loadedRun)
 	}
 	if loadedRun.SummaryJSON != `{"stepCount":1}` {
@@ -83,17 +110,21 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if len(runs) != 1 || runs[0].ID != "run-001" {
+	if len(runs) != 1 || runs[0].ID != contractRunID {
 		t.Fatalf("runs = %#v", runs)
 	}
 	if runs[0].SummaryJSON != `{"stepCount":1}` {
 		t.Fatalf("listed run summary = %q", runs[0].SummaryJSON)
 	}
+}
+
+func requireAPICaseRunContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) {
+	t.Helper()
 
 	caseRun, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
-		ID:                   "case-run-001",
-		RunID:                "run-001",
-		CaseID:               "case.health",
+		ID:                   contractCaseRunID,
+		RunID:                contractRunID,
+		CaseID:               contractCaseID,
 		Status:               store.StatusPassed,
 		RequestSummaryJSON:   `{"method":"GET"}`,
 		AssertionSummaryJSON: `{"passed":1}`,
@@ -107,11 +138,11 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("case run should have CreatedAt: %#v", caseRun)
 	}
 
-	caseRuns, err := s.ListAPICaseRuns(ctx, "run-001")
+	caseRuns, err := s.ListAPICaseRuns(ctx, contractRunID)
 	if err != nil {
 		t.Fatalf("list case runs: %v", err)
 	}
-	if len(caseRuns) != 1 || caseRuns[0].CaseID != "case.health" || caseRuns[0].Status != store.StatusPassed {
+	if len(caseRuns) != 1 || caseRuns[0].CaseID != contractCaseID || caseRuns[0].Status != store.StatusPassed {
 		t.Fatalf("case runs = %#v", caseRuns)
 	}
 	if caseRuns[0].RequestSummaryJSON != `{"method":"GET"}` || caseRuns[0].AssertionSummaryJSON != `{"passed":1}` {
@@ -125,16 +156,20 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		if err != nil {
 			t.Fatalf("list latest api case runs: %v", err)
 		}
-		if len(latestCaseRuns) != 1 || latestCaseRuns[0].ID != "case-run-001" || latestCaseRuns[0].CaseID != "case.health" {
+		if len(latestCaseRuns) != 1 || latestCaseRuns[0].ID != contractCaseRunID || latestCaseRuns[0].CaseID != contractCaseID {
 			t.Fatalf("latest case runs = %#v", latestCaseRuns)
 		}
 	}
+}
+
+func requireEvidenceContract(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
 
 	evidence, err := s.RecordEvidence(ctx, store.EvidenceRecord{
 		ID:         "evidence-001",
-		RunID:      "run-001",
-		CaseRunID:  "case-run-001",
-		StepID:     "step.health",
+		RunID:      contractRunID,
+		CaseRunID:  contractCaseRunID,
+		StepID:     contractStepID,
 		Kind:       "http-response",
 		URI:        "evidence/run-001/response.json",
 		MediaType:  "application/json",
@@ -152,7 +187,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("evidence should have CreatedAt: %#v", evidence)
 	}
 
-	evidenceRecords, err := s.ListEvidence(ctx, "run-001")
+	evidenceRecords, err := s.ListEvidence(ctx, contractRunID)
 	if err != nil {
 		t.Fatalf("list evidence: %v", err)
 	}
@@ -165,18 +200,22 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if evidenceRecords[0].Category != "runtime-attachment" || evidenceRecords[0].Visibility != "public" || evidenceRecords[0].LabelsJSON != `{"owner":"qa","severity":"critical"}` {
 		t.Fatalf("evidence attachment metadata = %#v", evidenceRecords[0])
 	}
-	if evidenceRecords[0].StepID != "step.health" {
+	if evidenceRecords[0].StepID != contractStepID {
 		t.Fatalf("evidence step relation = %#v", evidenceRecords[0])
 	}
+}
+
+func requirePostProcessTaskContract(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
 
 	taskStarted := time.Now().UTC().Add(-150 * time.Millisecond)
 	taskFinished := taskStarted.Add(125 * time.Millisecond)
 	task, err := s.RecordPostProcessTask(ctx, store.PostProcessTask{
 		ID:          "task-001",
-		RunID:       "run-001",
+		RunID:       contractRunID,
 		WorkflowID:  "workflow.health",
-		StepID:      "step.health",
-		CaseID:      "case.health",
+		StepID:      contractStepID,
+		CaseID:      contractCaseID,
 		Kind:        "runtime_log_collect",
 		Status:      store.StatusPassed,
 		StartedAt:   taskStarted,
@@ -189,20 +228,24 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if task.DurationMs != 125 {
 		t.Fatalf("task duration should be derived from timestamps: %#v", task)
 	}
-	tasks, err := s.ListPostProcessTasks(ctx, "run-001")
+	tasks, err := s.ListPostProcessTasks(ctx, contractRunID)
 	if err != nil {
 		t.Fatalf("list post process tasks: %v", err)
 	}
 	if len(tasks) != 1 || tasks[0].Kind != "runtime_log_collect" || tasks[0].DurationMs != 125 {
 		t.Fatalf("post process tasks = %#v", tasks)
 	}
+}
+
+func requireTraceTopologyContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) {
+	t.Helper()
 
 	topology, err := s.SaveTraceTopology(ctx, store.TraceTopology{
 		ID:            "topology-001",
-		WorkflowRunID: "run-001",
-		WorkflowID:    "workflow.smoke",
-		StepID:        "step.health",
-		CaseID:        "case.health",
+		WorkflowRunID: contractRunID,
+		WorkflowID:    contractWorkflowID,
+		StepID:        contractStepID,
+		CaseID:        contractCaseID,
 		RequestID:     "request-001",
 		TraceID:       "trace-001",
 		Status:        "complete",
@@ -216,7 +259,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if topology.CreatedAt.IsZero() {
 		t.Fatalf("trace topology should have CreatedAt: %#v", topology)
 	}
-	topologies, err := s.ListTraceTopologies(ctx, "run-001")
+	topologies, err := s.ListTraceTopologies(ctx, contractRunID)
 	if err != nil {
 		t.Fatalf("list trace topologies: %v", err)
 	}
@@ -226,6 +269,10 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if topologies[0].TopologyJSON != topology.TopologyJSON || topologies[0].TextTopology != "service.alpha -> service.beta" {
 		t.Fatalf("trace topology payload = %#v", topologies[0])
 	}
+}
+
+func requireEnvironmentContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) store.Environment {
+	t.Helper()
 
 	env, err := s.UpsertEnvironment(ctx, store.Environment{
 		ID:                     "env.team.accepted",
@@ -245,7 +292,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if env.CreatedAt.IsZero() || env.UpdatedAt.IsZero() {
 		t.Fatalf("environment timestamps should be set: %#v", env)
 	}
-	env.LastVerificationRunID = "run-001"
+	env.LastVerificationRunID = contractRunID
 	env.LastVerificationStatus = store.StatusPassed
 	env.EvidenceComplete = true
 	env.TopologyComplete = true
@@ -273,7 +320,33 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if len(environments) != 1 || environments[0].ID != "env.team.accepted" || !environments[0].Verified {
 		t.Fatalf("environments = %#v", environments)
 	}
-	graph := store.EnvironmentComponentGraph{
+	return env
+}
+
+func requireEnvironmentComponentGraphContract(t *testing.T, ctx context.Context, s store.Store, envID string) {
+	t.Helper()
+
+	graph := contractEnvironmentComponentGraph()
+	if err := s.ReplaceEnvironmentComponentGraph(ctx, envID, graph); err != nil {
+		t.Fatalf("replace environment component graph: %v", err)
+	}
+	loadedGraph, err := s.GetEnvironmentComponentGraph(ctx, envID)
+	if err != nil {
+		t.Fatalf("get environment component graph: %v", err)
+	}
+	if len(loadedGraph.Components) != 2 || len(loadedGraph.Dependencies) != 1 || len(loadedGraph.Assets) != 1 {
+		t.Fatalf("loaded component graph = %#v", loadedGraph)
+	}
+	if loadedGraph.Dependencies[0].ConsumerComponentID != "service.alpha" || loadedGraph.Dependencies[0].ProviderComponentID != "mysql" || loadedGraph.Dependencies[0].Phase != "startup" {
+		t.Fatalf("loaded component dependency = %#v", loadedGraph.Dependencies[0])
+	}
+	if loadedGraph.Assets[0].OwnerComponentID != "service.alpha" || loadedGraph.Assets[0].TargetComponentID != "mysql" || !jsonEqual(loadedGraph.Assets[0].SummaryJSON, graph.Assets[0].SummaryJSON) {
+		t.Fatalf("loaded component asset = %#v", loadedGraph.Assets[0])
+	}
+}
+
+func contractEnvironmentComponentGraph() store.EnvironmentComponentGraph {
+	return store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
 			{
 				ComponentID:     "mysql",
@@ -323,26 +396,14 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 			},
 		},
 	}
-	if err := s.ReplaceEnvironmentComponentGraph(ctx, env.ID, graph); err != nil {
-		t.Fatalf("replace environment component graph: %v", err)
-	}
-	loadedGraph, err := s.GetEnvironmentComponentGraph(ctx, env.ID)
-	if err != nil {
-		t.Fatalf("get environment component graph: %v", err)
-	}
-	if len(loadedGraph.Components) != 2 || len(loadedGraph.Dependencies) != 1 || len(loadedGraph.Assets) != 1 {
-		t.Fatalf("loaded component graph = %#v", loadedGraph)
-	}
-	if loadedGraph.Dependencies[0].ConsumerComponentID != "service.alpha" || loadedGraph.Dependencies[0].ProviderComponentID != "mysql" || loadedGraph.Dependencies[0].Phase != "startup" {
-		t.Fatalf("loaded component dependency = %#v", loadedGraph.Dependencies[0])
-	}
-	if loadedGraph.Assets[0].OwnerComponentID != "service.alpha" || loadedGraph.Assets[0].TargetComponentID != "mysql" || !jsonEqual(loadedGraph.Assets[0].SummaryJSON, graph.Assets[0].SummaryJSON) {
-		t.Fatalf("loaded component asset = %#v", loadedGraph.Assets[0])
-	}
+}
+
+func requireBaselineGateContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) {
+	t.Helper()
 
 	gate, err := s.UpsertBaselineGate(ctx, store.BaselineGate{
-		ProfileID:   "empty",
-		SubjectID:   "workflow.smoke",
+		ProfileID:   contractProfileID,
+		SubjectID:   contractWorkflowID,
 		Status:      store.StatusPassed,
 		Required:    false,
 		SummaryJSON: `{"reason":"first green run"}`,
@@ -355,16 +416,20 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("baseline gate should have UpdatedAt: %#v", gate)
 	}
 
-	loadedGate, err := s.GetBaselineGate(ctx, "empty", "workflow.smoke")
+	loadedGate, err := s.GetBaselineGate(ctx, contractProfileID, contractWorkflowID)
 	if err != nil {
 		t.Fatalf("get baseline gate: %v", err)
 	}
 	if loadedGate.Status != store.StatusPassed || loadedGate.Required {
 		t.Fatalf("loaded baseline gate = %#v", loadedGate)
 	}
+}
+
+func requireProfileIndexContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) {
+	t.Helper()
 
 	profile, err := s.UpsertProfileIndex(ctx, store.ProfileIndex{
-		ProfileID:    "empty",
+		ProfileID:    contractProfileID,
 		BundlePath:   "/tmp/external-profile-bundles/empty",
 		BundleDigest: "sha256:bundle",
 		SummaryJSON:  `{"workflows":0}`,
@@ -377,16 +442,21 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("profile index should have UpdatedAt: %#v", profile)
 	}
 
-	loadedProfile, err := s.GetProfileIndex(ctx, "empty")
+	loadedProfile, err := s.GetProfileIndex(ctx, contractProfileID)
 	if err != nil {
 		t.Fatalf("get profile index: %v", err)
 	}
 	if loadedProfile.BundlePath != "/tmp/external-profile-bundles/empty" || loadedProfile.BundleDigest != "sha256:bundle" {
 		t.Fatalf("loaded profile index = %#v", loadedProfile)
 	}
+}
+
+func requireConfigVersionContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) store.ConfigVersion {
+	t.Helper()
+
 	version, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
 		ID:           "config.empty.001",
-		ProfileID:    "empty",
+		ProfileID:    contractProfileID,
 		SourcePath:   "/tmp/external-profile-bundles/empty",
 		BundleDigest: "sha256:bundle",
 		SummaryJSON:  `{"services":1}`,
@@ -406,8 +476,14 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if activeVersion.ID != "config.empty.001" || activeVersion.ProfileID != "empty" || activeVersion.BundleDigest != "sha256:bundle" || !activeVersion.Active {
 		t.Fatalf("active config version = %#v", activeVersion)
 	}
+	return activeVersion
+}
+
+func requireReadModelContract(t *testing.T, ctx context.Context, s store.Store, activeVersion store.ConfigVersion, started time.Time) {
+	t.Helper()
+
 	readModel, err := s.UpsertReadModel(ctx, store.ReadModel{
-		ProfileID:       "empty",
+		ProfileID:       contractProfileID,
 		Key:             "interface-nodes",
 		ConfigVersionID: activeVersion.ID,
 		PayloadJSON:     `{"ok":true,"items":[]}`,
@@ -419,61 +495,26 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if readModel.UpdatedAt.IsZero() {
 		t.Fatalf("read model should have UpdatedAt: %#v", readModel)
 	}
-	loadedReadModel, err := s.GetReadModel(ctx, "empty", "interface-nodes")
+	loadedReadModel, err := s.GetReadModel(ctx, contractProfileID, "interface-nodes")
 	if err != nil {
 		t.Fatalf("get read model: %v", err)
 	}
 	if loadedReadModel.ConfigVersionID != activeVersion.ID || !jsonEqual(loadedReadModel.PayloadJSON, `{"ok":true,"items":[]}`) {
 		t.Fatalf("loaded read model = %#v", loadedReadModel)
 	}
+}
 
-	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
-		ProfileID: "empty",
-		IndexedAt: started.Add(3 * time.Minute),
-		Services: []store.CatalogService{
-			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "http", SourcePath: "/tmp/source/service.alpha"},
-		},
-		Workflows: []store.CatalogWorkflow{
-			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
-		},
-		InterfaceNodes: []store.CatalogInterfaceNode{
-			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
-		},
-		APICases: []store.CatalogAPICase{
-			{
-				ID:                   "case.alpha",
-				DisplayName:          "Case Alpha",
-				NodeID:               "node.alpha",
-				CasePath:             "cases/case.alpha.json",
-				SourceKind:           "karate",
-				SourcePath:           "tests/api.feature",
-				ExecutorID:           "executor.karate",
-				BaseURL:              "http://127.0.0.1:18080",
-				EvidenceDir:          ".runtime/cases",
-				TimeoutSeconds:       12,
-				DefaultOverridesJSON: `{"itemId":"item-001"}`,
-			},
-		},
-		RequestTemplates: []store.CatalogRequestTemplate{
-			{ID: "template.alpha", DisplayName: "Template Alpha", NodeID: "node.alpha", TemplateJSON: `{"method":"GET"}`},
-		},
-		WorkflowBindings: []store.CatalogWorkflowBinding{
-			{WorkflowID: "workflow.alpha", StepID: "step.alpha", NodeID: "node.alpha", CaseID: "case.alpha", Required: true},
-		},
-		CaseDependencies: []store.CatalogCaseDependency{
-			{ID: "dependency.alpha", CaseID: "case.alpha", FixtureID: "fixture.alpha", MappingsJSON: `[]`},
-		},
-		Fixtures: []store.CatalogFixture{
-			{ID: "fixture.alpha", DisplayName: "Fixture Alpha", Kind: "json", DataJSON: `{}`},
-		},
-	}); err != nil {
+func requireProfileCatalogContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) {
+	t.Helper()
+
+	if err := s.ReplaceProfileCatalog(ctx, contractProfileCatalog(started)); err != nil {
 		t.Fatalf("replace profile catalog index: %v", err)
 	}
 	catalogIndex, err := s.GetProfileCatalogIndex(ctx)
 	if err != nil {
 		t.Fatalf("get profile catalog index: %v", err)
 	}
-	if catalogIndex.ProfileID != "empty" || catalogIndex.IndexedAt.IsZero() {
+	if catalogIndex.ProfileID != contractProfileID || catalogIndex.IndexedAt.IsZero() {
 		t.Fatalf("profile catalog index identity = %#v", catalogIndex)
 	}
 	if catalogIndex.Counts.Services != 1 || catalogIndex.Counts.Workflows != 1 || catalogIndex.Counts.APICases != 1 || catalogIndex.Counts.Templates != 2 {
@@ -489,8 +530,12 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if len(catalog.APICases) != 1 || catalog.APICases[0].CasePath != "cases/case.alpha.json" || catalog.APICases[0].SourceKind != "karate" || catalog.APICases[0].SourcePath != "tests/api.feature" || catalog.APICases[0].ExecutorID != "executor.karate" || catalog.APICases[0].BaseURL != "http://127.0.0.1:18080" || catalog.APICases[0].EvidenceDir != ".runtime/cases" || catalog.APICases[0].TimeoutSeconds != 12 || catalog.APICases[0].DefaultOverridesJSON != `{"itemId":"item-001"}` {
 		t.Fatalf("profile catalog api case run config = %#v", catalog.APICases)
 	}
+}
 
-	_, err = s.GetRun(ctx, "missing")
+func requireMissingRunError(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
+
+	_, err := s.GetRun(ctx, "missing")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing run error = %v, want ErrNotFound", err)
 	}

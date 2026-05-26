@@ -167,112 +167,161 @@ func catalogServicesFromStore(catalog store.ProfileCatalog) ([]catalogService, [
 }
 
 func catalogWorkflowsFromStore(catalog store.ProfileCatalog, byWorkflow map[string]catalogWorkflowRunState) []catalogWorkflow {
-	bindingsByWorkflow := map[string][]store.CatalogWorkflowBinding{}
-	for _, binding := range catalog.WorkflowBindings {
+	bindingsByWorkflow := catalogWorkflowBindingsByWorkflow(catalog.WorkflowBindings)
+	workflowIDs := catalogWorkflowIDs(catalog.Workflows, bindingsByWorkflow)
+	index := catalogWorkflowStoreIndexFromCatalog(catalog)
+	workflows := make([]catalogWorkflow, 0, len(workflowIDs))
+	for _, workflowID := range workflowIDs {
+		workflows = append(workflows, catalogWorkflowFromStore(workflowID, catalog, index, bindingsByWorkflow[workflowID], byWorkflow[workflowID]))
+	}
+	return workflows
+}
+
+type catalogWorkflowStoreIndex struct {
+	workflows          map[string]store.CatalogWorkflow
+	nodes              map[string]store.CatalogInterfaceNode
+	cases              map[string]store.CatalogAPICase
+	workflowConfigs    map[string]store.CatalogTemplateConfig
+	stepConfigsByScope map[string]map[string]store.CatalogTemplateConfig
+}
+
+func catalogWorkflowBindingsByWorkflow(bindings []store.CatalogWorkflowBinding) map[string][]store.CatalogWorkflowBinding {
+	byWorkflow := map[string][]store.CatalogWorkflowBinding{}
+	for _, binding := range bindings {
 		if binding.WorkflowID == "" {
 			continue
 		}
-		bindingsByWorkflow[binding.WorkflowID] = append(bindingsByWorkflow[binding.WorkflowID], binding)
+		byWorkflow[binding.WorkflowID] = append(byWorkflow[binding.WorkflowID], binding)
 	}
-	for workflowID := range bindingsByWorkflow {
-		sort.SliceStable(bindingsByWorkflow[workflowID], func(i int, j int) bool {
-			left := bindingsByWorkflow[workflowID][i]
-			right := bindingsByWorkflow[workflowID][j]
+	for workflowID := range byWorkflow {
+		sort.SliceStable(byWorkflow[workflowID], func(i int, j int) bool {
+			left := byWorkflow[workflowID][i]
+			right := byWorkflow[workflowID][j]
 			if left.SortOrder != right.SortOrder {
 				return left.SortOrder < right.SortOrder
 			}
 			return left.StepID < right.StepID
 		})
 	}
+	return byWorkflow
+}
 
-	workflowIDs := make([]string, 0, len(bindingsByWorkflow))
+func catalogWorkflowIDs(workflows []store.CatalogWorkflow, bindingsByWorkflow map[string][]store.CatalogWorkflowBinding) []string {
+	ids := make([]string, 0, len(bindingsByWorkflow))
 	if len(bindingsByWorkflow) > 0 {
 		for workflowID := range bindingsByWorkflow {
-			workflowIDs = append(workflowIDs, workflowID)
+			ids = append(ids, workflowID)
 		}
 	} else {
-		for _, workflow := range catalog.Workflows {
+		for _, workflow := range workflows {
 			if workflow.ID != "" {
-				workflowIDs = append(workflowIDs, workflow.ID)
+				ids = append(ids, workflow.ID)
 			}
 		}
 	}
-	sort.Strings(workflowIDs)
+	sort.Strings(ids)
+	return ids
+}
 
-	workflowByID := map[string]store.CatalogWorkflow{}
-	for _, workflow := range catalog.Workflows {
-		workflowByID[workflow.ID] = workflow
+func catalogWorkflowStoreIndexFromCatalog(catalog store.ProfileCatalog) catalogWorkflowStoreIndex {
+	return catalogWorkflowStoreIndex{
+		workflows:          catalogWorkflowByID(catalog.Workflows),
+		nodes:              catalogInterfaceNodeByID(catalog.InterfaceNodes),
+		cases:              catalogAPICaseByID(catalog.APICases),
+		workflowConfigs:    workflowTemplateConfigs(catalog.TemplateConfigs),
+		stepConfigsByScope: stepTemplateConfigs(catalog.TemplateConfigs),
 	}
-	nodeByID := map[string]store.CatalogInterfaceNode{}
-	for _, node := range catalog.InterfaceNodes {
-		nodeByID[node.ID] = node
-	}
-	caseByID := map[string]store.CatalogAPICase{}
-	for _, item := range catalog.APICases {
-		caseByID[item.ID] = item
-	}
-	workflowConfigByID := workflowTemplateConfigs(catalog.TemplateConfigs)
-	stepConfigByWorkflow := stepTemplateConfigs(catalog.TemplateConfigs)
+}
 
-	workflows := make([]catalogWorkflow, 0, len(workflowIDs))
-	for _, workflowID := range workflowIDs {
-		workflow := workflowByID[workflowID]
-		workflowConfig := workflowConfigByID[workflowID]
-		stepConfigByID := stepConfigByWorkflow[workflowID]
-		steps := make([]catalogWorkflowStep, 0, len(bindingsByWorkflow[workflowID]))
-		services := map[string]bool{}
-		for _, binding := range bindingsByWorkflow[workflowID] {
-			node := nodeByID[binding.NodeID]
-			item := caseByID[binding.CaseID]
-			stepConfig := stepConfigByID[binding.StepID]
-			stepConfigJSON := jsonObject(stepConfig.ConfigJSON)
-			stepID := firstNonEmpty(binding.StepID, binding.NodeID, binding.CaseID)
-			serviceID := firstNonEmpty(valueString(stepConfigJSON["serviceId"]), stepConfig.NodeID, node.ServiceID)
-			if serviceID != "" {
-				services[serviceID] = true
-			}
-			steps = append(steps, catalogWorkflowStep{
-				ID:                 stepID,
-				DisplayName:        firstNonEmpty(stepConfig.Title, item.DisplayName, node.DisplayName, binding.StepID),
-				ServiceID:          serviceID,
-				CaseID:             firstNonEmpty(binding.CaseID, valueString(stepConfigJSON["caseId"])),
-				Action:             firstNonEmpty(valueString(stepConfigJSON["action"]), item.CaseType, node.Operation, item.DisplayName),
-				Required:           binding.Required,
-				Executable:         true,
-				EvidenceKinds:      stringListFromAny(stepConfigJSON["evidenceKinds"]),
-				RelatedMockTargets: stringListFromAny(stepConfigJSON["relatedMockTargets"]),
-				Inputs:             mapListFromAny(stepConfigJSON["inputs"]),
-				Exports:            mapListFromAny(stepConfigJSON["exports"]),
-				TimeoutMs:          node.TimeoutMs,
-				Presentation:       catalogStepPresentationForStore(stepConfigByID, stepID),
-			})
+func catalogWorkflowFromStore(workflowID string, catalog store.ProfileCatalog, index catalogWorkflowStoreIndex, bindings []store.CatalogWorkflowBinding, state catalogWorkflowRunState) catalogWorkflow {
+	workflow := index.workflows[workflowID]
+	workflowConfig := index.workflowConfigs[workflowID]
+	workflowConfigJSON := jsonObject(workflowConfig.ConfigJSON)
+	steps, serviceCount := catalogWorkflowStepsFromStore(bindings, index)
+	baseStepTimeoutMs := firstPositiveInt(intValue(workflowConfigJSON["baseStepTimeoutMs"]), workflow.BaseStepTimeoutMs)
+	timeoutOffsetMs := firstPositiveInt(intValue(workflowConfigJSON["timeoutOffsetMs"]), workflow.TimeoutOffsetMs)
+	title := firstNonEmpty(workflowConfig.Title, workflow.DisplayName, workflowID)
+	return catalogWorkflow{
+		ID:                workflowID,
+		DisplayName:       title,
+		Description:       firstNonEmpty(workflowConfig.Description, workflow.Description),
+		Entrypoint:        "/workflow-detail.html?id=" + url.QueryEscape(workflowID),
+		BaseStepTimeoutMs: baseStepTimeoutMs,
+		TimeoutOffsetMs:   timeoutOffsetMs,
+		TimeoutMs:         workflowBudgetMs(baseStepTimeoutMs, timeoutOffsetMs, steps),
+		Steps:             steps,
+		StepCount:         len(steps),
+		CaseCount:         workflowCaseCount(steps),
+		ServiceCount:      serviceCount,
+		Graph:             catalogGraphFromTemplateConfigs(catalog.TemplateConfigs),
+		Observability: catalogWorkflowObservability{
+			Panels: defaultWorkflowObservabilityPanels(),
+		},
+		Presentation: catalogWorkflowPresentationForStore(title, steps, stringMapFromAny(workflowConfigJSON["copy"])),
+		RunCount:     state.Count,
+		LatestRun:    catalogWorkflowLatestRun(state, len(steps)),
+	}
+}
+
+func catalogWorkflowStepsFromStore(bindings []store.CatalogWorkflowBinding, index catalogWorkflowStoreIndex) ([]catalogWorkflowStep, int) {
+	steps := make([]catalogWorkflowStep, 0, len(bindings))
+	services := map[string]bool{}
+	for _, binding := range bindings {
+		step := catalogWorkflowStepFromStore(binding, index)
+		if step.ServiceID != "" {
+			services[step.ServiceID] = true
 		}
-		workflowConfigJSON := jsonObject(workflowConfig.ConfigJSON)
-		baseStepTimeoutMs := firstPositiveInt(intValue(workflowConfigJSON["baseStepTimeoutMs"]), workflow.BaseStepTimeoutMs)
-		timeoutOffsetMs := firstPositiveInt(intValue(workflowConfigJSON["timeoutOffsetMs"]), workflow.TimeoutOffsetMs)
-		state := byWorkflow[workflowID]
-		workflows = append(workflows, catalogWorkflow{
-			ID:                workflowID,
-			DisplayName:       firstNonEmpty(workflowConfig.Title, workflow.DisplayName, workflowID),
-			Description:       firstNonEmpty(workflowConfig.Description, workflow.Description),
-			Entrypoint:        "/workflow-detail.html?id=" + url.QueryEscape(workflowID),
-			BaseStepTimeoutMs: baseStepTimeoutMs,
-			TimeoutOffsetMs:   timeoutOffsetMs,
-			TimeoutMs:         workflowBudgetMs(baseStepTimeoutMs, timeoutOffsetMs, steps),
-			Steps:             steps,
-			StepCount:         len(steps),
-			CaseCount:         workflowCaseCount(steps),
-			ServiceCount:      len(services),
-			Graph:             catalogGraphFromTemplateConfigs(catalog.TemplateConfigs),
-			Observability: catalogWorkflowObservability{
-				Panels: defaultWorkflowObservabilityPanels(),
-			},
-			Presentation: catalogWorkflowPresentationForStore(firstNonEmpty(workflowConfig.Title, workflow.DisplayName, workflowID), steps, stringMapFromAny(workflowConfigJSON["copy"])),
-			RunCount:     state.Count,
-			LatestRun:    catalogWorkflowLatestRun(state, len(steps)),
-		})
+		steps = append(steps, step)
 	}
-	return workflows
+	return steps, len(services)
+}
+
+func catalogWorkflowStepFromStore(binding store.CatalogWorkflowBinding, index catalogWorkflowStoreIndex) catalogWorkflowStep {
+	node := index.nodes[binding.NodeID]
+	item := index.cases[binding.CaseID]
+	stepConfigByID := index.stepConfigsByScope[binding.WorkflowID]
+	stepConfig := stepConfigByID[binding.StepID]
+	stepConfigJSON := jsonObject(stepConfig.ConfigJSON)
+	stepID := firstNonEmpty(binding.StepID, binding.NodeID, binding.CaseID)
+	return catalogWorkflowStep{
+		ID:                 stepID,
+		DisplayName:        firstNonEmpty(stepConfig.Title, item.DisplayName, node.DisplayName, binding.StepID),
+		ServiceID:          firstNonEmpty(valueString(stepConfigJSON["serviceId"]), stepConfig.NodeID, node.ServiceID),
+		CaseID:             firstNonEmpty(binding.CaseID, valueString(stepConfigJSON["caseId"])),
+		Action:             firstNonEmpty(valueString(stepConfigJSON["action"]), item.CaseType, node.Operation, item.DisplayName),
+		Required:           binding.Required,
+		Executable:         true,
+		EvidenceKinds:      stringListFromAny(stepConfigJSON["evidenceKinds"]),
+		RelatedMockTargets: stringListFromAny(stepConfigJSON["relatedMockTargets"]),
+		Inputs:             mapListFromAny(stepConfigJSON["inputs"]),
+		Exports:            mapListFromAny(stepConfigJSON["exports"]),
+		TimeoutMs:          node.TimeoutMs,
+		Presentation:       catalogStepPresentationForStore(stepConfigByID, stepID),
+	}
+}
+
+func catalogWorkflowByID(workflows []store.CatalogWorkflow) map[string]store.CatalogWorkflow {
+	out := map[string]store.CatalogWorkflow{}
+	for _, workflow := range workflows {
+		out[workflow.ID] = workflow
+	}
+	return out
+}
+
+func catalogInterfaceNodeByID(nodes []store.CatalogInterfaceNode) map[string]store.CatalogInterfaceNode {
+	out := map[string]store.CatalogInterfaceNode{}
+	for _, node := range nodes {
+		out[node.ID] = node
+	}
+	return out
+}
+
+func catalogAPICaseByID(cases []store.CatalogAPICase) map[string]store.CatalogAPICase {
+	out := map[string]store.CatalogAPICase{}
+	for _, item := range cases {
+		out[item.ID] = item
+	}
+	return out
 }
 
 func workflowBudgetMs(baseStepTimeoutMs int, timeoutOffsetMs int, steps []catalogWorkflowStep) int {

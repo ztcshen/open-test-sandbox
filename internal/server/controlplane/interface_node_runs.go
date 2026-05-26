@@ -416,7 +416,7 @@ func interfaceNodeRunItem(run store.Run, item store.APICaseRun, topologies []sto
 		"updatedAt":      latestTime(item.CreatedAt, run.UpdatedAt, run.CreatedAt),
 	}
 	if topology := storedTraceTopologyEvidence(item.CaseID, topologies); len(topology) > 0 {
-		payload["topology"] = topology
+		payload[topologyPayloadField] = topology
 	}
 	evaluation := evaluateRuntimeTimeout(elapsedMs, timeoutMs)
 	applyTimeoutFailure(payload, evaluation)

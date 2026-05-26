@@ -68,7 +68,7 @@ func CollectTraceTopologyPayload(ctx context.Context, runtime store.Store, colle
 	summary["requestId"] = row.RequestID
 	summary["topologyStatus"] = topology.Status
 	summary["spanCount"] = topology.SpanCount
-	return map[string]any{"ok": true, "traceTopology": traceTopologyPayload(row), "topology": topology}, nil
+	return map[string]any{"ok": true, "traceTopology": traceTopologyPayload(row), topologyPayloadField: topology}, nil
 }
 
 func traceTopologyCollectTaskSeed(ctx context.Context, runtime store.Store, payload map[string]any) store.PostProcessTask {

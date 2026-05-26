@@ -307,132 +307,23 @@ func TestServerBatchRunAppliesWorkflowStepExportsAsOverrides(t *testing.T) {
 
 func TestServerStartsEnvironmentAcceptanceRunWithHealthSummary(t *testing.T) {
 	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
+	s := openAcceptanceRouteStore(t, ctx)
 	defer s.Close()
 
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Request-Id", "request.env.acceptance")
-		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"ready":true}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	}))
+	target := newEnvironmentAcceptanceTarget(t)
 	defer target.Close()
-
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload struct {
-			Query string `json:"query"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode provider request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.Contains(payload.Query, "queryBasicTraces"):
-			_, _ = w.Write([]byte(`{"data":{"queryBasicTraces":{"traces":[{"endpointNames":["GET:/v1/env-acceptance"],"duration":80,"start":"2026-05-20 0320","isError":false,"traceIds":["trace.env.acceptance"]}]}}}`))
-		case strings.Contains(payload.Query, "queryTrace"):
-			_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[{"traceId":"trace.env.acceptance","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/v1/env-acceptance","type":"Entry","component":"Tomcat"},{"traceId":"trace.env.acceptance","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.env.acceptance","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"GET:/v1/env-acceptance","type":"Entry","component":"Server"}]}}}`))
-		default:
-			t.Fatalf("unexpected provider query: %s", payload.Query)
-		}
-	}))
+	provider := newEnvironmentAcceptanceTraceProvider(t)
 	defer provider.Close()
 
-	dir := t.TempDir()
-	casePath := filepath.Join(dir, "case-env-acceptance.json")
-	if err := os.WriteFile(casePath, []byte(`{
-  "id": "case.env.acceptance",
-  "title": "Environment Acceptance Step",
-  "request": {"method": "GET", "path": "/v1/env-acceptance"},
-  "assertions": {"expectedStatusCodes": [200], "responseContains": ["ok"]}
-}`), 0o644); err != nil {
-		t.Fatalf("write api case: %v", err)
-	}
-	bundle := profile.Bundle{
-		ID:             "sample",
-		Workflows:      []profile.Workflow{{ID: "workflow.env.acceptance"}},
-		InterfaceNodes: []profile.InterfaceNode{{ID: "node.env.acceptance"}},
-		APICases: []profile.APICase{{
-			ID:          "case.env.acceptance",
-			NodeID:      "node.env.acceptance",
-			CasePath:    casePath,
-			BaseURL:     target.URL,
-			EvidenceDir: filepath.Join(dir, "evidence"),
-		}},
-		WorkflowBindings: []profile.WorkflowBinding{{
-			WorkflowID: "workflow.env.acceptance",
-			StepID:     "step.env.acceptance",
-			NodeID:     "node.env.acceptance",
-			CaseID:     "case.env.acceptance",
-			Required:   true,
-			SortOrder:  1,
-		}},
-	}
+	bundle := environmentAcceptanceBundle(t, target.URL)
 	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s, TraceGraphQLURL: provider.URL}))
 	defer server.Close()
 
-	registered := postJSONResponse(t, server.URL+"/api/environments", `{
-  "id": "env.acceptance",
-  "verificationWorkflowId": "workflow.env.acceptance"
-}`, http.StatusOK)
-	if registered["ok"] != true {
-		t.Fatalf("register environment = %#v", registered)
-	}
-	if err := s.ReplaceEnvironmentComponentGraph(ctx, "env.acceptance", store.EnvironmentComponentGraph{
-		Components: []store.EnvironmentComponent{
-			{
-				ComponentID:     "service.gateway",
-				Kind:            "app",
-				Role:            "business-service",
-				ComposeService:  "service-gateway",
-				Required:        true,
-				HealthCheckJSON: fmt.Sprintf(`{"kind":"url","url":%q}`, target.URL+"/health"),
-			},
-		},
-	}); err != nil {
-		t.Fatalf("replace component graph: %v", err)
-	}
-
-	started := postJSONResponse(t, server.URL+"/api/environments/env.acceptance/acceptance-runs", `{"requestId":"env-acceptance-001"}`, http.StatusAccepted)
-	reportURL := fmt.Sprint(started["reportUrl"])
-	if started["environmentId"] != "env.acceptance" || started["workflowId"] != "workflow.env.acceptance" || reportURL == "" {
-		t.Fatalf("environment acceptance start = %#v", started)
-	}
+	registerEnvironmentAcceptance(t, server.URL)
+	replaceEnvironmentAcceptanceGraph(t, ctx, s, target.URL)
+	reportURL := startEnvironmentAcceptanceRun(t, server.URL)
 	report := waitAPICaseBatchReport(t, server.URL+reportURL)
-	if !report.Acceptance.OK || report.Acceptance.HealthSummary.Total != 1 || report.Acceptance.HealthSummary.Passed != 1 || len(report.Acceptance.NodeHealth) != 1 || !report.Acceptance.NodeHealth[0].OK {
-		t.Fatalf("environment acceptance health summary = %#v", report.Acceptance)
-	}
-	env, err := s.GetEnvironment(ctx, "env.acceptance")
-	if err != nil {
-		t.Fatalf("get environment after acceptance: %v", err)
-	}
-	if env.Status != "verified-ready" || env.LastVerificationRunID != report.BatchRunID || env.LastVerificationStatus != store.StatusPassed || !env.EvidenceComplete || !env.TopologyComplete {
-		t.Fatalf("environment after acceptance = %#v", env)
-	}
-	batchRun, err := s.GetRun(ctx, report.BatchRunID)
-	if err != nil {
-		t.Fatalf("get batch run after acceptance: %v", err)
-	}
-	if batchRun.EnvironmentID != "env.acceptance" {
-		t.Fatalf("batch run environment id = %#v", batchRun)
-	}
-	topologies, err := s.ListTraceTopologies(ctx, report.BatchRunID)
-	if err != nil {
-		t.Fatalf("list batch topology: %v", err)
-	}
-	if len(topologies) != 1 || topologies[0].WorkflowRunID != report.BatchRunID || topologies[0].StepID != "step.env.acceptance" {
-		t.Fatalf("batch topology copies = %#v", topologies)
-	}
-
-	restarted := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s}))
-	defer restarted.Close()
-	persisted := decodeJSONResponse(t, restarted.URL+reportURL, http.StatusOK)
-	if persisted["environmentId"] != "env.acceptance" || persisted["batchRunId"] != report.BatchRunID {
-		t.Fatalf("persisted environment acceptance report = %#v", persisted)
-	}
+	requireEnvironmentAcceptanceHealth(t, report)
+	requireEnvironmentAcceptanceStoreState(t, ctx, s, report)
+	requirePersistedEnvironmentAcceptanceReport(t, bundle, s, reportURL, report.BatchRunID)
 }

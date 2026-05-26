@@ -146,121 +146,21 @@ func TestServerExposesCaseRunFailureCategoriesFromProfile(t *testing.T) {
 
 func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
+	s := openCaseEvidenceSQLiteStore(t, ctx)
 	defer s.Close()
-
-	_, err = s.CreateRun(ctx, store.Run{
-		ID:           "run.alpha",
-		ProfileID:    "sample",
-		Status:       store.StatusPassed,
-		EvidenceRoot: ".runtime/evidence/run.alpha",
-		SummaryJSON:  "{}",
-	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
-		ID:                   "run.alpha.case",
-		RunID:                "run.alpha",
-		CaseID:               "case.alpha",
-		Status:               store.StatusPassed,
-		RequestSummaryJSON:   `{"method":"POST","path":"/alpha","hasBody":true}`,
-		AssertionSummaryJSON: `{"status":"passed","errorCount":0}`,
-	})
-	if err != nil {
-		t.Fatalf("record api case run: %v", err)
-	}
-	evidenceDir := t.TempDir()
-	requestPath := filepath.Join(evidenceDir, "request.json")
-	if err := os.WriteFile(requestPath, []byte(`{"method":"POST","path":"/alpha?token=query-secret","headers":{"Content-Type":"application/json","Authorization":"Bearer request-secret"},"body":{"id":"item-001","token":"request-token"}}`), 0o644); err != nil {
-		t.Fatalf("write request evidence: %v", err)
-	}
-	responsePath := filepath.Join(evidenceDir, "response.json")
-	if err := os.WriteFile(responsePath, []byte(`{"statusCode":200,"headers":{"Content-Type":"application/json","Set-Cookie":"session=response-cookie"},"body":"{\"ok\":true,\"password\":\"response-secret\"}"}`), 0o644); err != nil {
-		t.Fatalf("write response evidence: %v", err)
-	}
-	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
-		ID:         "run.alpha.request",
-		RunID:      "run.alpha",
-		CaseRunID:  "run.alpha.case",
-		StepID:     "step.alpha",
-		Kind:       "request",
-		URI:        requestPath,
-		MediaType:  "application/json",
-		SHA256:     "sha256-request",
-		SizeBytes:  128,
-		Summary:    `{"method":"POST","path":"/alpha","hasBody":true}`,
-		Category:   "http-exchange",
-		Visibility: "public",
-		LabelsJSON: `{"kind":"request","owner":"qa"}`,
-	})
-	if err != nil {
-		t.Fatalf("record request evidence: %v", err)
-	}
-	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
-		ID:        "run.alpha.response",
-		RunID:     "run.alpha",
-		CaseRunID: "run.alpha.case",
-		Kind:      "response",
-		URI:       responsePath,
-		MediaType: "application/json",
-		Summary:   `{"statusCode":200,"bodyBytes":19}`,
-	})
-	if err != nil {
-		t.Fatalf("record evidence: %v", err)
-	}
+	paths := seedStoredCaseEvidence(t, ctx, s)
 
 	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
 	defer server.Close()
 
 	payload := decodeJSONResponse(t, server.URL+"/api/case/evidence?runId=run.alpha&caseId=case.alpha", http.StatusOK)
 	evidence := payload["evidence"].(map[string]any)
-	summary := evidence["summary"].(map[string]any)
 	request := evidence["request"].(map[string]any)
 	response := evidence["response"].(map[string]any)
-	assertions := evidence["assertions"].(map[string]any)
-	if summary["case_id"] != "case.alpha" || request["method"] != "POST" || request["path"] != "/alpha?token=%5BREDACTED%5D" {
-		t.Fatalf("case evidence request = %#v", payload)
-	}
-	requestBody := request["body"].(map[string]any)
-	if requestBody["id"] != "item-001" {
-		t.Fatalf("case evidence request body = %#v", request)
-	}
-	redactedRequest, _ := json.Marshal(request)
-	for _, leaked := range []string{"query-secret", "request-secret", "request-token"} {
-		if strings.Contains(string(redactedRequest), leaked) {
-			t.Fatalf("case evidence request leaked %q: %s", leaked, redactedRequest)
-		}
-	}
-	if !strings.Contains(string(redactedRequest), "[REDACTED]") {
-		t.Fatalf("case evidence request was not redacted: %s", redactedRequest)
-	}
-	if response["http_code"] != float64(200) || assertions["status"] != "passed" {
-		t.Fatalf("case evidence response/assertions = %#v", payload)
-	}
-	redactedResponse, _ := json.Marshal(response)
-	for _, leaked := range []string{"response-secret", "response-cookie"} {
-		if strings.Contains(string(redactedResponse), leaked) {
-			t.Fatalf("case evidence response leaked %q: %s", leaked, redactedResponse)
-		}
-	}
-	if !strings.Contains(fmt.Sprint(response["body"]), "[REDACTED]") {
-		t.Fatalf("case evidence response body = %#v", response)
-	}
-	attachment := request["attachment"].(map[string]any)
-	labels := attachment["labels"].(map[string]any)
-	if attachment["category"] != "http-exchange" || attachment["visibility"] != "public" || labels["owner"] != "qa" {
-		t.Fatalf("case evidence attachment metadata = %#v", request)
-	}
-	if attachment["id"] != "run.alpha.request" || attachment["runId"] != "run.alpha" || attachment["caseRunId"] != "run.alpha.case" || attachment["stepId"] != "step.alpha" || attachment["kind"] != "request" {
-		t.Fatalf("case evidence attachment identity = %#v", attachment)
-	}
-	if attachment["uri"] != requestPath || attachment["mediaType"] != "application/json" || attachment["sha256"] != "sha256-request" || attachment["sizeBytes"] != float64(128) {
-		t.Fatalf("case evidence attachment file metadata = %#v", attachment)
-	}
+	requireStoredCaseEvidenceSummary(t, evidence, request)
+	requireStoredCaseEvidenceRedactedRequest(t, request)
+	requireStoredCaseEvidenceRedactedResponse(t, evidence, response)
+	requireStoredCaseEvidenceAttachment(t, request, paths.requestPath)
 }
 
 func TestServerExposesFailedCaseRunEvidenceByCaseRunID(t *testing.T) {
@@ -359,48 +259,192 @@ func TestServerExposesFailedCaseRunEvidenceByCaseRunID(t *testing.T) {
 
 func TestServerExposesCaseEvidenceDependenciesWithoutInventingTopology(t *testing.T) {
 	ctx := context.Background()
+	s := openCaseEvidenceSQLiteStore(t, ctx)
+	defer s.Close()
+
+	seedCaseEvidenceDependencyCatalog(t, ctx, s)
+	seedCaseEvidenceDependencyRun(t, ctx, s)
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/evidence?runId=run.alpha&caseId=case.step.three", http.StatusOK)
+	evidence := payload["evidence"].(map[string]any)
+	fixture := evidence["fixture"].(map[string]any)
+	requireCaseEvidenceFixtureDependency(t, fixture)
+	requireCaseEvidenceNoInventedTopology(t, evidence)
+}
+
+type storedCaseEvidencePaths struct {
+	requestPath string
+}
+
+func openCaseEvidenceSQLiteStore(t *testing.T, ctx context.Context) *sqlite.Store {
+	t.Helper()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
-	defer s.Close()
+	return s
+}
 
+func seedStoredCaseEvidence(t *testing.T, ctx context.Context, s store.Store) storedCaseEvidencePaths {
+	t.Helper()
+	createCaseEvidenceRun(t, ctx, s)
+	paths := writeCaseEvidenceFiles(t)
+	recordCaseEvidenceRows(t, ctx, s, paths)
+	return paths
+}
+
+func createCaseEvidenceRun(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
+	if _, err := s.CreateRun(ctx, store.Run{ID: "run.alpha", ProfileID: "sample", Status: store.StatusPassed, EvidenceRoot: ".runtime/evidence/run.alpha", SummaryJSON: "{}"}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   "run.alpha.case",
+		RunID:                "run.alpha",
+		CaseID:               "case.alpha",
+		Status:               store.StatusPassed,
+		RequestSummaryJSON:   `{"method":"POST","path":"/alpha","hasBody":true}`,
+		AssertionSummaryJSON: `{"status":"passed","errorCount":0}`,
+	}); err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+}
+
+func writeCaseEvidenceFiles(t *testing.T) storedCaseEvidencePaths {
+	t.Helper()
+	evidenceDir := t.TempDir()
+	requestPath := filepath.Join(evidenceDir, "request.json")
+	if err := os.WriteFile(requestPath, []byte(`{"method":"POST","path":"/alpha?token=query-secret","headers":{"Content-Type":"application/json","Authorization":"Bearer request-secret"},"body":{"id":"item-001","token":"request-token"}}`), 0o644); err != nil {
+		t.Fatalf("write request evidence: %v", err)
+	}
+	responsePath := filepath.Join(evidenceDir, "response.json")
+	if err := os.WriteFile(responsePath, []byte(`{"statusCode":200,"headers":{"Content-Type":"application/json","Set-Cookie":"session=response-cookie"},"body":"{\"ok\":true,\"password\":\"response-secret\"}"}`), 0o644); err != nil {
+		t.Fatalf("write response evidence: %v", err)
+	}
+	return storedCaseEvidencePaths{requestPath: requestPath}
+}
+
+func recordCaseEvidenceRows(t *testing.T, ctx context.Context, s store.Store, paths storedCaseEvidencePaths) {
+	t.Helper()
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID: "run.alpha.request", RunID: "run.alpha", CaseRunID: "run.alpha.case", StepID: "step.alpha",
+		Kind: "request", URI: paths.requestPath, MediaType: "application/json", SHA256: "sha256-request", SizeBytes: 128,
+		Summary: `{"method":"POST","path":"/alpha","hasBody":true}`, Category: "http-exchange", Visibility: "public", LabelsJSON: `{"kind":"request","owner":"qa"}`,
+	}); err != nil {
+		t.Fatalf("record request evidence: %v", err)
+	}
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{ID: "run.alpha.response", RunID: "run.alpha", CaseRunID: "run.alpha.case", Kind: "response", URI: filepath.Join(filepath.Dir(paths.requestPath), "response.json"), MediaType: "application/json", Summary: `{"statusCode":200,"bodyBytes":19}`}); err != nil {
+		t.Fatalf("record evidence: %v", err)
+	}
+}
+
+func requireStoredCaseEvidenceSummary(t *testing.T, evidence map[string]any, request map[string]any) {
+	t.Helper()
+	summary := evidence["summary"].(map[string]any)
+	if summary["case_id"] != "case.alpha" || request["method"] != "POST" || request["path"] != "/alpha?token=%5BREDACTED%5D" {
+		t.Fatalf("case evidence request = %#v", evidence)
+	}
+	requestBody := request["body"].(map[string]any)
+	if requestBody["id"] != "item-001" {
+		t.Fatalf("case evidence request body = %#v", request)
+	}
+}
+
+func requireStoredCaseEvidenceRedactedRequest(t *testing.T, request map[string]any) {
+	t.Helper()
+	redactedRequest, _ := json.Marshal(request)
+	for _, leaked := range []string{"query-secret", "request-secret", "request-token"} {
+		if strings.Contains(string(redactedRequest), leaked) {
+			t.Fatalf("case evidence request leaked %q: %s", leaked, redactedRequest)
+		}
+	}
+	if !strings.Contains(string(redactedRequest), "[REDACTED]") {
+		t.Fatalf("case evidence request was not redacted: %s", redactedRequest)
+	}
+}
+
+func requireStoredCaseEvidenceRedactedResponse(t *testing.T, evidence map[string]any, response map[string]any) {
+	t.Helper()
+	assertions := evidence["assertions"].(map[string]any)
+	if response["http_code"] != float64(200) || assertions["status"] != "passed" {
+		t.Fatalf("case evidence response/assertions = %#v", evidence)
+	}
+	redactedResponse, _ := json.Marshal(response)
+	for _, leaked := range []string{"response-secret", "response-cookie"} {
+		if strings.Contains(string(redactedResponse), leaked) {
+			t.Fatalf("case evidence response leaked %q: %s", leaked, redactedResponse)
+		}
+	}
+	if !strings.Contains(fmt.Sprint(response["body"]), "[REDACTED]") {
+		t.Fatalf("case evidence response body = %#v", response)
+	}
+}
+
+func requireStoredCaseEvidenceAttachment(t *testing.T, request map[string]any, requestPath string) {
+	t.Helper()
+	attachment := request["attachment"].(map[string]any)
+	labels := attachment["labels"].(map[string]any)
+	if attachment["category"] != "http-exchange" || attachment["visibility"] != "public" || labels["owner"] != "qa" {
+		t.Fatalf("case evidence attachment metadata = %#v", request)
+	}
+	if attachment["id"] != "run.alpha.request" || attachment["runId"] != "run.alpha" || attachment["caseRunId"] != "run.alpha.case" || attachment["stepId"] != "step.alpha" || attachment["kind"] != "request" {
+		t.Fatalf("case evidence attachment identity = %#v", attachment)
+	}
+	if attachment["uri"] != requestPath || attachment["mediaType"] != "application/json" || attachment["sha256"] != "sha256-request" || attachment["sizeBytes"] != float64(128) {
+		t.Fatalf("case evidence attachment file metadata = %#v", attachment)
+	}
+}
+
+func seedCaseEvidenceDependencyCatalog(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
 	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
-		ProfileID: "sample",
-		IndexedAt: time.Now().UTC(),
-		Workflows: []store.CatalogWorkflow{
-			{ID: "workflow.alpha", DisplayName: "Alpha workflow"},
-		},
-		Services: []store.CatalogService{
-			{ID: "service.one", DisplayName: "One", Kind: "app"},
-			{ID: "service.two", DisplayName: "Two", Kind: "app"},
-			{ID: "service.three", DisplayName: "Three", Kind: "app"},
-		},
-		InterfaceNodes: []store.CatalogInterfaceNode{
-			{ID: "node.one", DisplayName: "Node One", ServiceID: "service.one", Status: "active", SortOrder: 1},
-			{ID: "node.two", DisplayName: "Node Two", ServiceID: "service.two", Status: "active", SortOrder: 2},
-			{ID: "node.three", DisplayName: "Node Three", ServiceID: "service.three", Status: "active", SortOrder: 3},
-		},
-		APICases: []store.CatalogAPICase{
-			{ID: "case.step.one", DisplayName: "Step One", NodeID: "node.one", RequiredForAdmission: true, Status: "active", SortOrder: 1},
-			{ID: "case.step.two.config", DisplayName: "Step Two", NodeID: "node.two", RequiredForAdmission: true, Status: "active", SortOrder: 2},
-			{ID: "case.step.three", DisplayName: "Step Three", NodeID: "node.three", RequiredForAdmission: true, Status: "active", SortOrder: 3},
-		},
+		ProfileID: "sample", IndexedAt: time.Now().UTC(),
+		Workflows:      []store.CatalogWorkflow{{ID: "workflow.alpha", DisplayName: "Alpha workflow"}},
+		Services:       caseEvidenceDependencyServices(),
+		InterfaceNodes: caseEvidenceDependencyNodes(),
+		APICases:       caseEvidenceDependencyCases(),
 		WorkflowBindings: []store.CatalogWorkflowBinding{
 			{WorkflowID: "workflow.alpha", StepID: "step.one", NodeID: "node.one", CaseID: "case.step.one", Required: true, SortOrder: 1},
 			{WorkflowID: "workflow.alpha", StepID: "step.two", NodeID: "node.two", CaseID: "case.step.two.config", Required: true, SortOrder: 2},
 			{WorkflowID: "workflow.alpha", StepID: "step.three", NodeID: "node.three", CaseID: "case.step.three", Required: true, SortOrder: 3},
 		},
-		Fixtures: []store.CatalogFixture{
-			{ID: "fixture.after.second", DisplayName: "After second", Kind: "workflow_prefix", SourceWorkflowID: "workflow.alpha", SourceUntilStep: "step.two", Status: "active", SortOrder: 1},
-		},
-		CaseDependencies: []store.CatalogCaseDependency{
-			{ID: "dependency.step.three", CaseID: "case.step.three", FixtureID: "fixture.after.second", Required: true, MappingsJSON: `[{"from":"$.exports.item_id","to":"$.request.item_id"}]`, Status: "active", SortOrder: 1},
-		},
+		Fixtures:         []store.CatalogFixture{{ID: "fixture.after.second", DisplayName: "After second", Kind: "workflow_prefix", SourceWorkflowID: "workflow.alpha", SourceUntilStep: "step.two", Status: "active", SortOrder: 1}},
+		CaseDependencies: []store.CatalogCaseDependency{{ID: "dependency.step.three", CaseID: "case.step.three", FixtureID: "fixture.after.second", Required: true, MappingsJSON: `[{"from":"$.exports.item_id","to":"$.request.item_id"}]`, Status: "active", SortOrder: 1}},
 	}); err != nil {
 		t.Fatalf("replace profile catalog: %v", err)
 	}
-	_, err = s.CreateRun(ctx, store.Run{
+}
+
+func caseEvidenceDependencyServices() []store.CatalogService {
+	return []store.CatalogService{
+		{ID: "service.one", DisplayName: "One", Kind: "app"},
+		{ID: "service.two", DisplayName: "Two", Kind: "app"},
+		{ID: "service.three", DisplayName: "Three", Kind: "app"},
+	}
+}
+
+func caseEvidenceDependencyNodes() []store.CatalogInterfaceNode {
+	return []store.CatalogInterfaceNode{
+		{ID: "node.one", DisplayName: "Node One", ServiceID: "service.one", Status: "active", SortOrder: 1},
+		{ID: "node.two", DisplayName: "Node Two", ServiceID: "service.two", Status: "active", SortOrder: 2},
+		{ID: "node.three", DisplayName: "Node Three", ServiceID: "service.three", Status: "active", SortOrder: 3},
+	}
+}
+
+func caseEvidenceDependencyCases() []store.CatalogAPICase {
+	return []store.CatalogAPICase{
+		{ID: "case.step.one", DisplayName: "Step One", NodeID: "node.one", RequiredForAdmission: true, Status: "active", SortOrder: 1},
+		{ID: "case.step.two.config", DisplayName: "Step Two", NodeID: "node.two", RequiredForAdmission: true, Status: "active", SortOrder: 2},
+		{ID: "case.step.three", DisplayName: "Step Three", NodeID: "node.three", RequiredForAdmission: true, Status: "active", SortOrder: 3},
+	}
+}
+
+func seedCaseEvidenceDependencyRun(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
+	if _, err := s.CreateRun(ctx, store.Run{
 		ID:        "run.alpha",
 		ProfileID: "sample",
 		Status:    store.StatusPassed,
@@ -409,8 +453,7 @@ func TestServerExposesCaseEvidenceDependenciesWithoutInventingTopology(t *testin
 			{"stepId":"step.two","caseId":"case.step.two.runtime","ok":true},
 			{"stepId":"step.three","caseId":"case.step.three","ok":true}
 		]}`,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	for _, item := range []store.APICaseRun{
@@ -422,13 +465,10 @@ func TestServerExposesCaseEvidenceDependenciesWithoutInventingTopology(t *testin
 			t.Fatalf("record api case run: %v", err)
 		}
 	}
+}
 
-	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
-	defer server.Close()
-
-	payload := decodeJSONResponse(t, server.URL+"/api/case/evidence?runId=run.alpha&caseId=case.step.three", http.StatusOK)
-	evidence := payload["evidence"].(map[string]any)
-	fixture := evidence["fixture"].(map[string]any)
+func requireCaseEvidenceFixtureDependency(t *testing.T, fixture map[string]any) {
+	t.Helper()
 	if fixture["status"] != "configured" {
 		t.Fatalf("fixture status = %#v", fixture)
 	}
@@ -460,6 +500,10 @@ func TestServerExposesCaseEvidenceDependenciesWithoutInventingTopology(t *testin
 	if fixtureSummary["applyCount"] != float64(2) || fixtureSummary["failedCount"] != float64(0) {
 		t.Fatalf("fixture summary = %#v", fixtureSummary)
 	}
+}
+
+func requireCaseEvidenceNoInventedTopology(t *testing.T, evidence map[string]any) {
+	t.Helper()
 	topology := evidence["topology"].(map[string]any)
 	if topology["status"] != "unavailable" {
 		t.Fatalf("topology = %#v", topology)
