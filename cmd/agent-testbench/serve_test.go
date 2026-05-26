@@ -19,6 +19,16 @@ import (
 )
 
 func TestServeHandlerUsesConfiguredStore(t *testing.T) {
+	storePath := seedServeRunStore(t, "run.alpha")
+	handler, cleanup := newServeStoreHandler(t, storePath)
+	defer cleanup()
+
+	requireServeRunsContains(t, handler, "run.alpha", "configured store")
+}
+
+func seedServeRunStore(t *testing.T, runID string) string {
+	t.Helper()
+
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
@@ -26,11 +36,11 @@ func TestServeHandlerUsesConfiguredStore(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	_, err = s.CreateRun(ctx, store.Run{
-		ID:           "run.alpha",
+		ID:           runID,
 		ProfileID:    "empty",
 		WorkflowID:   "workflow.alpha",
 		Status:       store.StatusPassed,
-		EvidenceRoot: ".runtime/evidence/run.alpha",
+		EvidenceRoot: ".runtime/evidence/" + runID,
 		SummaryJSON:  `{"steps":[{"stepId":"step.alpha","ok":true}]}`,
 	})
 	if err != nil {
@@ -39,6 +49,11 @@ func TestServeHandlerUsesConfiguredStore(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
+	return storePath
+}
+
+func newServeStoreHandler(t *testing.T, storePath string) (http.Handler, func()) {
+	t.Helper()
 
 	handler, cleanup, err := serveHandlerFromArgs([]string{
 		"--store", "sqlite://" + storePath,
@@ -46,15 +61,19 @@ func TestServeHandlerUsesConfiguredStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build serve handler: %v", err)
 	}
-	defer cleanup()
+	return handler, func() { _ = cleanup() }
+}
+
+func requireServeRunsContains(t *testing.T, handler http.Handler, runID string, label string) {
+	t.Helper()
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("runs status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "run.alpha") {
-		t.Fatalf("serve handler did not use configured store: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), runID) {
+		t.Fatalf("serve handler did not use %s: %s", label, rec.Body.String())
 	}
 }
 
@@ -88,43 +107,11 @@ func TestServeHandlerRequiresActiveStore(t *testing.T) {
 }
 
 func TestServeHandlerAcceptsLocationAgnosticStoreFlag(t *testing.T) {
-	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	_, err = s.CreateRun(ctx, store.Run{
-		ID:           "run.store.flag",
-		ProfileID:    "empty",
-		WorkflowID:   "workflow.alpha",
-		Status:       store.StatusPassed,
-		EvidenceRoot: ".runtime/evidence/run.store.flag",
-		SummaryJSON:  `{"steps":[{"stepId":"step.alpha","ok":true}]}`,
-	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
-	}
-
-	handler, cleanup, err := serveHandlerFromArgs([]string{
-		"--store", "sqlite://" + storePath,
-	})
-	if err != nil {
-		t.Fatalf("build serve handler: %v", err)
-	}
+	storePath := seedServeRunStore(t, "run.store.flag")
+	handler, cleanup := newServeStoreHandler(t, storePath)
 	defer cleanup()
 
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("runs status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "run.store.flag") {
-		t.Fatalf("serve handler did not use --store: %s", rec.Body.String())
-	}
+	requireServeRunsContains(t, handler, "run.store.flag", "--store")
 
 	current := httptest.NewRecorder()
 	handler.ServeHTTP(current, httptest.NewRequest(http.MethodGet, "/api/store/current", nil))
@@ -147,6 +134,20 @@ func TestServeHandlerAcceptsLocationAgnosticStoreFlag(t *testing.T) {
 }
 
 func TestServeHandlerCanBootFromPublishedStoreCatalogWithoutProfilePath(t *testing.T) {
+	storePath, sourcePath := seedServePublishedStoreCatalog(t)
+	handler, cleanup, err := serveHandlerFromArgs([]string{"--store", "sqlite://" + storePath})
+	if err != nil {
+		t.Fatalf("build serve handler from store catalog: %v", err)
+	}
+	defer cleanup()
+
+	requireServeInterfaceNodesFromStoreCatalog(t, handler)
+	requireServeDashboardUsesRuntimeSource(t, handler, sourcePath)
+}
+
+func seedServePublishedStoreCatalog(t *testing.T) (string, string) {
+	t.Helper()
+
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	sourcePath := filepath.Join(t.TempDir(), "sources", "service-alpha", "main-4e8d26674209")
@@ -171,12 +172,11 @@ func TestServeHandlerCanBootFromPublishedStoreCatalogWithoutProfilePath(t *testi
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
+	return storePath, sourcePath
+}
 
-	handler, cleanup, err := serveHandlerFromArgs([]string{"--store", "sqlite://" + storePath})
-	if err != nil {
-		t.Fatalf("build serve handler from store catalog: %v", err)
-	}
-	defer cleanup()
+func requireServeInterfaceNodesFromStoreCatalog(t *testing.T, handler http.Handler) {
+	t.Helper()
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/interface-nodes", nil))
@@ -198,6 +198,10 @@ func TestServeHandlerCanBootFromPublishedStoreCatalogWithoutProfilePath(t *testi
 	if payload.Source.ID != "team-alpha" || payload.Source.Kind != "store" || len(payload.Items) != 1 || payload.Items[0].ID != "node.alpha" {
 		t.Fatalf("serve handler did not use published catalog: %#v", payload)
 	}
+}
+
+func requireServeDashboardUsesRuntimeSource(t *testing.T, handler http.Handler, sourcePath string) {
+	t.Helper()
 
 	dashboard := httptest.NewRecorder()
 	handler.ServeHTTP(dashboard, httptest.NewRequest(http.MethodGet, "/api/dashboard", nil))

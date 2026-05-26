@@ -110,42 +110,49 @@ func runCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T, _ string, lab
 	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	outputDir := filepath.Join(t.TempDir(), "suite-report")
-	out := runCLI(t,
-		"case", "suite", "report",
-		"--tag", "smoke",
-		"--owner", "team-a",
-		"--base-url", serverURL,
-		"--output-dir", outputDir,
-		"--json",
-	)
+	report := runCaseSuiteReportJSON(t, label, serverURL, outputDir)
+	requireCaseSuiteReportJSON(t, label, report, fixture)
+	requireCaseSuiteReportFiles(t, label, report, fixture, outputDir)
+	requireCaseSuiteVariantReportRun(t, label, serverURL, fixture)
+}
 
-	var report struct {
-		OK             bool   `json:"ok"`
-		JUnitReportURL string `json:"junitReportUrl"`
-		Filters        struct {
-			Tags  []string `json:"tags"`
-			Owner string   `json:"owner"`
-		} `json:"filters"`
-		Counts struct {
-			Total  int `json:"total"`
-			Passed int `json:"passed"`
-			Failed int `json:"failed"`
-		} `json:"counts"`
-		Results []struct {
-			CaseID    string   `json:"caseId"`
-			Title     string   `json:"title"`
-			NodeID    string   `json:"nodeId"`
-			Tags      []string `json:"tags"`
-			Priority  string   `json:"priority"`
-			Owner     string   `json:"owner"`
-			Status    string   `json:"status"`
-			CaseRunID string   `json:"caseRunId"`
-			DetailURL string   `json:"detailUrl"`
-		} `json:"results"`
-	}
+type caseSuiteReportCommandOutput struct {
+	OK             bool   `json:"ok"`
+	JUnitReportURL string `json:"junitReportUrl"`
+	Filters        struct {
+		Tags  []string `json:"tags"`
+		Owner string   `json:"owner"`
+	} `json:"filters"`
+	Counts struct {
+		Total  int `json:"total"`
+		Passed int `json:"passed"`
+		Failed int `json:"failed"`
+	} `json:"counts"`
+	Results []struct {
+		CaseID    string   `json:"caseId"`
+		Title     string   `json:"title"`
+		NodeID    string   `json:"nodeId"`
+		Tags      []string `json:"tags"`
+		Priority  string   `json:"priority"`
+		Owner     string   `json:"owner"`
+		Status    string   `json:"status"`
+		CaseRunID string   `json:"caseRunId"`
+		DetailURL string   `json:"detailUrl"`
+	} `json:"results"`
+}
+
+func runCaseSuiteReportJSON(t *testing.T, label string, serverURL string, outputDir string) caseSuiteReportCommandOutput {
+	t.Helper()
+	out := runCLI(t, "case", "suite", "report", "--tag", "smoke", "--owner", "team-a", "--base-url", serverURL, "--output-dir", outputDir, "--json")
+	var report caseSuiteReportCommandOutput
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite report json: %v\n%s", label, err, out)
 	}
+	return report
+}
+
+func requireCaseSuiteReportJSON(t *testing.T, label string, report caseSuiteReportCommandOutput, fixture interfaceNodeBatchReportFixture) {
+	t.Helper()
 	if !report.OK || report.Counts.Total != 1 || report.Counts.Passed != 1 || report.Counts.Failed != 0 {
 		t.Fatalf("%s suite report = %#v", label, report)
 	}
@@ -162,32 +169,42 @@ func runCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T, _ string, lab
 	if strings.Join(item.Tags, ",") != "smoke,regression" {
 		t.Fatalf("%s suite result tags = %#v", label, item.Tags)
 	}
-	html, err := os.ReadFile(filepath.Join(outputDir, "report.html"))
-	if err != nil {
-		t.Fatalf("%s suite html report missing: %v", label, err)
-	}
+}
+
+func requireCaseSuiteReportFiles(t *testing.T, label string, report caseSuiteReportCommandOutput, fixture interfaceNodeBatchReportFixture, outputDir string) {
+	t.Helper()
+	html := readCaseSuiteReportFile(t, label, filepath.Join(outputDir, "report.html"), "suite html report")
 	for _, want := range []string{"Case Suite Report", "Case Alpha Default", "team-a", "smoke", "p0", "caseRunId"} {
-		if !strings.Contains(string(html), want) {
+		if !strings.Contains(html, want) {
 			t.Fatalf("%s suite html missing %q:\n%s", label, want, html)
 		}
 	}
-	if strings.Contains(string(html), "Case Alpha Variant") {
+	if strings.Contains(html, "Case Alpha Variant") {
 		t.Fatalf("%s suite html should not include unselected case:\n%s", label, html)
 	}
 	junitPath := filepath.Join(outputDir, "report.junit.xml")
-	junitRaw, err := os.ReadFile(junitPath)
-	if err != nil {
-		t.Fatalf("%s suite junit report missing: %v", label, err)
-	}
+	junit := readCaseSuiteReportFile(t, label, junitPath, "suite junit report")
 	if report.JUnitReportURL != junitPath {
 		t.Fatalf("%s junit report url = %q want %q", label, report.JUnitReportURL, junitPath)
 	}
 	for _, want := range []string{`<testsuite name="Case Suite Report" tests="1" failures="0"`, `name="` + fixture.defaultCaseID + `"`, `classname="` + fixture.nodeAlphaID + `"`} {
-		if !strings.Contains(string(junitRaw), want) {
-			t.Fatalf("%s suite junit missing %q:\n%s", label, want, junitRaw)
+		if !strings.Contains(junit, want) {
+			t.Fatalf("%s suite junit missing %q:\n%s", label, want, junit)
 		}
 	}
+}
 
+func readCaseSuiteReportFile(t *testing.T, label string, path string, reportName string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%s %s missing: %v", label, reportName, err)
+	}
+	return string(raw)
+}
+
+func requireCaseSuiteVariantReportRun(t *testing.T, label string, serverURL string, fixture interfaceNodeBatchReportFixture) {
+	t.Helper()
 	variantOut := runCLI(t,
 		"case", "suite", "report",
 		"--tag", "negative",

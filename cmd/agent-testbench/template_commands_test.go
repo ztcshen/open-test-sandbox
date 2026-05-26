@@ -8,6 +8,12 @@ import (
 	"agent-testbench/internal/store"
 )
 
+type renderedTemplateRequest struct {
+	Method string         `json:"method"`
+	Path   string         `json:"path"`
+	Body   map[string]any `json:"body"`
+}
+
 func TestWorkflowAuditAllowsExplicitOfflineTemplatePackage(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
@@ -38,26 +44,45 @@ func TestTemplateRenderCommandUsesNamedMySQLActiveStore(t *testing.T) {
 
 func runTemplateRenderCommandPrintsRequestPreview(t *testing.T, storeRef string, label string) {
 	t.Helper()
+	publishTemplateRenderProfile(t)
+	requireFileTemplateRenderOutput(t, label)
+	seedStoreTemplateRenderCatalog(t, storeRef, label)
+	requireStoreTemplateRenderOutput(t, label)
+}
+
+func publishTemplateRenderProfile(t *testing.T) {
+	t.Helper()
+
 	dir := t.TempDir()
 	writeTemplateProfile(t, dir)
 	runCLI(t, "config", "publish", "--from", dir)
+}
+
+func requireFileTemplateRenderOutput(t *testing.T, label string) {
+	t.Helper()
 
 	out := runCLI(t, "template", "render", "--template", "template.create", "--fixture", "fixture.item")
-
-	var rendered struct {
-		Method string         `json:"method"`
-		Path   string         `json:"path"`
-		Body   map[string]any `json:"body"`
-	}
-	if err := json.Unmarshal([]byte(out), &rendered); err != nil {
-		t.Fatalf("decode %s template render output: %v\n%s", label, err, out)
-	}
+	rendered := decodeTemplateRenderOutput(t, label, out)
 	if rendered.Method != "POST" || rendered.Path != "/v1/items/item-001" {
 		t.Fatalf("%s rendered request identity = %#v", label, rendered)
 	}
 	if rendered.Body["id"] != "item-001" || rendered.Body["quantity"].(float64) != 3 {
 		t.Fatalf("%s rendered request body = %#v", label, rendered.Body)
 	}
+}
+
+func decodeTemplateRenderOutput(t *testing.T, label string, raw string) renderedTemplateRequest {
+	t.Helper()
+
+	var rendered renderedTemplateRequest
+	if err := json.Unmarshal([]byte(raw), &rendered); err != nil {
+		t.Fatalf("decode %s template render output: %v\n%s", label, err, raw)
+	}
+	return rendered
+}
+
+func seedStoreTemplateRenderCatalog(t *testing.T, storeRef string, label string) {
+	t.Helper()
 
 	ctx := context.Background()
 	s, err := openStore(ctx, storeRef)
@@ -91,16 +116,13 @@ func runTemplateRenderCommandPrintsRequestPreview(t *testing.T, storeRef string,
 	if err := s.Close(); err != nil {
 		t.Fatalf("close %s template store: %v", label, err)
 	}
+}
+
+func requireStoreTemplateRenderOutput(t *testing.T, label string) {
+	t.Helper()
 
 	storeOut := runCLI(t, "template", "render", "--template", "template.store", "--fixture", "fixture.store")
-	var storeRendered struct {
-		Method string         `json:"method"`
-		Path   string         `json:"path"`
-		Body   map[string]any `json:"body"`
-	}
-	if err := json.Unmarshal([]byte(storeOut), &storeRendered); err != nil {
-		t.Fatalf("decode %s store template render output: %v\n%s", label, err, storeOut)
-	}
+	storeRendered := decodeTemplateRenderOutput(t, label, storeOut)
 	if storeRendered.Method != "PATCH" || storeRendered.Path != "/v1/items/item-002" || storeRendered.Body["enabled"] != true {
 		t.Fatalf("%s store rendered request = %#v", label, storeRendered)
 	}

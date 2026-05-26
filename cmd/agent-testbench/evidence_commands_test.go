@@ -12,6 +12,66 @@ import (
 	"agent-testbench/internal/store"
 )
 
+type evidenceImportCommandReport struct {
+	SourcePath      string `json:"sourcePath"`
+	ProfileID       string `json:"profileId"`
+	RunCount        int    `json:"runCount"`
+	APICaseRunCount int    `json:"apiCaseRunCount"`
+	EvidenceCount   int    `json:"evidenceCount"`
+}
+
+type namedEvidenceImportFixture struct {
+	sourcePath       string
+	workflowLegacyID int64
+	caseLegacyID     int64
+	parentRunID      string
+}
+
+type evidenceListCommandReport struct {
+	Runs []evidenceListCommandRun `json:"runs"`
+}
+
+type evidenceListCommandRun struct {
+	ID              string                      `json:"id"`
+	APICaseRunCount int                         `json:"apiCaseRunCount"`
+	EvidenceCount   int                         `json:"evidenceCount"`
+	EvidenceRecords []evidenceListCommandRecord `json:"evidenceRecords"`
+}
+
+type evidenceListCommandRecord struct {
+	ID        string `json:"id"`
+	RunID     string `json:"runId"`
+	CaseRunID string `json:"caseRunId"`
+	Kind      string `json:"kind"`
+	URI       string `json:"uri"`
+}
+
+type evidenceTasksCommandReport struct {
+	RunID  string                     `json:"runId"`
+	Counts evidenceTasksCommandCounts `json:"counts"`
+	Tasks  []evidenceTasksCommandTask `json:"tasks"`
+}
+
+type evidenceTasksCommandCounts struct {
+	Total      int   `json:"total"`
+	Passed     int   `json:"passed"`
+	Failed     int   `json:"failed"`
+	Running    int   `json:"running"`
+	DurationMs int64 `json:"durationMs"`
+}
+
+type evidenceTasksCommandTask struct {
+	ID            string `json:"id"`
+	RunID         string `json:"runId"`
+	StepID        string `json:"stepId"`
+	Kind          string `json:"kind"`
+	Status        string `json:"status"`
+	Outcome       string `json:"outcome"`
+	Reason        string `json:"reason"`
+	DisplayStatus string `json:"displayStatus"`
+	DurationMs    int64  `json:"durationMs"`
+}
+
 func TestEvidenceImportCommandIndexesLegacyRuntime(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "legacy.sqlite")
@@ -63,6 +123,16 @@ func TestEvidenceImportUsesNamedMySQLActiveStore(t *testing.T) {
 
 func runEvidenceImportUsesNamedActiveStore(t *testing.T, storeRef string, runLabel string, label string) {
 	t.Helper()
+	fixture := createNamedEvidenceImportFixture(t, runLabel)
+	report := runEvidenceImportJSON(t, fixture.sourcePath, label)
+	requireEvidenceImportSummary(t, label, report, fixture.sourcePath)
+	requireImportedEvidenceStoreRecords(t, storeRef, label, fixture)
+	requireImportedEvidenceListOutput(t, label, fixture)
+}
+
+func createNamedEvidenceImportFixture(t *testing.T, runLabel string) namedEvidenceImportFixture {
+	t.Helper()
+
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "legacy.sqlite")
 	suffix := time.Now().UTC().UnixNano()
@@ -70,21 +140,35 @@ func runEvidenceImportUsesNamedActiveStore(t *testing.T, storeRef string, runLab
 	caseLegacyID := suffix + 1
 	parentRunID := fmt.Sprintf("case-run-parent-%s-%d", runLabel, suffix)
 	createLegacyRuntimeDBWithIDs(t, sourcePath, workflowLegacyID, caseLegacyID, parentRunID)
+	return namedEvidenceImportFixture{
+		sourcePath:       sourcePath,
+		workflowLegacyID: workflowLegacyID,
+		caseLegacyID:     caseLegacyID,
+		parentRunID:      parentRunID,
+	}
+}
+
+func runEvidenceImportJSON(t *testing.T, sourcePath string, label string) evidenceImportCommandReport {
+	t.Helper()
 
 	out := runCLI(t, "evidence", "import", "--from", sourcePath, "--profile", "sample", "--json")
-	var report struct {
-		SourcePath      string `json:"sourcePath"`
-		ProfileID       string `json:"profileId"`
-		RunCount        int    `json:"runCount"`
-		APICaseRunCount int    `json:"apiCaseRunCount"`
-		EvidenceCount   int    `json:"evidenceCount"`
-	}
+	var report evidenceImportCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s evidence import json: %v\n%s", label, err, out)
 	}
+	return report
+}
+
+func requireEvidenceImportSummary(t *testing.T, label string, report evidenceImportCommandReport, sourcePath string) {
+	t.Helper()
+
 	if report.SourcePath != sourcePath || report.ProfileID != "sample" || report.RunCount != 2 || report.APICaseRunCount != 1 || report.EvidenceCount != 1 {
 		t.Fatalf("%s evidence import report = %#v", label, report)
 	}
+}
+
+func requireImportedEvidenceStoreRecords(t *testing.T, storeRef string, label string, fixture namedEvidenceImportFixture) {
+	t.Helper()
 
 	ctx := context.Background()
 	runtime, err := openStore(ctx, storeRef)
@@ -92,7 +176,7 @@ func runEvidenceImportUsesNamedActiveStore(t *testing.T, storeRef string, runLab
 		t.Fatalf("open %s evidence import Store: %v", label, err)
 	}
 	defer runtime.Close()
-	workflowRunID := fmt.Sprintf("legacy-workflow-%d", workflowLegacyID)
+	workflowRunID := fmt.Sprintf("legacy-workflow-%d", fixture.workflowLegacyID)
 	workflowRun, err := runtime.GetRun(ctx, workflowRunID)
 	if err != nil {
 		t.Fatalf("get imported %s workflow run: %v", label, err)
@@ -100,54 +184,45 @@ func runEvidenceImportUsesNamedActiveStore(t *testing.T, storeRef string, runLab
 	if workflowRun.ProfileID != "sample" || workflowRun.WorkflowID != "workflow.alpha" || workflowRun.Status != store.StatusPassed {
 		t.Fatalf("imported %s workflow run = %#v", label, workflowRun)
 	}
-	parentRun, err := runtime.GetRun(ctx, parentRunID)
+	parentRun, err := runtime.GetRun(ctx, fixture.parentRunID)
 	if err != nil {
 		t.Fatalf("get imported %s parent run: %v", label, err)
 	}
 	if parentRun.ProfileID != "sample" || parentRun.Status != store.StatusFailed {
 		t.Fatalf("imported %s parent run = %#v", label, parentRun)
 	}
-	caseRuns, err := runtime.ListAPICaseRuns(ctx, parentRunID)
+	caseRuns, err := runtime.ListAPICaseRuns(ctx, fixture.parentRunID)
 	if err != nil {
 		t.Fatalf("list imported %s case runs: %v", label, err)
 	}
-	if len(caseRuns) != 1 || caseRuns[0].ID != fmt.Sprintf("legacy-case-run-%d", caseLegacyID) || caseRuns[0].CaseID != "case.alpha" || caseRuns[0].Status != store.StatusFailed {
+	if len(caseRuns) != 1 || caseRuns[0].ID != fmt.Sprintf("legacy-case-run-%d", fixture.caseLegacyID) || caseRuns[0].CaseID != "case.alpha" || caseRuns[0].Status != store.StatusFailed {
 		t.Fatalf("imported %s case runs = %#v", label, caseRuns)
 	}
-	records, err := runtime.ListEvidence(ctx, parentRunID)
+	records, err := runtime.ListEvidence(ctx, fixture.parentRunID)
 	if err != nil {
 		t.Fatalf("list imported %s Evidence: %v", label, err)
 	}
-	if len(records) != 1 || records[0].ID != fmt.Sprintf("legacy-evidence-%d", caseLegacyID) || records[0].Kind != "case-run" {
+	if len(records) != 1 || records[0].ID != fmt.Sprintf("legacy-evidence-%d", fixture.caseLegacyID) || records[0].Kind != "case-run" {
 		t.Fatalf("imported %s Evidence = %#v", label, records)
 	}
+}
 
-	listOut := runCLI(t, "evidence", "list", "--run", parentRunID, "--json")
-	var evidenceReport struct {
-		Runs []struct {
-			ID              string `json:"id"`
-			APICaseRunCount int    `json:"apiCaseRunCount"`
-			EvidenceCount   int    `json:"evidenceCount"`
-			EvidenceRecords []struct {
-				ID        string `json:"id"`
-				RunID     string `json:"runId"`
-				CaseRunID string `json:"caseRunId"`
-				Kind      string `json:"kind"`
-				URI       string `json:"uri"`
-			} `json:"evidenceRecords"`
-		} `json:"runs"`
-	}
+func requireImportedEvidenceListOutput(t *testing.T, label string, fixture namedEvidenceImportFixture) {
+	t.Helper()
+
+	listOut := runCLI(t, "evidence", "list", "--run", fixture.parentRunID, "--json")
+	var evidenceReport evidenceListCommandReport
 	if err := json.Unmarshal([]byte(listOut), &evidenceReport); err != nil {
 		t.Fatalf("decode imported %s evidence list json: %v\n%s", label, err, listOut)
 	}
-	if len(evidenceReport.Runs) != 1 || evidenceReport.Runs[0].ID != parentRunID || evidenceReport.Runs[0].APICaseRunCount != 1 || evidenceReport.Runs[0].EvidenceCount != 1 {
+	if len(evidenceReport.Runs) != 1 || evidenceReport.Runs[0].ID != fixture.parentRunID || evidenceReport.Runs[0].APICaseRunCount != 1 || evidenceReport.Runs[0].EvidenceCount != 1 {
 		t.Fatalf("imported %s evidence list = %#v", label, evidenceReport.Runs)
 	}
 	if len(evidenceReport.Runs[0].EvidenceRecords) != 1 {
 		t.Fatalf("imported %s evidence list records = %#v", label, evidenceReport.Runs[0].EvidenceRecords)
 	}
 	record := evidenceReport.Runs[0].EvidenceRecords[0]
-	if record.ID != fmt.Sprintf("legacy-evidence-%d", caseLegacyID) || record.RunID != parentRunID || record.CaseRunID != fmt.Sprintf("legacy-case-run-%d", caseLegacyID) || record.Kind != "case-run" || record.URI != ".runtime/cases/"+parentRunID {
+	if record.ID != fmt.Sprintf("legacy-evidence-%d", fixture.caseLegacyID) || record.RunID != fixture.parentRunID || record.CaseRunID != fmt.Sprintf("legacy-case-run-%d", fixture.caseLegacyID) || record.Kind != "case-run" || record.URI != ".runtime/cases/"+fixture.parentRunID {
 		t.Fatalf("imported %s evidence list record = %#v", label, record)
 	}
 }
@@ -239,6 +314,14 @@ func TestEvidenceCommandsUseNamedSQLiteActiveStore(t *testing.T) {
 
 func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
 	storePath := createPostProcessTaskStore(t)
+	report := runEvidenceTasksJSON(t, storePath)
+	requireEvidenceTasksReport(t, report)
+	requireEvidenceTasksTextFilters(t, storePath)
+	requireEvidenceCommandsUseExplicitStore(t, storePath)
+}
+
+func runEvidenceTasksJSON(t *testing.T, storePath string) evidenceTasksCommandReport {
+	t.Helper()
 
 	out := runCLI(t,
 		"evidence", "tasks",
@@ -248,30 +331,16 @@ func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
 		"--kind", "trace_topology_collect",
 		"--json",
 	)
-	var report struct {
-		RunID  string `json:"runId"`
-		Counts struct {
-			Total      int   `json:"total"`
-			Passed     int   `json:"passed"`
-			Failed     int   `json:"failed"`
-			Running    int   `json:"running"`
-			DurationMs int64 `json:"durationMs"`
-		} `json:"counts"`
-		Tasks []struct {
-			ID            string `json:"id"`
-			RunID         string `json:"runId"`
-			StepID        string `json:"stepId"`
-			Kind          string `json:"kind"`
-			Status        string `json:"status"`
-			Outcome       string `json:"outcome"`
-			Reason        string `json:"reason"`
-			DisplayStatus string `json:"displayStatus"`
-			DurationMs    int64  `json:"durationMs"`
-		} `json:"tasks"`
-	}
+	var report evidenceTasksCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode evidence tasks json: %v\n%s", err, out)
 	}
+	return report
+}
+
+func requireEvidenceTasksReport(t *testing.T, report evidenceTasksCommandReport) {
+	t.Helper()
+
 	if report.RunID != "run.tasks" || report.Counts.Total != 1 || report.Counts.Passed != 1 || report.Counts.DurationMs != 125 {
 		t.Fatalf("evidence tasks report = %#v", report)
 	}
@@ -281,6 +350,10 @@ func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
 	if report.Tasks[0].Outcome != "success" || report.Tasks[0].Reason != "completed" || report.Tasks[0].DisplayStatus != "passed: completed" {
 		t.Fatalf("evidence task readable status = %#v", report.Tasks[0])
 	}
+}
+
+func requireEvidenceTasksTextFilters(t *testing.T, storePath string) {
+	t.Helper()
 
 	textOut := runCLI(t, "evidence", "tasks", "--store", "sqlite://"+storePath, "--run", "run.tasks", "--status", "failed")
 	for _, want := range []string{"Post Process Tasks: run.tasks", "task.logs", "runtime_log_collect", "300 ms", "log source missing"} {
@@ -294,6 +367,10 @@ func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
 			t.Fatalf("evidence skipped task text missing %q:\n%s", want, skippedOut)
 		}
 	}
+}
+
+func requireEvidenceCommandsUseExplicitStore(t *testing.T, storePath string) {
+	t.Helper()
 
 	storeRef := "sqlite://" + storePath
 	listOut := runCLI(t, "evidence", "list", "--store", storeRef, "--json")

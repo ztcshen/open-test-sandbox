@@ -22,7 +22,41 @@ func TestCaseSuiteStabilityUsesNamedMySQLActiveStore(t *testing.T) {
 func runCaseSuiteStabilityReportsTransitions(t *testing.T, storeRef string, label string) {
 	t.Helper()
 	fixture := publishUniqueCaseSuiteCoverageProfile(t)
+	runIDs := seedCaseSuiteStabilityTransitions(t, storeRef, label, fixture)
+	report := runCaseSuiteStabilityJSON(t, label, fixture.profileDir)
+	requireCaseSuiteStabilityReport(t, label, report, fixture, runIDs)
+	requireCaseSuiteStabilityText(t, label, fixture.profileDir, fixture.variantCaseID)
+}
 
+type caseSuiteStabilityRecentRun struct {
+	RunID string `json:"runId"`
+}
+
+type caseSuiteStabilityItem struct {
+	CaseID       string                        `json:"caseId"`
+	LatestStatus string                        `json:"latestStatus"`
+	Transitions  int                           `json:"transitions"`
+	Unstable     bool                          `json:"unstable"`
+	Recent       []caseSuiteStabilityRecentRun `json:"recent"`
+}
+
+type caseSuiteStabilityReport struct {
+	OK     bool `json:"ok"`
+	Counts struct {
+		Total    int `json:"total"`
+		Stable   int `json:"stable"`
+		Unstable int `json:"unstable"`
+		NotRun   int `json:"notRun"`
+	} `json:"counts"`
+	Items []caseSuiteStabilityItem `json:"items"`
+}
+
+type caseSuiteStabilityRunIDs struct {
+	latestVariant string
+}
+
+func seedCaseSuiteStabilityTransitions(t *testing.T, storeRef string, label string, fixture caseSuiteCoverageFixture) caseSuiteStabilityRunIDs {
+	t.Helper()
 	variantRun1ID := uniqueTestID(t, "run.variant.1")
 	variantRun2ID := uniqueTestID(t, "run.variant.2")
 	variantRun3ID := uniqueTestID(t, "run.variant.3")
@@ -32,63 +66,43 @@ func runCaseSuiteStabilityReportsTransitions(t *testing.T, storeRef string, labe
 		caseSuiteCoverageRun{runID: variantRun3ID, caseID: fixture.variantCaseID, status: store.StatusPassed, offset: -time.Minute},
 		caseSuiteCoverageRun{runID: uniqueTestID(t, "run.default.1"), caseID: fixture.defaultCaseID, status: store.StatusPassed, offset: 0},
 	)
+	return caseSuiteStabilityRunIDs{latestVariant: variantRun3ID}
+}
 
-	out := runCLI(t,
-		"case", "suite", "stability",
-		"--profile", fixture.profileDir,
-		"--tag", "regression",
-		"--status", "active",
-		"--limit", "3",
-		"--json",
-	)
-	var report struct {
-		OK     bool `json:"ok"`
-		Counts struct {
-			Total    int `json:"total"`
-			Stable   int `json:"stable"`
-			Unstable int `json:"unstable"`
-			NotRun   int `json:"notRun"`
-		} `json:"counts"`
-		Items []struct {
-			CaseID       string `json:"caseId"`
-			LatestStatus string `json:"latestStatus"`
-			Transitions  int    `json:"transitions"`
-			Unstable     bool   `json:"unstable"`
-			Recent       []struct {
-				RunID string `json:"runId"`
-			} `json:"recent"`
-		} `json:"items"`
-	}
+func runCaseSuiteStabilityJSON(t *testing.T, label string, profileDir string) caseSuiteStabilityReport {
+	t.Helper()
+	out := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--tag", "regression", "--status", "active", "--limit", "3", "--json")
+	var report caseSuiteStabilityReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite stability json: %v\n%s", label, err, out)
 	}
+	return report
+}
+
+func requireCaseSuiteStabilityReport(t *testing.T, label string, report caseSuiteStabilityReport, fixture caseSuiteCoverageFixture, runIDs caseSuiteStabilityRunIDs) {
+	t.Helper()
 	if report.OK || report.Counts.Total != 3 || report.Counts.Unstable != 1 || report.Counts.Stable != 1 || report.Counts.NotRun != 1 {
 		t.Fatalf("%s suite stability report = %#v", label, report)
 	}
-	byCase := map[string]struct {
-		LatestStatus string
-		Transitions  int
-		Unstable     bool
-		Recent       []struct {
-			RunID string `json:"runId"`
-		}
-	}{}
-	for _, item := range report.Items {
-		byCase[item.CaseID] = struct {
-			LatestStatus string
-			Transitions  int
-			Unstable     bool
-			Recent       []struct {
-				RunID string `json:"runId"`
-			}
-		}{item.LatestStatus, item.Transitions, item.Unstable, item.Recent}
+	byCase := caseSuiteStabilityItemsByCase(report)
+	variant := byCase[fixture.variantCaseID]
+	if !variant.Unstable || variant.Transitions != 2 || variant.LatestStatus != store.StatusPassed || len(variant.Recent) == 0 || variant.Recent[0].RunID != runIDs.latestVariant {
+		t.Fatalf("%s variant stability = %#v", label, variant)
 	}
-	if !byCase[fixture.variantCaseID].Unstable || byCase[fixture.variantCaseID].Transitions != 2 || byCase[fixture.variantCaseID].LatestStatus != store.StatusPassed || byCase[fixture.variantCaseID].Recent[0].RunID != variantRun3ID {
-		t.Fatalf("%s variant stability = %#v", label, byCase[fixture.variantCaseID])
-	}
+}
 
-	textOut := runCLI(t, "case", "suite", "stability", "--profile", fixture.profileDir, "--tag", "regression", "--limit", "3")
-	for _, want := range []string{"Case Suite Stability", "Unstable: 1", fixture.variantCaseID} {
+func caseSuiteStabilityItemsByCase(report caseSuiteStabilityReport) map[string]caseSuiteStabilityItem {
+	byCase := map[string]caseSuiteStabilityItem{}
+	for _, item := range report.Items {
+		byCase[item.CaseID] = item
+	}
+	return byCase
+}
+
+func requireCaseSuiteStabilityText(t *testing.T, label string, profileDir string, variantCaseID string) {
+	t.Helper()
+	textOut := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--tag", "regression", "--limit", "3")
+	for _, want := range []string{"Case Suite Stability", "Unstable: 1", variantCaseID} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s stability text missing %q:\n%s", label, want, textOut)
 		}

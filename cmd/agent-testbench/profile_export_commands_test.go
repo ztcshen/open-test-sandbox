@@ -13,9 +13,33 @@ import (
 	"agent-testbench/internal/store/sqlite"
 )
 
+type profileExportCommandReport struct {
+	OK        bool   `json:"ok"`
+	ProfileID string `json:"profileId"`
+	Output    string `json:"output"`
+	Counts    struct {
+		Services        int `json:"services"`
+		Workflows       int `json:"workflows"`
+		InterfaceNodes  int `json:"interfaceNodes"`
+		APICases        int `json:"apiCases"`
+		TemplateConfigs int `json:"templateConfigs"`
+	} `json:"counts"`
+}
+
 func TestProfileExportWritesActiveStoreCatalogAsProfileBundle(t *testing.T) {
-	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	seedProfileExportCatalog(t, storePath)
+
+	outputDir := filepath.Join(t.TempDir(), "exported-profile")
+	report := runProfileExportJSON(t, storePath, outputDir)
+	requireProfileExportReport(t, report, outputDir)
+	requireExportedProfileBundle(t, outputDir)
+}
+
+func seedProfileExportCatalog(t *testing.T, storePath string) {
+	t.Helper()
+
+	ctx := context.Background()
 	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -61,27 +85,30 @@ func TestProfileExportWritesActiveStoreCatalogAsProfileBundle(t *testing.T) {
 	if err := runtime.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
+}
 
-	outputDir := filepath.Join(t.TempDir(), "exported-profile")
+func runProfileExportJSON(t *testing.T, storePath string, outputDir string) profileExportCommandReport {
+	t.Helper()
+
 	out := runCLI(t, "profile", "export", "--store", "sqlite://"+storePath, "--output", outputDir, "--json")
-	var report struct {
-		OK        bool   `json:"ok"`
-		ProfileID string `json:"profileId"`
-		Output    string `json:"output"`
-		Counts    struct {
-			Services        int `json:"services"`
-			Workflows       int `json:"workflows"`
-			InterfaceNodes  int `json:"interfaceNodes"`
-			APICases        int `json:"apiCases"`
-			TemplateConfigs int `json:"templateConfigs"`
-		} `json:"counts"`
-	}
+	var report profileExportCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode export report: %v\n%s", err, out)
 	}
+	return report
+}
+
+func requireProfileExportReport(t *testing.T, report profileExportCommandReport, outputDir string) {
+	t.Helper()
+
 	if !report.OK || report.ProfileID != "profile.export" || report.Output != outputDir || report.Counts.TemplateConfigs != 2 {
 		t.Fatalf("export report = %#v", report)
 	}
+}
+
+func requireExportedProfileBundle(t *testing.T, outputDir string) {
+	t.Helper()
+
 	bundle, err := profile.Load(outputDir)
 	if err != nil {
 		t.Fatalf("load exported profile: %v", err)

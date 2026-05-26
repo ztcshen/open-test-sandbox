@@ -9,6 +9,41 @@ import (
 	"agent-testbench/internal/store"
 )
 
+type environmentComponentReadinessFixture struct {
+	storePath string
+	graphPath string
+	envID     string
+}
+
+func writeEnvironmentComponentReadinessFixture(t *testing.T, envID string, includeAsset bool) environmentComponentReadinessFixture {
+	t.Helper()
+
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", envID,
+		"--start-command", "true",
+		"--verification-workflow", "workflow.core-10",
+	)
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
+		},
+	}
+	if includeAsset {
+		graph.Assets = []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "app.schema", AssetKind: "mysql-ddl", TargetComponentID: "db", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app;\n", ApplyOrder: 10, SummaryJSON: `{}`},
+		}
+	}
+	writeFile(t, graphPath, mustJSON(t, graph))
+	return environmentComponentReadinessFixture{storePath: storePath, graphPath: graphPath, envID: envID}
+}
+
 func TestEnvironmentComponentsReplaceRejectsBlockingDependencyCycle(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	graphPath := filepath.Join(t.TempDir(), "graph.json")
@@ -78,30 +113,11 @@ func TestEnvironmentComponentsReplaceRejectsRemoteComponentAssetWithoutURLPath(t
 }
 
 func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	graphPath := filepath.Join(t.TempDir(), "graph.json")
-	runCLI(t, "environment", "register",
-		"--store", "sqlite://"+storePath,
-		"--id", "env.component.inspect-readiness",
-		"--start-command", "true",
-		"--verification-workflow", "workflow.core-10",
-	)
-	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
-		Components: []store.EnvironmentComponent{
-			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-		},
-		Dependencies: []store.ComponentDependency{
-			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
-		},
-		Assets: []store.ComponentConfigAsset{
-			{OwnerComponentID: "app", AssetID: "app.schema", AssetKind: "mysql-ddl", TargetComponentID: "db", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app;\n", ApplyOrder: 10, SummaryJSON: `{}`},
-		},
-	}))
-	replaceOut := runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "--json", "env.component.inspect-readiness")
-	inspectOut := runCLI(t, "environment", "components", "inspect", "--store", "sqlite://"+storePath, "--json", "env.component.inspect-readiness")
-	documentedReplaceOut := runCLI(t, "environment", "components", "replace", "env.component.inspect-readiness", "--store", "sqlite://"+storePath, "--file", graphPath, "--json")
-	documentedInspectOut := runCLI(t, "environment", "components", "inspect", "env.component.inspect-readiness", "--store", "sqlite://"+storePath, "--json")
+	fixture := writeEnvironmentComponentReadinessFixture(t, "env.component.inspect-readiness", true)
+	replaceOut := runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+fixture.storePath, "--file", fixture.graphPath, "--json", fixture.envID)
+	inspectOut := runCLI(t, "environment", "components", "inspect", "--store", "sqlite://"+fixture.storePath, "--json", fixture.envID)
+	documentedReplaceOut := runCLI(t, "environment", "components", "replace", fixture.envID, "--store", "sqlite://"+fixture.storePath, "--file", fixture.graphPath, "--json")
+	documentedInspectOut := runCLI(t, "environment", "components", "inspect", fixture.envID, "--store", "sqlite://"+fixture.storePath, "--json")
 	for _, out := range []string{replaceOut, inspectOut, documentedReplaceOut, documentedInspectOut} {
 		var payload struct {
 			ComponentGraph struct {
@@ -124,25 +140,9 @@ func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
 }
 
 func TestEnvironmentInspectReportsComponentGraphReadiness(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	graphPath := filepath.Join(t.TempDir(), "graph.json")
-	runCLI(t, "environment", "register",
-		"--store", "sqlite://"+storePath,
-		"--id", "env.inspect.component-readiness",
-		"--start-command", "true",
-		"--verification-workflow", "workflow.core-10",
-	)
-	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
-		Components: []store.EnvironmentComponent{
-			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-		},
-		Dependencies: []store.ComponentDependency{
-			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
-		},
-	}))
-	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.inspect.component-readiness")
-	out := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.inspect.component-readiness")
+	fixture := writeEnvironmentComponentReadinessFixture(t, "env.inspect.component-readiness", false)
+	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+fixture.storePath, "--file", fixture.graphPath, fixture.envID)
+	out := runCLI(t, "environment", "inspect", "--store", "sqlite://"+fixture.storePath, "--json", fixture.envID)
 	var payload struct {
 		ComponentGraph struct {
 			OK                   bool     `json:"ok"`
@@ -160,57 +160,63 @@ func TestEnvironmentInspectReportsComponentGraphReadiness(t *testing.T) {
 }
 
 func TestEnvironmentBootstrapReportsComponentGraphReadiness(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	graphPath := filepath.Join(t.TempDir(), "graph.json")
-	runCLI(t, "environment", "register",
-		"--store", "sqlite://"+storePath,
-		"--id", "env.component.bootstrap-readiness",
-		"--start-command", "true",
-		"--verification-workflow", "workflow.core-10",
-	)
-	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
-		Components: []store.EnvironmentComponent{
-			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-		},
-		Dependencies: []store.ComponentDependency{
-			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
-		},
-	}))
-	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.component.bootstrap-readiness")
-	out := runCLI(t, "environment", "bootstrap", "--store", "sqlite://"+storePath, "--json", "env.component.bootstrap-readiness")
-	var payload struct {
-		Plan struct {
+	storePath := seedEnvironmentBootstrapComponentReadiness(t)
+	payload := runEnvironmentBootstrapComponentReadinessJSON(t, storePath)
+	requireEnvironmentBootstrapComponentReadiness(t, payload)
+}
+
+type environmentBootstrapComponentReadinessPayload struct {
+	Plan struct {
+		ComponentGraph struct {
+			OK                   bool     `json:"ok"`
+			BlockingDependencies int      `json:"blockingDependencies"`
+			BlockingOrder        []string `json:"blockingOrder"`
+		} `json:"componentGraph"`
+		ComponentStartupPlan struct {
+			OK      bool `json:"ok"`
+			Batches []struct {
+				Components []struct {
+					ComponentID string `json:"componentId"`
+				} `json:"components"`
+			} `json:"batches"`
+			HealthGates []struct {
+				ComponentID string `json:"componentId"`
+			} `json:"healthGates"`
+		} `json:"componentStartupPlan"`
+		Restore struct {
 			ComponentGraph struct {
-				OK                   bool     `json:"ok"`
-				BlockingDependencies int      `json:"blockingDependencies"`
-				BlockingOrder        []string `json:"blockingOrder"`
+				OK            bool     `json:"ok"`
+				BlockingOrder []string `json:"blockingOrder"`
 			} `json:"componentGraph"`
 			ComponentStartupPlan struct {
-				OK      bool `json:"ok"`
-				Batches []struct {
-					Components []struct {
-						ComponentID string `json:"componentId"`
-					} `json:"components"`
-				} `json:"batches"`
-				HealthGates []struct {
-					ComponentID string `json:"componentId"`
-				} `json:"healthGates"`
+				OK bool `json:"ok"`
 			} `json:"componentStartupPlan"`
-			Restore struct {
-				ComponentGraph struct {
-					OK            bool     `json:"ok"`
-					BlockingOrder []string `json:"blockingOrder"`
-				} `json:"componentGraph"`
-				ComponentStartupPlan struct {
-					OK bool `json:"ok"`
-				} `json:"componentStartupPlan"`
-			} `json:"restore"`
-		} `json:"plan"`
-	}
+		} `json:"restore"`
+	} `json:"plan"`
+}
+
+func seedEnvironmentBootstrapComponentReadiness(t *testing.T) string {
+	t.Helper()
+
+	fixture := writeEnvironmentComponentReadinessFixture(t, "env.component.bootstrap-readiness", false)
+	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+fixture.storePath, "--file", fixture.graphPath, fixture.envID)
+	return fixture.storePath
+}
+
+func runEnvironmentBootstrapComponentReadinessJSON(t *testing.T, storePath string) environmentBootstrapComponentReadinessPayload {
+	t.Helper()
+
+	out := runCLI(t, "environment", "bootstrap", "--store", "sqlite://"+storePath, "--json", "env.component.bootstrap-readiness")
+	var payload environmentBootstrapComponentReadinessPayload
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
 		t.Fatalf("decode bootstrap component readiness json: %v\n%s", err, out)
 	}
+	return payload
+}
+
+func requireEnvironmentBootstrapComponentReadiness(t *testing.T, payload environmentBootstrapComponentReadinessPayload) {
+	t.Helper()
+
 	if !payload.Plan.ComponentGraph.OK || payload.Plan.ComponentGraph.BlockingDependencies != 1 || strings.Join(payload.Plan.ComponentGraph.BlockingOrder, ",") != "db,app" {
 		t.Fatalf("bootstrap component graph readiness = %#v", payload.Plan.ComponentGraph)
 	}

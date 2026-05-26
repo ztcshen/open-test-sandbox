@@ -14,7 +14,33 @@ import (
 	"agent-testbench/internal/store/sqlite"
 )
 
+type sandboxStartCommandReport struct {
+	OK       bool                         `json:"ok"`
+	Services []sandboxStartCommandService `json:"services"`
+}
+
+type sandboxStartCommandService struct {
+	ID       string `json:"id"`
+	ExitCode int    `json:"exitCode"`
+	Skipped  bool   `json:"skipped"`
+}
+
+type sandboxStartFixture struct {
+	storePath           string
+	startedPath         string
+	platformStartedPath string
+}
+
 func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start")
+	requireSandboxStartServices(t, report)
+	requireSandboxStartupSideEffects(t, fixture)
+}
+
+func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {
+	t.Helper()
+
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "store.sqlite")
 	startedPath := filepath.Join(dir, "started.txt")
@@ -56,19 +82,31 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	out := runCLI(t, "sandbox", "start", "--store", "sqlite://"+storePath, "--json")
+	return sandboxStartFixture{
+		storePath:           storePath,
+		startedPath:         startedPath,
+		platformStartedPath: platformStartedPath,
+	}
+}
 
-	var report struct {
-		OK       bool `json:"ok"`
-		Services []struct {
-			ID       string `json:"id"`
-			ExitCode int    `json:"exitCode"`
-			Skipped  bool   `json:"skipped"`
-		} `json:"services"`
+func runSandboxStartJSON(t *testing.T, storeRef string, label string, args ...string) sandboxStartCommandReport {
+	t.Helper()
+
+	cliArgs := append([]string{"sandbox", "start", "--json"}, args...)
+	if storeRef != "" {
+		cliArgs = append([]string{"sandbox", "start", "--store", storeRef, "--json"}, args...)
 	}
+	out := runCLI(t, cliArgs...)
+	var report sandboxStartCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode sandbox start report: %v\n%s", err, out)
+		t.Fatalf("decode %s sandbox start report: %v\n%s", label, err, out)
 	}
+	return report
+}
+
+func requireSandboxStartServices(t *testing.T, report sandboxStartCommandReport) {
+	t.Helper()
+
 	if !report.OK || len(report.Services) != 3 {
 		t.Fatalf("sandbox start report = %#v", report)
 	}
@@ -87,14 +125,19 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 	if !skippedByID["documented-service"] {
 		t.Fatalf("documented-service should be skipped without a startup command")
 	}
-	started, err := os.ReadFile(startedPath)
+}
+
+func requireSandboxStartupSideEffects(t *testing.T, fixture sandboxStartFixture) {
+	t.Helper()
+
+	started, err := os.ReadFile(fixture.startedPath)
 	if err != nil {
 		t.Fatalf("read startup side effect: %v", err)
 	}
 	if string(started) != "entry-service" {
 		t.Fatalf("startup command wrote %q", started)
 	}
-	platformStarted, err := os.ReadFile(platformStartedPath)
+	platformStarted, err := os.ReadFile(fixture.platformStartedPath)
 	if err != nil {
 		t.Fatalf("read platform startup side effect: %v", err)
 	}
@@ -115,6 +158,15 @@ func TestSandboxStartUsesNamedMySQLActiveStore(t *testing.T) {
 
 func runSandboxStartUsesNamedActiveStore(t *testing.T, storeRef string, suffixLabel string, label string) {
 	t.Helper()
+	startedPath, serviceID := seedNamedSandboxStartCatalog(t, storeRef, suffixLabel, label)
+	report := runSandboxStartJSON(t, "", label, "--service", serviceID)
+	requireNamedSandboxStartReport(t, label, report, serviceID)
+	requireNamedSandboxStartupSideEffect(t, label, startedPath, serviceID)
+}
+
+func seedNamedSandboxStartCatalog(t *testing.T, storeRef string, suffixLabel string, label string) (string, string) {
+	t.Helper()
+
 	dir := t.TempDir()
 	startedPath := filepath.Join(dir, "started-"+suffixLabel+".txt")
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
@@ -144,22 +196,20 @@ func runSandboxStartUsesNamedActiveStore(t *testing.T, storeRef string, suffixLa
 	if err := s.Close(); err != nil {
 		t.Fatalf("close %s SQL Store: %v", label, err)
 	}
+	return startedPath, serviceID
+}
 
-	out := runCLI(t, "sandbox", "start", "--service", serviceID, "--json")
-	var report struct {
-		OK       bool `json:"ok"`
-		Services []struct {
-			ID       string `json:"id"`
-			ExitCode int    `json:"exitCode"`
-			Skipped  bool   `json:"skipped"`
-		} `json:"services"`
-	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode %s sandbox start report: %v\n%s", label, err, out)
-	}
+func requireNamedSandboxStartReport(t *testing.T, label string, report sandboxStartCommandReport, serviceID string) {
+	t.Helper()
+
 	if !report.OK || len(report.Services) != 1 || report.Services[0].ID != serviceID || report.Services[0].ExitCode != 0 || report.Services[0].Skipped {
 		t.Fatalf("%s sandbox start report = %#v", label, report)
 	}
+}
+
+func requireNamedSandboxStartupSideEffect(t *testing.T, label string, startedPath string, serviceID string) {
+	t.Helper()
+
 	started, err := os.ReadFile(startedPath)
 	if err != nil {
 		t.Fatalf("read %s startup side effect: %v", label, err)
@@ -238,18 +288,30 @@ func runSandboxRegisterCommandsUseNamedActiveStore(t *testing.T, storeRef string
 	nodeID := "node.create-order." + suffixLabel + "." + suffix
 	caseID := "case.create-order." + suffixLabel + "." + suffix
 
-	serviceOut := runCLI(t, "sandbox", "service", "register",
+	registerNamedSandboxService(t, label, serviceID)
+	registerNamedSandboxInterface(t, label, serviceID, nodeID, caseID)
+	requireNamedSandboxCatalog(t, storeRef, label, serviceID, nodeID, caseID)
+}
+
+func registerNamedSandboxService(t *testing.T, label string, serviceID string) {
+	t.Helper()
+
+	out := runCLI(t, "sandbox", "service", "register",
 		"--id", serviceID,
 		"--display-name", "Gateway "+label,
 		"--kind", "http",
 		"--service-port", "18080",
 		"--health-url", newHealthyTestURL(t),
 	)
-	if !strings.Contains(serviceOut, "Registered service: "+serviceID) {
-		t.Fatalf("%s service register output = %q", label, serviceOut)
+	if !strings.Contains(out, "Registered service: "+serviceID) {
+		t.Fatalf("%s service register output = %q", label, out)
 	}
+}
 
-	interfaceOut := runCLI(t, "sandbox", "interface", "register",
+func registerNamedSandboxInterface(t *testing.T, label string, serviceID string, nodeID string, caseID string) {
+	t.Helper()
+
+	out := runCLI(t, "sandbox", "interface", "register",
 		"--id", nodeID,
 		"--service-id", serviceID,
 		"--method", "POST",
@@ -258,9 +320,13 @@ func runSandboxRegisterCommandsUseNamedActiveStore(t *testing.T, storeRef string
 		"--case-title", "Create order",
 		"--required-for-admission",
 	)
-	if !strings.Contains(interfaceOut, "Registered interface: "+nodeID) || !strings.Contains(interfaceOut, "Case: "+caseID) {
-		t.Fatalf("%s interface register output = %q", label, interfaceOut)
+	if !strings.Contains(out, "Registered interface: "+nodeID) || !strings.Contains(out, "Case: "+caseID) {
+		t.Fatalf("%s interface register output = %q", label, out)
 	}
+}
+
+func requireNamedSandboxCatalog(t *testing.T, storeRef string, label string, serviceID string, nodeID string, caseID string) {
+	t.Helper()
 
 	s, err := openStore(context.Background(), storeRef)
 	if err != nil {

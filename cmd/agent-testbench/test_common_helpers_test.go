@@ -38,10 +38,7 @@ func writeTestJSON(t *testing.T, w http.ResponseWriter, status int, value any) {
 	}
 }
 
-func hasProfileVerifyCheck(checks []struct {
-	Name string `json:"name"`
-	OK   bool   `json:"ok"`
-}, name string) bool {
+func hasProfileVerifyCheck(checks []profileVerifyCheckResult, name string) bool {
 	for _, check := range checks {
 		if check.Name == name && check.OK {
 			return true

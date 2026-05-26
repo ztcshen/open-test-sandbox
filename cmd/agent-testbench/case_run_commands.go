@@ -16,80 +16,128 @@ import (
 	"agent-testbench/internal/store"
 )
 
+type caseRunCommandOptions struct {
+	casePath       string
+	caseID         string
+	baseURL        string
+	evidenceDir    string
+	runID          string
+	storeRef       string
+	storeURL       string
+	profileID      string
+	timeoutSeconds int
+	dryRun         bool
+	jsonOutput     bool
+	overrides      mapFlag
+}
+
 func runCaseRun(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("case run", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	overrides := mapFlag{}
-	casePath := flags.String("case", "", "API case file path")
-	caseID := flags.String("case-id", "", "API case id from the active Store catalog")
-	baseURL := flags.String("base-url", "", "Base URL for live request execution")
-	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "cases"), "Evidence output directory")
-	runID := flags.String("run-id", "", "Run id")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	profileID := flags.String("profile", "default", "Profile id for store records")
-	timeoutSeconds := flags.Int("timeout-seconds", 0, "Request timeout in seconds for Store catalog case execution")
-	dryRun := flags.Bool("dry-run", false, "Preview the file-backed case run without sending HTTP, writing Evidence, or indexing Store records")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	flags.Var(&overrides, "override", "Request body override as key=value; repeat for multiple values")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if *dryRun {
-		if strings.TrimSpace(*caseID) != "" {
-			return errors.New("case run --dry-run currently supports --case PATH")
-		}
-		if strings.TrimSpace(*casePath) == "" {
-			return errors.New("case run --dry-run requires --case PATH")
-		}
-		plan, err := apicase.Plan(apicase.RunOptions{
-			CasePath:    *casePath,
-			BaseURL:     *baseURL,
-			EvidenceDir: *evidenceDir,
-			RunID:       *runID,
-			Overrides:   overrides.Values(),
-		})
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return writeIndentedJSON(plan)
-		}
-		printCaseRunDryRun(plan)
-		return nil
-	}
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
+	options, err := parseCaseRunCommandOptions(args)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(*caseID) != "" {
-		result, err := runStoreCatalogCase(ctx, resolvedStoreURL, *profileID, *caseID, *baseURL, *evidenceDir, *runID, *timeoutSeconds, overrides.Values())
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return writeIndentedJSON(result)
-		}
-		printStoreCatalogCaseRun(result)
-		return nil
+	if options.dryRun {
+		return runCaseRunDryRun(options)
 	}
-	if strings.TrimSpace(*casePath) == "" {
-		return errors.New("case run requires --case PATH or --case-id ID")
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(options.storeRef, options.storeURL)
+	if err != nil {
+		return err
 	}
-	result, err := apicase.Run(ctx, apicase.RunOptions{
-		CasePath:    *casePath,
-		BaseURL:     *baseURL,
-		EvidenceDir: *evidenceDir,
-		RunID:       *runID,
-		Overrides:   overrides.Values(),
+	if strings.TrimSpace(options.caseID) != "" {
+		return runCaseRunCatalogCase(ctx, resolvedStoreURL, options)
+	}
+	return runCaseRunFile(ctx, resolvedStoreURL, options)
+}
+
+func parseCaseRunCommandOptions(args []string) (caseRunCommandOptions, error) {
+	flags := flag.NewFlagSet("case run", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	options := caseRunCommandOptions{}
+	overrides := mapFlag{}
+	casePath := flags.String("case", options.casePath, "API case file path")
+	caseID := flags.String("case-id", options.caseID, "API case id from the active Store catalog")
+	baseURL := flags.String("base-url", options.baseURL, "Base URL for live request execution")
+	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "cases"), "Evidence output directory")
+	runID := flags.String("run-id", options.runID, "Run id")
+	storeRef := flags.String("store", options.storeRef, "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", options.storeURL, legacyStoreURLFlagHelp)
+	profileID := flags.String("profile", "default", "Profile id for store records")
+	timeoutSeconds := flags.Int("timeout-seconds", options.timeoutSeconds, "Request timeout in seconds for Store catalog case execution")
+	dryRun := flags.Bool("dry-run", options.dryRun, "Preview the file-backed case run without sending HTTP, writing Evidence, or indexing Store records")
+	jsonOutput := flags.Bool("json", options.jsonOutput, "Emit a machine-readable JSON report")
+	flags.Var(&overrides, "override", "Request body override as key=value; repeat for multiple values")
+	if err := flags.Parse(args); err != nil {
+		return caseRunCommandOptions{}, err
+	}
+	options.casePath = *casePath
+	options.caseID = *caseID
+	options.baseURL = *baseURL
+	options.evidenceDir = *evidenceDir
+	options.runID = *runID
+	options.storeRef = *storeRef
+	options.storeURL = *storeURL
+	options.profileID = *profileID
+	options.timeoutSeconds = *timeoutSeconds
+	options.dryRun = *dryRun
+	options.jsonOutput = *jsonOutput
+	options.overrides = overrides
+	return options, nil
+}
+
+func runCaseRunDryRun(options caseRunCommandOptions) error {
+	if strings.TrimSpace(options.caseID) != "" {
+		return errors.New("case run --dry-run currently supports --case PATH")
+	}
+	if strings.TrimSpace(options.casePath) == "" {
+		return errors.New("case run --dry-run requires --case PATH")
+	}
+	plan, err := apicase.Plan(apicase.RunOptions{
+		CasePath:    options.casePath,
+		BaseURL:     options.baseURL,
+		EvidenceDir: options.evidenceDir,
+		RunID:       options.runID,
+		Overrides:   options.overrides.Values(),
 	})
 	if err != nil {
 		return err
 	}
-	if err := indexCaseRun(ctx, resolvedStoreURL, *profileID, result); err != nil {
+	if options.jsonOutput {
+		return writeIndentedJSON(plan)
+	}
+	printCaseRunDryRun(plan)
+	return nil
+}
+
+func runCaseRunCatalogCase(ctx context.Context, storeURL string, options caseRunCommandOptions) error {
+	result, err := runStoreCatalogCase(ctx, storeURL, options.profileID, options.caseID, options.baseURL, options.evidenceDir, options.runID, options.timeoutSeconds, options.overrides.Values())
+	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if options.jsonOutput {
+		return writeIndentedJSON(result)
+	}
+	printStoreCatalogCaseRun(result)
+	return nil
+}
+
+func runCaseRunFile(ctx context.Context, storeURL string, options caseRunCommandOptions) error {
+	if strings.TrimSpace(options.casePath) == "" {
+		return errors.New("case run requires --case PATH or --case-id ID")
+	}
+	result, err := apicase.Run(ctx, apicase.RunOptions{
+		CasePath:    options.casePath,
+		BaseURL:     options.baseURL,
+		EvidenceDir: options.evidenceDir,
+		RunID:       options.runID,
+		Overrides:   options.overrides.Values(),
+	})
+	if err != nil {
+		return err
+	}
+	if err := indexCaseRun(ctx, storeURL, options.profileID, result); err != nil {
+		return err
+	}
+	if options.jsonOutput {
 		return writeIndentedJSON(result)
 	}
 	fmt.Printf("Case Run: %s\n", result.RunID)
@@ -142,43 +190,68 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 	}
 	defer closeCLIStore(s)
 
+	times := caseRunIndexTimes(result)
+	requestSummary, assertionSummary, err := apiCaseRunSummaries(result.EvidencePath)
+	if err != nil {
+		return err
+	}
+	if err := recordIndexedCaseRunParent(ctx, s, profileID, result, times); err != nil {
+		return err
+	}
+	if err := recordIndexedAPICaseRun(ctx, s, result, requestSummary, assertionSummary, times); err != nil {
+		return err
+	}
+	return recordIndexedCaseRunEvidence(ctx, s, result, times.now)
+}
+
+type caseRunIndexClock struct {
+	now        time.Time
+	startedAt  time.Time
+	finishedAt time.Time
+}
+
+func caseRunIndexTimes(result apicase.RunResult) caseRunIndexClock {
 	now := time.Now().UTC()
 	startedAt := runResultTime(result.StartedAt, now)
 	finishedAt := runResultTime(result.FinishedAt, now)
 	if finishedAt.Before(startedAt) {
 		finishedAt = startedAt
 	}
-	requestSummary, assertionSummary, err := apiCaseRunSummaries(result.EvidencePath)
-	if err != nil {
-		return err
-	}
-	if _, err := s.CreateRun(ctx, store.Run{
+	return caseRunIndexClock{now: now, startedAt: startedAt, finishedAt: finishedAt}
+}
+
+func recordIndexedCaseRunParent(ctx context.Context, s store.Store, profileID string, result apicase.RunResult, times caseRunIndexClock) error {
+	_, err := s.CreateRun(ctx, store.Run{
 		ID:           result.RunID,
 		ProfileID:    profileID,
 		WorkflowID:   "",
 		Status:       result.Status,
 		EvidenceRoot: result.EvidencePath,
 		SummaryJSON:  caseRunSummaryJSON(result),
-		StartedAt:    startedAt,
-		FinishedAt:   finishedAt,
-		CreatedAt:    startedAt,
-		UpdatedAt:    finishedAt,
-	}); err != nil {
-		return err
-	}
-	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		StartedAt:    times.startedAt,
+		FinishedAt:   times.finishedAt,
+		CreatedAt:    times.startedAt,
+		UpdatedAt:    times.finishedAt,
+	})
+	return err
+}
+
+func recordIndexedAPICaseRun(ctx context.Context, s store.Store, result apicase.RunResult, requestSummary string, assertionSummary string, times caseRunIndexClock) error {
+	_, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
 		ID:                   result.RunID + ".case",
 		RunID:                result.RunID,
 		CaseID:               result.CaseID,
 		Status:               result.Status,
 		RequestSummaryJSON:   requestSummary,
 		AssertionSummaryJSON: assertionSummary,
-		StartedAt:            startedAt,
-		FinishedAt:           finishedAt,
-		CreatedAt:            startedAt,
-	}); err != nil {
-		return err
-	}
+		StartedAt:            times.startedAt,
+		FinishedAt:           times.finishedAt,
+		CreatedAt:            times.startedAt,
+	})
+	return err
+}
+
+func recordIndexedCaseRunEvidence(ctx context.Context, s store.Store, result apicase.RunResult, createdAt time.Time) error {
 	for _, name := range []string{"case.json", "request.json", "response.json", "assertions.json", "summary.json"} {
 		path := filepath.Join(result.EvidencePath, name)
 		if _, err := os.Stat(path); err != nil {
@@ -199,7 +272,7 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 			URI:       path,
 			MediaType: "application/json",
 			Summary:   summary,
-			CreatedAt: now,
+			CreatedAt: createdAt,
 		}); err != nil {
 			return err
 		}

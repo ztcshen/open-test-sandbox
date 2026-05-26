@@ -22,7 +22,42 @@ func TestCaseSuiteCoverageUsesNamedMySQLActiveStore(t *testing.T) {
 func runCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.T, storeRef string, label string) {
 	t.Helper()
 	fixture := publishUniqueCaseSuiteCoverageProfile(t)
+	runIDs := seedCaseSuiteCoverageLatestRuns(t, storeRef, label, fixture)
+	report := runCaseSuiteCoverageJSON(t, label, fixture.profileDir)
+	requireCaseSuiteCoverageReport(t, label, report, fixture, runIDs)
+	requireCaseSuiteCoverageText(t, label, fixture.profileDir, fixture, runIDs)
+}
 
+type caseSuiteCoverageCommandReport struct {
+	OK     bool `json:"ok"`
+	Counts struct {
+		Total  int `json:"total"`
+		Passed int `json:"passed"`
+		Failed int `json:"failed"`
+		NotRun int `json:"notRun"`
+	} `json:"counts"`
+	Items []caseSuiteCoverageCommandReportItem `json:"items"`
+}
+
+type caseSuiteCoverageCommandReportItem struct {
+	CaseID       string `json:"caseId"`
+	Title        string `json:"title"`
+	NodeID       string `json:"nodeId"`
+	LatestStatus string `json:"latestStatus"`
+	LatestRunID  string `json:"latestRunId"`
+	CaseRunID    string `json:"caseRunId"`
+	DetailURL    string `json:"detailUrl"`
+	HasPassed    bool   `json:"hasPassed"`
+	Reason       string `json:"reason"`
+}
+
+type caseSuiteCoverageRunIDs struct {
+	latestDefault string
+	latestVariant string
+}
+
+func seedCaseSuiteCoverageLatestRuns(t *testing.T, storeRef string, label string, fixture caseSuiteCoverageFixture) caseSuiteCoverageRunIDs {
+	t.Helper()
 	oldDefaultRunID := uniqueTestID(t, "run.default.old")
 	latestDefaultRunID := uniqueTestID(t, "run.default.latest")
 	latestVariantRunID := uniqueTestID(t, "run.variant.latest")
@@ -31,71 +66,49 @@ func runCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.T
 		caseSuiteCoverageRun{runID: latestDefaultRunID, caseID: fixture.defaultCaseID, status: store.StatusPassed, offset: -time.Minute},
 		caseSuiteCoverageRun{runID: latestVariantRunID, caseID: fixture.variantCaseID, status: store.StatusFailed, offset: 0},
 	)
+	return caseSuiteCoverageRunIDs{latestDefault: latestDefaultRunID, latestVariant: latestVariantRunID}
+}
 
-	out := runCLI(t,
-		"case", "suite", "coverage",
-		"--profile", fixture.profileDir,
-		"--tag", "regression",
-		"--status", "active",
-		"--json",
-	)
-
-	var report struct {
-		OK     bool `json:"ok"`
-		Counts struct {
-			Total  int `json:"total"`
-			Passed int `json:"passed"`
-			Failed int `json:"failed"`
-			NotRun int `json:"notRun"`
-		} `json:"counts"`
-		Items []struct {
-			CaseID       string `json:"caseId"`
-			Title        string `json:"title"`
-			NodeID       string `json:"nodeId"`
-			LatestStatus string `json:"latestStatus"`
-			LatestRunID  string `json:"latestRunId"`
-			CaseRunID    string `json:"caseRunId"`
-			DetailURL    string `json:"detailUrl"`
-			HasPassed    bool   `json:"hasPassed"`
-			Reason       string `json:"reason"`
-		} `json:"items"`
-	}
+func runCaseSuiteCoverageJSON(t *testing.T, label string, profileDir string) caseSuiteCoverageCommandReport {
+	t.Helper()
+	out := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--tag", "regression", "--status", "active", "--json")
+	var report caseSuiteCoverageCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite coverage json: %v\n%s", label, err, out)
 	}
+	return report
+}
+
+func requireCaseSuiteCoverageReport(t *testing.T, label string, report caseSuiteCoverageCommandReport, fixture caseSuiteCoverageFixture, runIDs caseSuiteCoverageRunIDs) {
+	t.Helper()
 	if report.OK || report.Counts.Total != 3 || report.Counts.Passed != 1 || report.Counts.Failed != 1 || report.Counts.NotRun != 1 {
 		t.Fatalf("%s suite coverage report = %#v", label, report)
 	}
-	byCase := map[string]struct {
-		LatestStatus string
-		LatestRunID  string
-		CaseRunID    string
-		DetailURL    string
-		HasPassed    bool
-		Reason       string
-	}{}
-	for _, item := range report.Items {
-		byCase[item.CaseID] = struct {
-			LatestStatus string
-			LatestRunID  string
-			CaseRunID    string
-			DetailURL    string
-			HasPassed    bool
-			Reason       string
-		}{item.LatestStatus, item.LatestRunID, item.CaseRunID, item.DetailURL, item.HasPassed, item.Reason}
-	}
-	if byCase[fixture.defaultCaseID].LatestStatus != store.StatusPassed || byCase[fixture.defaultCaseID].LatestRunID != latestDefaultRunID || !byCase[fixture.defaultCaseID].HasPassed {
+	byCase := caseSuiteCoverageItemsByCase(report)
+	if byCase[fixture.defaultCaseID].LatestStatus != store.StatusPassed || byCase[fixture.defaultCaseID].LatestRunID != runIDs.latestDefault || !byCase[fixture.defaultCaseID].HasPassed {
 		t.Fatalf("%s default coverage = %#v", label, byCase[fixture.defaultCaseID])
 	}
-	if byCase[fixture.variantCaseID].LatestStatus != store.StatusFailed || byCase[fixture.variantCaseID].CaseRunID != latestVariantRunID+".case" || byCase[fixture.variantCaseID].DetailURL == "" || byCase[fixture.variantCaseID].HasPassed {
+	if byCase[fixture.variantCaseID].LatestStatus != store.StatusFailed || byCase[fixture.variantCaseID].CaseRunID != runIDs.latestVariant+".case" || byCase[fixture.variantCaseID].DetailURL == "" || byCase[fixture.variantCaseID].HasPassed {
 		t.Fatalf("%s variant coverage = %#v", label, byCase[fixture.variantCaseID])
 	}
 	if byCase[fixture.unrunCaseID].LatestStatus != "not-run" || byCase[fixture.unrunCaseID].Reason != "no run recorded in Store" {
 		t.Fatalf("%s unrun coverage = %#v", label, byCase[fixture.unrunCaseID])
 	}
+}
 
-	textOut := runCLI(t, "case", "suite", "coverage", "--profile", fixture.profileDir, "--tag", "regression")
-	for _, want := range []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", fixture.variantCaseID, latestVariantRunID + ".case"} {
+func caseSuiteCoverageItemsByCase(report caseSuiteCoverageCommandReport) map[string]caseSuiteCoverageCommandReportItem {
+	byCase := map[string]caseSuiteCoverageCommandReportItem{}
+	for _, item := range report.Items {
+		byCase[item.CaseID] = item
+	}
+	return byCase
+}
+
+func requireCaseSuiteCoverageText(t *testing.T, label string, profileDir string, fixture caseSuiteCoverageFixture, runIDs caseSuiteCoverageRunIDs) {
+	t.Helper()
+	textOut := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--tag", "regression")
+	wants := []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", fixture.variantCaseID, runIDs.latestVariant + ".case"}
+	for _, want := range wants {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s coverage text missing %q:\n%s", label, want, textOut)
 		}
@@ -115,58 +128,49 @@ func TestCaseSuiteInspectUsesNamedMySQLActiveStore(t *testing.T) {
 func runCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T, storeRef string, label string) {
 	t.Helper()
 	fixture := publishCaseSuiteReadinessHistory(t, storeRef, label)
+	report := runCaseSuiteInspectJSON(t, label, fixture.profileDir)
+	requireCaseSuiteInspectReport(t, label, report, fixture)
+	requireCaseSuiteInspectText(t, label, fixture.profileDir, fixture.unrunCaseID)
+}
 
-	out := runCLI(t,
-		"case", "suite", "inspect",
-		"--profile", fixture.profileDir,
-		"--tag", "regression",
-		"--status", "active",
-		"--json",
-	)
+type caseSuiteInspectReport struct {
+	OK     bool `json:"ok"`
+	Counts struct {
+		Total   int `json:"total"`
+		Ready   int `json:"ready"`
+		Blocked int `json:"blocked"`
+		Failed  int `json:"failed"`
+		NotRun  int `json:"notRun"`
+	} `json:"counts"`
+	Items []caseSuiteInspectReportItem `json:"items"`
+}
 
-	var report struct {
-		OK     bool `json:"ok"`
-		Counts struct {
-			Total   int `json:"total"`
-			Ready   int `json:"ready"`
-			Blocked int `json:"blocked"`
-			Failed  int `json:"failed"`
-			NotRun  int `json:"notRun"`
-		} `json:"counts"`
-		Items []struct {
-			CaseID             string   `json:"caseId"`
-			Ready              bool     `json:"ready"`
-			HasRunnableFile    bool     `json:"hasRunnableFile"`
-			HasExecutionConfig bool     `json:"hasExecutionConfig"`
-			LatestStatus       string   `json:"latestStatus"`
-			Issues             []string `json:"issues"`
-			SuggestedAction    string   `json:"suggestedAction"`
-		} `json:"items"`
-	}
+type caseSuiteInspectReportItem struct {
+	CaseID             string   `json:"caseId"`
+	Ready              bool     `json:"ready"`
+	HasRunnableFile    bool     `json:"hasRunnableFile"`
+	HasExecutionConfig bool     `json:"hasExecutionConfig"`
+	LatestStatus       string   `json:"latestStatus"`
+	Issues             []string `json:"issues"`
+	SuggestedAction    string   `json:"suggestedAction"`
+}
+
+func runCaseSuiteInspectJSON(t *testing.T, label string, profileDir string) caseSuiteInspectReport {
+	t.Helper()
+	out := runCLI(t, "case", "suite", "inspect", "--profile", profileDir, "--tag", "regression", "--status", "active", "--json")
+	var report caseSuiteInspectReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite inspection json: %v\n%s", label, err, out)
 	}
+	return report
+}
+
+func requireCaseSuiteInspectReport(t *testing.T, label string, report caseSuiteInspectReport, fixture caseSuiteCoverageFixture) {
+	t.Helper()
 	if report.OK || report.Counts.Total != 3 || report.Counts.Ready != 2 || report.Counts.Blocked != 1 || report.Counts.Failed != 1 || report.Counts.NotRun != 1 {
 		t.Fatalf("%s suite inspection report = %#v", label, report)
 	}
-	byCase := map[string]struct {
-		Ready              bool
-		HasRunnableFile    bool
-		HasExecutionConfig bool
-		LatestStatus       string
-		Issues             []string
-		SuggestedAction    string
-	}{}
-	for _, item := range report.Items {
-		byCase[item.CaseID] = struct {
-			Ready              bool
-			HasRunnableFile    bool
-			HasExecutionConfig bool
-			LatestStatus       string
-			Issues             []string
-			SuggestedAction    string
-		}{item.Ready, item.HasRunnableFile, item.HasExecutionConfig, item.LatestStatus, item.Issues, item.SuggestedAction}
-	}
+	byCase := caseSuiteInspectItemsByCase(report)
 	if !byCase[fixture.defaultCaseID].Ready || !byCase[fixture.defaultCaseID].HasRunnableFile || byCase[fixture.defaultCaseID].LatestStatus != store.StatusPassed {
 		t.Fatalf("%s default inspection = %#v", label, byCase[fixture.defaultCaseID])
 	}
@@ -176,9 +180,20 @@ func runCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T, store
 	if byCase[fixture.unrunCaseID].Ready || byCase[fixture.unrunCaseID].SuggestedAction != "add-runnable-source" || len(byCase[fixture.unrunCaseID].Issues) == 0 {
 		t.Fatalf("%s unrun inspection = %#v", label, byCase[fixture.unrunCaseID])
 	}
+}
 
-	textOut := runCLI(t, "case", "suite", "inspect", "--profile", fixture.profileDir, "--tag", "regression")
-	for _, want := range []string{"Case Suite Inspection", "Total: 3 Ready: 2 Blocked: 1", fixture.unrunCaseID, "add-runnable-source"} {
+func caseSuiteInspectItemsByCase(report caseSuiteInspectReport) map[string]caseSuiteInspectReportItem {
+	byCase := map[string]caseSuiteInspectReportItem{}
+	for _, item := range report.Items {
+		byCase[item.CaseID] = item
+	}
+	return byCase
+}
+
+func requireCaseSuiteInspectText(t *testing.T, label string, profileDir string, unrunCaseID string) {
+	t.Helper()
+	textOut := runCLI(t, "case", "suite", "inspect", "--profile", profileDir, "--tag", "regression")
+	for _, want := range []string{"Case Suite Inspection", "Total: 3 Ready: 2 Blocked: 1", unrunCaseID, "add-runnable-source"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s inspection text missing %q:\n%s", label, want, textOut)
 		}

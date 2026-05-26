@@ -12,6 +12,41 @@ import (
 	"agent-testbench/internal/store/sqlite"
 )
 
+type profileVerifyCheckResult struct {
+	Name string `json:"name"`
+	OK   bool   `json:"ok"`
+}
+
+type profileVerifyRuntimeReport struct {
+	OK      bool                        `json:"ok"`
+	Summary profileVerifyRuntimeSummary `json:"summary"`
+	Checks  []profileVerifyCheckResult  `json:"checks"`
+}
+
+type profileVerifyRuntimeSummary struct {
+	TotalChecks          int  `json:"totalChecks"`
+	PassedChecks         int  `json:"passedChecks"`
+	FailedChecks         int  `json:"failedChecks"`
+	RequiredCaseRuns     bool `json:"requiredCaseRuns"`
+	RequiredWorkflowRuns bool `json:"requiredWorkflowRuns"`
+}
+
+type profileImportCommandReport struct {
+	ProfileID  string   `json:"profileId"`
+	BundlePath string   `json:"bundlePath"`
+	ReadModels []string `json:"readModels"`
+}
+
+type namedProfileVerifyReport struct {
+	OK      bool `json:"ok"`
+	Publish struct {
+		ProfileID  string   `json:"profileId"`
+		ReadModels []string `json:"readModels"`
+	} `json:"publish"`
+	Summary profileVerifyRuntimeSummary `json:"summary"`
+	Checks  []profileVerifyCheckResult  `json:"checks"`
+}
+
 func TestProfileVerifyCommandAuditsPublishesAndChecksReadModels(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeEmptyProfileBundle(t)
@@ -121,37 +156,54 @@ func TestProfileVerifyCommandStopsBeforePublishWhenAuditFails(t *testing.T) {
 func TestProfileVerifyCommandCanRequirePassedAPICaseRuns(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeInterfaceNodeCaseProfile(t)
+	seedProfileVerifyPassedCaseRun(t, dbPath, "run-alpha", "case-run-alpha", "case.alpha", "2026-05-14T01:00:00Z")
+	requireProfileVerifyMissingCaseRun(t, profileDir, dbPath)
+	seedProfileVerifyPassedCaseRun(t, dbPath, "run-beta", "case-run-beta", "case.beta", "2026-05-14T01:01:00Z")
+
+	report := runProfileVerifyCaseRunsJSON(t, profileDir, dbPath)
+	requireProfileVerifyCaseRunReport(t, report)
+}
+
+func seedProfileVerifyPassedCaseRun(t *testing.T, dbPath string, runID string, caseRunID string, caseID string, startAt string) {
+	t.Helper()
+
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
+	startedAt := mustParseTime(t, startAt)
+	finishedAt := startedAt.Add(time.Second)
 	if _, err := s.CreateRun(ctx, store.Run{
-		ID:         "run-alpha",
+		ID:         runID,
 		ProfileID:  "sample",
-		WorkflowID: "case.alpha",
+		WorkflowID: caseID,
 		Status:     store.StatusPassed,
-		StartedAt:  mustParseTime(t, "2026-05-14T01:00:00Z"),
-		FinishedAt: mustParseTime(t, "2026-05-14T01:00:01Z"),
-		CreatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
-		UpdatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
+		StartedAt:  startedAt,
+		FinishedAt: finishedAt,
+		CreatedAt:  finishedAt,
+		UpdatedAt:  finishedAt,
 	}); err != nil {
-		t.Fatalf("create alpha run: %v", err)
+		t.Fatalf("create %s run: %v", caseID, err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
-		ID:         "case-run-alpha",
-		RunID:      "run-alpha",
-		CaseID:     "case.alpha",
+		ID:         caseRunID,
+		RunID:      runID,
+		CaseID:     caseID,
 		Status:     store.StatusPassed,
-		StartedAt:  mustParseTime(t, "2026-05-14T01:00:00Z"),
-		FinishedAt: mustParseTime(t, "2026-05-14T01:00:01Z"),
-		CreatedAt:  mustParseTime(t, "2026-05-14T01:00:01Z"),
+		StartedAt:  startedAt,
+		FinishedAt: finishedAt,
+		CreatedAt:  finishedAt,
 	}); err != nil {
-		t.Fatalf("record alpha case run: %v", err)
+		t.Fatalf("record %s case run: %v", caseID, err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
+}
+
+func requireProfileVerifyMissingCaseRun(t *testing.T, profileDir string, dbPath string) {
+	t.Helper()
 
 	missing := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-case-runs")
 	if !strings.Contains(missing, "api-case-run:case.beta") || !strings.Contains(missing, "no passed run") {
@@ -163,56 +215,22 @@ func TestProfileVerifyCommandCanRequirePassedAPICaseRuns(t *testing.T) {
 			t.Fatalf("missing case run json output does not contain %q:\n%s", want, missingJSON)
 		}
 	}
+}
 
-	s, err = sqlite.Open(ctx, sqlite.Config{Path: dbPath})
-	if err != nil {
-		t.Fatalf("reopen sqlite store: %v", err)
-	}
-	if _, err := s.CreateRun(ctx, store.Run{
-		ID:         "run-beta",
-		ProfileID:  "sample",
-		WorkflowID: "case.beta",
-		Status:     store.StatusPassed,
-		StartedAt:  mustParseTime(t, "2026-05-14T01:01:00Z"),
-		FinishedAt: mustParseTime(t, "2026-05-14T01:01:01Z"),
-		CreatedAt:  mustParseTime(t, "2026-05-14T01:01:01Z"),
-		UpdatedAt:  mustParseTime(t, "2026-05-14T01:01:01Z"),
-	}); err != nil {
-		t.Fatalf("create beta run: %v", err)
-	}
-	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
-		ID:         "case-run-beta",
-		RunID:      "run-beta",
-		CaseID:     "case.beta",
-		Status:     store.StatusPassed,
-		StartedAt:  mustParseTime(t, "2026-05-14T01:01:00Z"),
-		FinishedAt: mustParseTime(t, "2026-05-14T01:01:01Z"),
-		CreatedAt:  mustParseTime(t, "2026-05-14T01:01:01Z"),
-	}); err != nil {
-		t.Fatalf("record beta case run: %v", err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close reopened store: %v", err)
-	}
+func runProfileVerifyCaseRunsJSON(t *testing.T, profileDir string, dbPath string) profileVerifyRuntimeReport {
+	t.Helper()
 
 	out := runCLI(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-case-runs", "--json")
-	var report struct {
-		OK      bool `json:"ok"`
-		Summary struct {
-			TotalChecks          int  `json:"totalChecks"`
-			PassedChecks         int  `json:"passedChecks"`
-			FailedChecks         int  `json:"failedChecks"`
-			RequiredCaseRuns     bool `json:"requiredCaseRuns"`
-			RequiredWorkflowRuns bool `json:"requiredWorkflowRuns"`
-		} `json:"summary"`
-		Checks []struct {
-			Name string `json:"name"`
-			OK   bool   `json:"ok"`
-		} `json:"checks"`
-	}
+	var report profileVerifyRuntimeReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode profile verify runtime report: %v\n%s", err, out)
 	}
+	return report
+}
+
+func requireProfileVerifyCaseRunReport(t *testing.T, report profileVerifyRuntimeReport) {
+	t.Helper()
+
 	if !report.OK || !hasProfileVerifyCheck(report.Checks, "api-case-run:case.alpha") || !hasProfileVerifyCheck(report.Checks, "api-case-run:case.beta") {
 		t.Fatalf("profile verify runtime report = %#v", report)
 	}
@@ -250,20 +268,7 @@ func TestProfileVerifyCommandCanRequirePassedWorkflowRuns(t *testing.T) {
 	}
 
 	out := runCLI(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-workflow-runs", "--json")
-	var report struct {
-		OK      bool `json:"ok"`
-		Summary struct {
-			TotalChecks          int  `json:"totalChecks"`
-			PassedChecks         int  `json:"passedChecks"`
-			FailedChecks         int  `json:"failedChecks"`
-			RequiredCaseRuns     bool `json:"requiredCaseRuns"`
-			RequiredWorkflowRuns bool `json:"requiredWorkflowRuns"`
-		} `json:"summary"`
-		Checks []struct {
-			Name string `json:"name"`
-			OK   bool   `json:"ok"`
-		} `json:"checks"`
-	}
+	var report profileVerifyRuntimeReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode profile verify workflow report: %v\n%s", err, out)
 	}
@@ -290,13 +295,19 @@ func TestProfileImportAndVerifyUseNamedMySQLActiveStore(t *testing.T) {
 
 func runProfileImportAndVerifyUseNamedActiveStore(t *testing.T, storeRef string, runLabel string, label string) {
 	t.Helper()
+	importDir := importProfileAndRequireNamedStoreIndex(t, storeRef, label)
+	verifyDir := seedNamedProfileVerifyCaseRuns(t, storeRef, runLabel, label)
+	verifyReport := runNamedProfileVerifyJSON(t, verifyDir, label)
+	requireNamedProfileVerifyReport(t, label, verifyReport)
+	requireNamedProfileVerifyStoreState(t, storeRef, label, importDir, verifyDir)
+}
+
+func importProfileAndRequireNamedStoreIndex(t *testing.T, storeRef string, label string) string {
+	t.Helper()
+
 	importDir := writeEmptyProfileBundle(t)
 	importOut := runCLI(t, "profile", "import", "--from", importDir, "--json")
-	var importReport struct {
-		ProfileID  string   `json:"profileId"`
-		BundlePath string   `json:"bundlePath"`
-		ReadModels []string `json:"readModels"`
-	}
+	var importReport profileImportCommandReport
 	if err := json.Unmarshal([]byte(importOut), &importReport); err != nil {
 		t.Fatalf("decode %s profile import json: %v\n%s", label, err, importOut)
 	}
@@ -323,35 +334,45 @@ func runProfileImportAndVerifyUseNamedActiveStore(t *testing.T, storeRef string,
 	if catalogIndex.ProfileID != "empty" {
 		t.Fatalf("%s profile catalog index = %#v", label, catalogIndex)
 	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close imported %s profile Store: %v", label, err)
+	}
+	return importDir
+}
+
+func seedNamedProfileVerifyCaseRuns(t *testing.T, storeRef string, runLabel string, label string) string {
+	t.Helper()
 
 	verifyDir := writeInterfaceNodeCaseProfile(t)
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	ctx := context.Background()
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open %s profile Store for case runs: %v", label, err)
+	}
 	base := mustParseTime(t, "2026-05-18T03:00:00Z")
 	recordCaseRunForCoverage(t, ctx, runtime, "run."+runLabel+".alpha."+suffix, "case.alpha", store.StatusPassed, base)
 	recordCaseRunForCoverage(t, ctx, runtime, "run."+runLabel+".beta."+suffix, "case.beta", store.StatusPassed, base.Add(time.Minute))
 	if err := runtime.Close(); err != nil {
 		t.Fatalf("close %s profile Store: %v", label, err)
 	}
+	return verifyDir
+}
+
+func runNamedProfileVerifyJSON(t *testing.T, verifyDir string, label string) namedProfileVerifyReport {
+	t.Helper()
 
 	verifyOut := runCLI(t, "profile", "verify", "--profile", verifyDir, "--require-case-runs", "--json")
-	var verifyReport struct {
-		OK      bool `json:"ok"`
-		Publish struct {
-			ProfileID  string   `json:"profileId"`
-			ReadModels []string `json:"readModels"`
-		} `json:"publish"`
-		Summary struct {
-			RequiredCaseRuns bool `json:"requiredCaseRuns"`
-			FailedChecks     int  `json:"failedChecks"`
-		} `json:"summary"`
-		Checks []struct {
-			Name string `json:"name"`
-			OK   bool   `json:"ok"`
-		} `json:"checks"`
-	}
+	var verifyReport namedProfileVerifyReport
 	if err := json.Unmarshal([]byte(verifyOut), &verifyReport); err != nil {
 		t.Fatalf("decode %s profile verify json: %v\n%s", label, err, verifyOut)
 	}
+	return verifyReport
+}
+
+func requireNamedProfileVerifyReport(t *testing.T, label string, verifyReport namedProfileVerifyReport) {
+	t.Helper()
+
 	if !verifyReport.OK || verifyReport.Publish.ProfileID != "sample" || !hasReadModels(verifyReport.Publish.ReadModels, "interface-nodes", "catalog", "dashboard") {
 		t.Fatalf("%s profile verify report = %#v", label, verifyReport)
 	}
@@ -361,8 +382,13 @@ func runProfileImportAndVerifyUseNamedActiveStore(t *testing.T, storeRef string,
 	if !hasProfileVerifyCheck(verifyReport.Checks, "api-case-run:case.alpha") || !hasProfileVerifyCheck(verifyReport.Checks, "api-case-run:case.beta") {
 		t.Fatalf("%s profile verify checks = %#v", label, verifyReport.Checks)
 	}
+}
 
-	runtime, err = openStore(ctx, storeRef)
+func requireNamedProfileVerifyStoreState(t *testing.T, storeRef string, label string, importDir string, verifyDir string) {
+	t.Helper()
+
+	ctx := context.Background()
+	runtime, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("reopen %s profile Store: %v", label, err)
 	}
