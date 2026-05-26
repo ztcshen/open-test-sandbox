@@ -244,6 +244,17 @@ else
   tools/guardrails/check_store_first_contracts.sh
 fi
 
+if [[ "${AGENT_TESTBENCH_SKIP_QUALITY_GATE:-0}" == "1" ]]; then
+  step "skipping Go AI quality gate"
+else
+  step "running Go AI quality gate"
+  if [[ "$scoped_release_check" -eq 1 ]]; then
+    QUALITY_GATE_STRICT="${QUALITY_GATE_STRICT:-false}" scripts/quality-gate.sh --report-dir build/reports/quality-gate "${scope_paths[@]}"
+  else
+    QUALITY_GATE_STRICT="${QUALITY_GATE_STRICT:-false}" scripts/quality-gate.sh --report-dir build/reports/quality-gate
+  fi
+fi
+
 if [[ "$scoped_release_check" -eq 0 ]]; then
   step "running Go tests"
   if is_mysql_store_dsn "$smoke_store_dsn"; then

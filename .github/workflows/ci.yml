@@ -53,6 +53,11 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Run Go lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+
       - name: Install browser
         run: npx playwright install chromium
 
@@ -72,6 +77,14 @@ jobs:
           fi
         env:
           AGENT_TESTBENCH_SMOKE_STORE_DSN: mysql://root:ci-store-pass@127.0.0.1:3306/agent_testbench_ci_smoke?tls=false
+
+      - name: Upload quality gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-gate-report
+          path: build/reports/quality-gate
+          if-no-files-found: ignore
 
   mysql-real-signoff:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mysql_real_signoff == 'true' }}

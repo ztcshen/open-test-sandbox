@@ -1,0 +1,151 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+
+issues:
+  new: true
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - misspell
+    - revive
+    - gocyclo
+    - cyclop
+    - maintidx
+    - dupl
+    - goconst
+    - gocognit
+    - nakedret
+    - unparam
+    - prealloc
+    - whitespace
+    - importas
+    - depguard
+    - forbidigo
+  settings:
+    cyclop:
+      max-complexity: 20
+      package-average: 10
+    depguard:
+      rules:
+        domain-no-infra:
+          files:
+            - "internal/domain/**/*.go"
+          deny:
+            - pkg: "agent-testbench/internal/store"
+              desc: "domain must not depend on Store implementations"
+            - pkg: "agent-testbench/internal/server"
+              desc: "domain must not depend on server/control-plane code"
+            - pkg: "agent-testbench/internal/runner"
+              desc: "domain must not depend on runner implementations"
+        internal-no-cli:
+          files:
+            - "internal/**/*.go"
+          deny:
+            - pkg: "agent-testbench/cmd/agent-testbench"
+              desc: "internal packages must not depend on CLI entrypoints"
+        public-pkg-no-internal:
+          files:
+            - "pkg/**/*.go"
+          deny:
+            - pkg: "agent-testbench/internal"
+              desc: "public pkg code must not depend on internal business packages"
+    dupl:
+      threshold: 100
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    forbidigo:
+      forbid:
+        - pattern: "^print(ln)?$"
+          msg: "use explicit command output, logging, or testing helpers instead of built-in print"
+    gocognit:
+      min-complexity: 30
+    goconst:
+      min-len: 4
+      min-occurrences: 4
+    gocyclo:
+      min-complexity: 20
+    maintidx:
+      under: 20
+    nakedret:
+      max-func-lines: 30
+    revive:
+      severity: warning
+    staticcheck:
+      checks:
+        - all
+    unparam:
+      check-exported: false
+  exclusions:
+    generated: lax
+    paths:
+      - "^vendor/"
+      - "^third_party/"
+      - "^generated/"
+      - "^gen/"
+      - "^mocks/"
+      - "^mock/"
+      - "^testdata/"
+      - "^docs/"
+      - "^migrations/"
+      - "^scripts/"
+      - "^\\.runtime/"
+      - "^\\.scratch/"
+      - "^node_modules/"
+      - "^control-plane/static/assets/react/"
+      - ".*\\.pb\\.go$"
+      - ".*\\.pb\\.gw\\.go$"
+      - ".*\\.gen\\.go$"
+      - ".*_mock\\.go$"
+      - ".*/wire_gen\\.go$"
+      - ".*/swagger/.*"
+      - ".*/openapi/.*"
+    rules:
+      - path: "_test\\.go$"
+        linters:
+          - cyclop
+          - dupl
+          - errcheck
+          - gocognit
+          - goconst
+          - gocyclo
+          - maintidx
+          - prealloc
+          - unparam
+      - path: "^tools/qualitygate/"
+        linters:
+          - depguard
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - "^vendor/"
+      - "^third_party/"
+      - "^generated/"
+      - "^gen/"
+      - "^mocks/"
+      - "^mock/"
+      - "^testdata/"
+      - "^docs/"
+      - "^migrations/"
+      - "^scripts/"
+      - "^\\.runtime/"
+      - "^\\.scratch/"
+      - "^node_modules/"

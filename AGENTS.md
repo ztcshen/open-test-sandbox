@@ -64,6 +64,35 @@ agent-native, API-operated, Store-first, and local-first.
   code. Do not rely on pure inference to generate substantial architecture,
   API, persistence, migration, or workflow code.
 
+## AI Go Quality Gate Rules
+
+- Before adding Go behavior, search for an existing package, interface,
+  repository, client, validator, policy, or domain method that already owns the
+  concept.
+- Do not copy similar service, usecase, handler, or CLI command flows just to
+  move faster. If repeated code represents a real rule, move the rule to a
+  domain method, policy, validator, calculator, repository method, or client
+  wrapper with a business name.
+- Do not create `utils`, `common`, `helper`, or `helpers` packages to satisfy a
+  duplicate-code gate. Package names must describe the domain or boundary they
+  own.
+- Do not introduce an interface for reuse alone. In Go, add an interface only
+  when there are multiple implementations, a test/mock seam is needed, or the
+  interface marks an important dependency boundary.
+- Before splitting a large file, state the responsibility boundary. Before
+  splitting a large package, state the package semantics. File movement alone
+  does not count as a completed refactor.
+- When fixing duplication, do not delete business branches, error handling, or
+  tests to reduce reported lines. Public functions, interfaces, struct fields,
+  HTTP routes, proto/OpenAPI contracts, migrations, and wire files require an
+  explicit impact note.
+- If keeping duplication is clearer, say why. DTO assembly, generated code,
+  large test fixtures, and intentionally parallel request/response shapes can
+  stay duplicated when abstraction would hide intent.
+- Run `go test ./...` and `make quality` before handing off Go changes. Use
+  `QUALITY_GATE_STRICT=true make quality` only when the slice is ready for
+  blocking enforcement.
+
 ## Project Shape
 
 - `cmd/agent-testbench/`: CLI entrypoint.

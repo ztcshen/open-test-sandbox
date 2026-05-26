@@ -180,6 +180,7 @@ test("release-check scoped Go selection runs only touched package directories", 
 
     const result = runReleaseCheck(releaseCheckEnv({
       AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-go-scope-test.sqlite",
+      AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
       PATH: `${binDir}:${process.env.PATH}`,
     }), ["--scope", "internal/store/mysql/config.go"]);
 
@@ -192,6 +193,7 @@ test("release-check scoped Go selection runs only touched package directories", 
     await writeFile(goLog, "");
     const dirResult = runReleaseCheck(releaseCheckEnv({
       AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-go-dir-scope-test.sqlite",
+      AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
       PATH: `${binDir}:${process.env.PATH}`,
     }), ["--scope", "internal/store/mysql"]);
 
@@ -223,6 +225,7 @@ fi
 
     const result = runReleaseCheck(releaseCheckEnv({
       AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-go-dependents-test.sqlite",
+      AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
       PATH: `${binDir}:${process.env.PATH}`,
     }), ["--scope", "internal/store/mysql/config.go"]);
 
