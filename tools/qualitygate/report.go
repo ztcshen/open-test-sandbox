@@ -174,6 +174,17 @@ func sortedKeys(values map[string]bool) []string {
 	return out
 }
 
+func sortedCountKeys(values map[string]int) []string {
+	out := make([]string, 0, len(values))
+	for key, count := range values {
+		for i := 0; i < count; i++ {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func getenv(key string) string {
 	return os.Getenv(key)
 }

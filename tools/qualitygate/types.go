@@ -24,6 +24,7 @@ type Config struct {
 	FileEffectiveLinesBlock  int
 	FunctionLinesWarn        int
 	FunctionLinesBlock       int
+	FunctionStatementsWarn   int
 	FunctionDuplicateLines   int
 	StructFieldsWarn         int
 	StructFieldsBlock        int
@@ -95,6 +96,7 @@ type FunctionMetric struct {
 	StartLine  int    `json:"startLine"`
 	EndLine    int    `json:"endLine"`
 	Lines      int    `json:"lines"`
+	Statements int    `json:"statements"`
 }
 
 type PackageMetric struct {
@@ -157,16 +159,17 @@ func DefaultConfig() Config {
 		FileEffectiveLinesBlock: 600,
 		FunctionLinesWarn:       60,
 		FunctionLinesBlock:      100,
+		FunctionStatementsWarn:  60,
 		FunctionDuplicateLines:  80,
-		StructFieldsWarn:        25,
+		StructFieldsWarn:        35,
 		StructFieldsBlock:       40,
-		InterfaceMethodsWarn:    10,
+		InterfaceMethodsWarn:    16,
 		InterfaceMethodsBlock:   20,
 		PackageLinesWarn:        1500,
 		PackageLinesBlock:       0,
 		PackageFileCountWarn:    20,
 		PackageFileCountBlock:   0,
-		FileFunctionCountWarn:   25,
+		FileFunctionCountWarn:   40,
 		FileFunctionCountBlock:  45,
 		DuplicatePercentWarn:    5,
 		DuplicatePercentBlock:   8,

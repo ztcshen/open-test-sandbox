@@ -95,6 +95,51 @@ func isConfigOrEnumFile(path string) bool {
 		strings.Contains(base, "schema")
 }
 
+func isRouteRegistrationFile(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	return strings.HasPrefix(base, "routes_") || strings.HasSuffix(base, "_routes.go")
+}
+
+func isCLISurfaceFile(path string) bool {
+	return strings.HasPrefix(normalizePath(path), "cmd/agent-testbench/")
+}
+
+func isControlPlaneSurfaceFile(path string) bool {
+	return strings.HasPrefix(normalizePath(path), "internal/server/controlplane/")
+}
+
+func isStoreSchemaSurfaceFile(path string) bool {
+	path = normalizePath(path)
+	base := strings.ToLower(filepath.Base(path))
+	return strings.HasPrefix(path, "internal/store/schema/") ||
+		strings.HasPrefix(path, "internal/store/sqlstore/") ||
+		strings.HasPrefix(path, "internal/store/sqlite/") ||
+		strings.Contains(base, "migration") ||
+		strings.Contains(base, "dialect")
+}
+
+func isProfileArtifactSurfaceFile(path string) bool {
+	path = normalizePath(path)
+	return strings.HasPrefix(path, "internal/domain/profilehome/") ||
+		strings.HasPrefix(path, "internal/domain/profileimport/") ||
+		strings.HasPrefix(path, "internal/profilepublish/")
+}
+
+func isRunnerEvidenceSurfaceFile(path string) bool {
+	return strings.HasPrefix(normalizePath(path), "internal/runner/evidence/")
+}
+
+func isStoreContractSurfaceFile(path string) bool {
+	path = normalizePath(path)
+	return path == "internal/store/store.go" ||
+		strings.HasPrefix(path, "internal/store/mysql/") ||
+		strings.HasPrefix(path, "internal/store/postgres/")
+}
+
+func isQualityGateToolFile(path string) bool {
+	return strings.HasPrefix(normalizePath(path), "tools/qualitygate/")
+}
+
 func isCorePath(path string) bool {
 	path = normalizePath(path)
 	return strings.HasPrefix(path, "cmd/") ||

@@ -19,6 +19,18 @@ type traceCollector struct {
 
 type TraceCollector = traceCollector
 
+type traceTopologyCollectInput struct {
+	run        store.Run
+	caseID     string
+	stepID     string
+	requestID  string
+	traceID    string
+	endpoint   string
+	rowID      string
+	startedAt  time.Time
+	finishedAt time.Time
+}
+
 func handleTraceTopologyCollect(w http.ResponseWriter, r *http.Request, runtime store.Store, collector traceCollector) {
 	payload, err := readJSONPayload(r)
 	if err != nil {
@@ -90,73 +102,17 @@ func traceTopologyCollectTaskSeed(ctx context.Context, runtime store.Store, payl
 }
 
 func collectTraceTopology(ctx context.Context, runtime store.Store, collector traceCollector, payload map[string]any) (store.TraceTopology, traceTopology, error) {
-	if runtime == nil {
-		return store.TraceTopology{}, traceTopology{}, fmt.Errorf("runtime store is not configured")
-	}
 	if strings.TrimSpace(collector.GraphQLURL) == "" {
 		return store.TraceTopology{}, traceTopology{}, fmt.Errorf("trace provider GraphQL URL is not configured")
 	}
-	runID := strings.TrimSpace(valueString(payload["runId"]))
-	if runID == "" {
-		return store.TraceTopology{}, traceTopology{}, fmt.Errorf("runId is required")
-	}
-	run, err := runtime.GetRun(ctx, runID)
+	input, err := traceTopologyCollectInputFromPayload(ctx, runtime, payload)
 	if err != nil {
 		return store.TraceTopology{}, traceTopology{}, err
 	}
-	caseID := strings.TrimSpace(valueString(payload["caseId"]))
-	if caseID == "" {
-		caseRuns, err := runtime.ListAPICaseRuns(ctx, runID)
-		if err != nil {
-			return store.TraceTopology{}, traceTopology{}, err
-		}
-		if len(caseRuns) > 0 {
-			caseID = caseRuns[0].CaseID
-		}
-	}
-	stepID := strings.TrimSpace(valueString(payload["stepId"]))
-	requestID := strings.TrimSpace(valueString(payload["requestId"]))
-	traceID := strings.TrimSpace(valueString(payload["traceId"]))
-	endpoint := strings.TrimSpace(valueString(payload["endpoint"]))
-	if endpoint == "" && traceID == "" {
-		return store.TraceTopology{}, traceTopology{}, fmt.Errorf("endpoint is required")
-	}
-	startedAt := timeFromPayload(payload["startedAt"], run.StartedAt, run.CreatedAt)
-	finishedAt := timeFromPayload(payload["finishedAt"], run.FinishedAt, run.UpdatedAt, run.CreatedAt)
-	if finishedAt.Before(startedAt) {
-		finishedAt = startedAt.Add(2 * time.Minute)
-	}
-	queryStartedAt := startedAt.Add(-30 * time.Second)
-	queryFinishedAt := finishedAt.Add(90 * time.Second)
 	provider := graphQLTraceProvider{URL: collector.GraphQLURL}
-	var topology traceTopology
-	if traceID != "" {
-		trace, err := provider.QueryTrace(ctx, traceID)
-		if err != nil {
-			return store.TraceTopology{}, traceTopology{}, err
-		}
-		topology = buildTraceTopology(stepID, caseID, requestID, trace)
-	} else {
-		candidates, err := provider.FindCandidates(ctx, endpoint, queryStartedAt, queryFinishedAt)
-		if err != nil {
-			return store.TraceTopology{}, traceTopology{}, err
-		}
-		sortTraceCandidatesByRunWindow(candidates, startedAt, finishedAt)
-		var lastErr error
-		for _, candidate := range candidates {
-			trace, err := provider.QueryTrace(ctx, candidate.TraceID)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			candidateTopology := buildTraceTopology(stepID, caseID, requestID, trace)
-			if len(candidateTopology.ConfirmedEdges) > len(topology.ConfirmedEdges) || topology.SpanCount == 0 {
-				topology = candidateTopology
-			}
-		}
-		if topology.SpanCount == 0 && lastErr != nil {
-			return store.TraceTopology{}, traceTopology{}, lastErr
-		}
+	topology, err := queryTraceTopology(ctx, provider, input)
+	if err != nil {
+		return store.TraceTopology{}, traceTopology{}, err
 	}
 	if topology.SpanCount == 0 {
 		return store.TraceTopology{}, traceTopology{}, fmt.Errorf("trace provider returned no queryable traces")
@@ -165,16 +121,111 @@ func collectTraceTopology(ctx context.Context, runtime store.Store, collector tr
 	if err != nil {
 		return store.TraceTopology{}, traceTopology{}, err
 	}
-	rowID := strings.TrimSpace(valueString(payload["id"]))
-	if rowID == "" {
-		rowID = traceTopologyRowID(run.ID, stepID, caseID, topology.TraceID, topology.RequestID)
+	row, err := saveCollectedTraceTopology(ctx, runtime, input, topology, raw)
+	if err != nil {
+		return store.TraceTopology{}, traceTopology{}, err
 	}
-	row, err := runtime.SaveTraceTopology(ctx, store.TraceTopology{
+	return row, topology, nil
+}
+
+func traceTopologyCollectInputFromPayload(ctx context.Context, runtime store.Store, payload map[string]any) (traceTopologyCollectInput, error) {
+	if runtime == nil {
+		return traceTopologyCollectInput{}, fmt.Errorf("runtime store is not configured")
+	}
+	runID := strings.TrimSpace(valueString(payload["runId"]))
+	if runID == "" {
+		return traceTopologyCollectInput{}, fmt.Errorf("runId is required")
+	}
+	run, err := runtime.GetRun(ctx, runID)
+	if err != nil {
+		return traceTopologyCollectInput{}, err
+	}
+	caseID, err := traceTopologyCollectCaseID(ctx, runtime, runID, payload)
+	if err != nil {
+		return traceTopologyCollectInput{}, err
+	}
+	input := traceTopologyCollectInput{
+		run:       run,
+		caseID:    caseID,
+		stepID:    strings.TrimSpace(valueString(payload["stepId"])),
+		requestID: strings.TrimSpace(valueString(payload["requestId"])),
+		traceID:   strings.TrimSpace(valueString(payload["traceId"])),
+		endpoint:  strings.TrimSpace(valueString(payload["endpoint"])),
+		rowID:     strings.TrimSpace(valueString(payload["id"])),
+	}
+	if input.endpoint == "" && input.traceID == "" {
+		return traceTopologyCollectInput{}, fmt.Errorf("endpoint is required")
+	}
+	input.startedAt = timeFromPayload(payload["startedAt"], run.StartedAt, run.CreatedAt)
+	input.finishedAt = timeFromPayload(payload["finishedAt"], run.FinishedAt, run.UpdatedAt, run.CreatedAt)
+	if input.finishedAt.Before(input.startedAt) {
+		input.finishedAt = input.startedAt.Add(2 * time.Minute)
+	}
+	return input, nil
+}
+
+func traceTopologyCollectCaseID(ctx context.Context, runtime store.Store, runID string, payload map[string]any) (string, error) {
+	caseID := strings.TrimSpace(valueString(payload["caseId"]))
+	if caseID != "" {
+		return caseID, nil
+	}
+	caseRuns, err := runtime.ListAPICaseRuns(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	if len(caseRuns) == 0 {
+		return "", nil
+	}
+	return caseRuns[0].CaseID, nil
+}
+
+func queryTraceTopology(ctx context.Context, provider graphQLTraceProvider, input traceTopologyCollectInput) (traceTopology, error) {
+	if input.traceID != "" {
+		trace, err := provider.QueryTrace(ctx, input.traceID)
+		if err != nil {
+			return traceTopology{}, err
+		}
+		return buildTraceTopology(input.stepID, input.caseID, input.requestID, trace), nil
+	}
+	return queryBestTraceCandidateTopology(ctx, provider, input)
+}
+
+func queryBestTraceCandidateTopology(ctx context.Context, provider graphQLTraceProvider, input traceTopologyCollectInput) (traceTopology, error) {
+	candidates, err := provider.FindCandidates(ctx, input.endpoint, input.startedAt.Add(-30*time.Second), input.finishedAt.Add(90*time.Second))
+	if err != nil {
+		return traceTopology{}, err
+	}
+	sortTraceCandidatesByRunWindow(candidates, input.startedAt, input.finishedAt)
+	var topology traceTopology
+	var lastErr error
+	for _, candidate := range candidates {
+		trace, err := provider.QueryTrace(ctx, candidate.TraceID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		candidateTopology := buildTraceTopology(input.stepID, input.caseID, input.requestID, trace)
+		if len(candidateTopology.ConfirmedEdges) > len(topology.ConfirmedEdges) || topology.SpanCount == 0 {
+			topology = candidateTopology
+		}
+	}
+	if topology.SpanCount == 0 && lastErr != nil {
+		return traceTopology{}, lastErr
+	}
+	return topology, nil
+}
+
+func saveCollectedTraceTopology(ctx context.Context, runtime store.Store, input traceTopologyCollectInput, topology traceTopology, raw []byte) (store.TraceTopology, error) {
+	rowID := input.rowID
+	if rowID == "" {
+		rowID = traceTopologyRowID(input.run.ID, input.stepID, input.caseID, topology.TraceID, topology.RequestID)
+	}
+	return runtime.SaveTraceTopology(ctx, store.TraceTopology{
 		ID:            rowID,
-		WorkflowRunID: run.ID,
-		WorkflowID:    run.WorkflowID,
-		StepID:        stepID,
-		CaseID:        caseID,
+		WorkflowRunID: input.run.ID,
+		WorkflowID:    input.run.WorkflowID,
+		StepID:        input.stepID,
+		CaseID:        input.caseID,
 		RequestID:     topology.RequestID,
 		TraceID:       topology.TraceID,
 		Status:        topology.Status,
@@ -182,10 +233,6 @@ func collectTraceTopology(ctx context.Context, runtime store.Store, collector tr
 		TextTopology:  topology.TextTopology,
 		CreatedAt:     time.Now().UTC(),
 	})
-	if err != nil {
-		return store.TraceTopology{}, traceTopology{}, err
-	}
-	return row, topology, nil
 }
 
 func traceTopologyRowID(runID string, stepID string, caseID string, traceID string, requestID string) string {
