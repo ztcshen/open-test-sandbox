@@ -198,6 +198,9 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if options.Execute && !options.JSONOutput {
+		ctx = contextWithEnvironmentRestoreProgress(ctx, os.Stderr)
+	}
 	runtime, err := openStore(ctx, options.StoreURL)
 	if err != nil {
 		return err

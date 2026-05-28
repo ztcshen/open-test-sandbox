@@ -38,6 +38,15 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 	requireSandboxStartupSideEffects(t, fixture)
 }
 
+func TestSandboxStartMissingServiceExplainsRegistryBoundary(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+
+	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--service", "mysql")
+	if !strings.Contains(out, "profile service registry") || !strings.Contains(out, "environment restore") {
+		t.Fatalf("missing service error should explain registry boundary, got %q", out)
+	}
+}
+
 func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {
 	t.Helper()
 

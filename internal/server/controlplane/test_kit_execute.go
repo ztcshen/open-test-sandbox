@@ -41,6 +41,9 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 	if err := applyAPICaseRequestModel(&request, item.Case); err != nil {
 		return failedCaseExecution(item.Case.ID, err.Error())
 	}
+	if request.requiresBody() && request.body == nil {
+		return failedCaseExecution(item.Case.ID, fmt.Sprintf("%s caseExecution.body is required for %s; add caseExecution.body or a request template that renders a body", request.method, item.Case.ID))
+	}
 	httpRequest, err := http.NewRequestWithContext(ctx, request.method, request.fullURL, request.bodyReader())
 	if err != nil {
 		return failedCaseExecution(item.Case.ID, err.Error())
@@ -113,6 +116,15 @@ type caseHTTPRequest struct {
 	expectedResponse  []string
 	nodeID            string
 	signed            bool
+}
+
+func (request caseHTTPRequest) requiresBody() bool {
+	switch strings.ToUpper(strings.TrimSpace(request.method)) {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		return true
+	default:
+		return false
+	}
 }
 
 func buildCaseHTTPRequest(ctx context.Context, bundle profile.Bundle, runtime store.Store, execution caseExecutionConfig, caseBaseURL string, payload map[string]any) (caseHTTPRequest, error) {

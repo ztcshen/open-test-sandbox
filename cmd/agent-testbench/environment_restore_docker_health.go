@@ -67,11 +67,14 @@ func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeo
 func waitEnvironmentRestoreURLHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
 	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(timeout)
+	progress := newEnvironmentRestoreHealthProgress(ctx, check, timeout)
+	progress.start()
 	var lastErr string
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, check.URL, nil)
 		if err != nil {
 			check.Error = err.Error()
+			progress.done(false, check.Error)
 			return check
 		}
 		resp, err := client.Do(req)
@@ -80,32 +83,31 @@ func waitEnvironmentRestoreURLHealthCheck(ctx context.Context, check environment
 			if closeErr := resp.Body.Close(); closeErr != nil {
 				lastErr = closeErr.Error()
 				check.Error = lastErr
+				progress.done(false, check.Error)
 				return check
 			}
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				check.OK = true
 				check.Error = ""
+				progress.done(true, fmt.Sprintf("HTTP %d", resp.StatusCode))
 				return check
 			}
 			lastErr = fmt.Sprintf("health check returned HTTP %d", resp.StatusCode)
 		} else {
 			lastErr = err.Error()
 		}
-		if time.Now().After(deadline) {
-			check.Error = lastErr
+		var keepWaiting bool
+		check, keepWaiting = waitEnvironmentRestoreHealthPoll(ctx, check, &progress, deadline, lastErr)
+		if !keepWaiting {
 			return check
-		}
-		select {
-		case <-ctx.Done():
-			check.Error = ctx.Err().Error()
-			return check
-		case <-time.After(250 * time.Millisecond):
 		}
 	}
 }
 
 func waitEnvironmentRestoreTCPHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
 	deadline := time.Now().Add(timeout)
+	progress := newEnvironmentRestoreHealthProgress(ctx, check, timeout)
+	progress.start()
 	var lastErr string
 	for {
 		dialer := net.Dialer{Timeout: 2 * time.Second}
@@ -113,23 +115,37 @@ func waitEnvironmentRestoreTCPHealthCheck(ctx context.Context, check environment
 		if err == nil {
 			if closeErr := conn.Close(); closeErr != nil {
 				check.Error = closeErr.Error()
+				progress.done(false, check.Error)
 				return check
 			}
 			check.OK = true
 			check.Error = ""
+			progress.done(true, "tcp connected")
 			return check
 		}
 		lastErr = err.Error()
-		if time.Now().After(deadline) {
-			check.Error = lastErr
+		var keepWaiting bool
+		check, keepWaiting = waitEnvironmentRestoreHealthPoll(ctx, check, &progress, deadline, lastErr)
+		if !keepWaiting {
 			return check
 		}
-		select {
-		case <-ctx.Done():
-			check.Error = ctx.Err().Error()
-			return check
-		case <-time.After(250 * time.Millisecond):
-		}
+	}
+}
+
+func waitEnvironmentRestoreHealthPoll(ctx context.Context, check environmentRestoreHealthCheckReport, progress *environmentRestoreHealthProgress, deadline time.Time, lastErr string) (environmentRestoreHealthCheckReport, bool) {
+	if time.Now().After(deadline) {
+		check.Error = lastErr
+		progress.done(false, check.Error)
+		return check, false
+	}
+	progress.waiting(lastErr, deadline)
+	select {
+	case <-ctx.Done():
+		check.Error = ctx.Err().Error()
+		progress.done(false, check.Error)
+		return check, false
+	case <-time.After(250 * time.Millisecond):
+		return check, true
 	}
 }
 
@@ -172,6 +188,8 @@ func waitEnvironmentRestoreContainerHealthCheck(ctx context.Context, check envir
 
 func waitEnvironmentRestoreCommand(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration, workspace string, command []string, ok func(*environmentRestoreHealthCheckReport, string) bool) environmentRestoreHealthCheckReport {
 	deadline := time.Now().Add(timeout)
+	progress := newEnvironmentRestoreHealthProgress(ctx, check, timeout)
+	progress.start()
 	var lastErr string
 	for {
 		output, errText := runRestoreCommand(ctx, workspace, command)
@@ -181,6 +199,7 @@ func waitEnvironmentRestoreCommand(ctx context.Context, check environmentRestore
 			if check.Output == "" {
 				check.Output = truncateReportText(output, 200)
 			}
+			progress.done(true, "ready")
 			return check
 		}
 		if errText != "" {
@@ -193,14 +212,80 @@ func waitEnvironmentRestoreCommand(ctx context.Context, check environmentRestore
 			if check.Output == "" {
 				check.Output = truncateReportText(output, 200)
 			}
+			progress.done(false, check.Error)
 			return check
 		}
+		progress.waiting(lastErr, deadline)
 		select {
 		case <-ctx.Done():
 			check.Error = ctx.Err().Error()
+			progress.done(false, check.Error)
 			return check
 		case <-time.After(250 * time.Millisecond):
 		}
+	}
+}
+
+type environmentRestoreHealthProgress struct {
+	ctx       context.Context
+	target    string
+	timeout   time.Duration
+	lastPrint time.Time
+}
+
+func newEnvironmentRestoreHealthProgress(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthProgress {
+	return environmentRestoreHealthProgress{
+		ctx:     ctx,
+		target:  environmentRestoreHealthProgressTarget(check),
+		timeout: timeout,
+	}
+}
+
+func (p *environmentRestoreHealthProgress) start() {
+	environmentRestoreProgressf(p.ctx, "restore health checking: %s timeout=%s\n", p.target, p.timeout)
+	p.lastPrint = time.Now()
+}
+
+func (p *environmentRestoreHealthProgress) waiting(lastErr string, deadline time.Time) {
+	if time.Since(p.lastPrint) < 2*time.Second {
+		return
+	}
+	remaining := time.Until(deadline).Round(time.Second)
+	if remaining < 0 {
+		remaining = 0
+	}
+	environmentRestoreProgressf(p.ctx, "restore health waiting: %s last=%s remaining=%s\n", p.target, lastErr, remaining)
+	p.lastPrint = time.Now()
+}
+
+func (p *environmentRestoreHealthProgress) done(ok bool, detail string) {
+	state := "failed"
+	if ok {
+		state = "ok"
+	}
+	environmentRestoreProgressf(p.ctx, "restore health %s: %s last=%s\n", state, p.target, detail)
+}
+
+func environmentRestoreHealthProgressTarget(check environmentRestoreHealthCheckReport) string {
+	switch strings.TrimSpace(check.Kind) {
+	case "url", "":
+		return "url " + check.URL
+	case "tcp":
+		return "tcp " + check.Address
+	case "compose-service":
+		return "compose-service " + check.Service
+	case "container":
+		return "container " + check.Container
+	case "command":
+		if check.ID != "" {
+			return "command " + check.ID
+		}
+		return "command health check"
+	default:
+		if check.ID != "" {
+			return check.Kind + " " + check.ID
+		}
+		return check.Kind
 	}
 }
 

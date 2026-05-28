@@ -249,7 +249,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		}
 	}
 	if strings.TrimSpace(*serviceID) != "" && report.Counts.Total == 0 {
-		return fmt.Errorf("registered service not found: %s", strings.TrimSpace(*serviceID))
+		return fmt.Errorf("registered service not found in profile service registry: %s (sandbox start does not read the environment component graph; use environment restore for component-graph Docker startup or register the service with sandbox service register)", strings.TrimSpace(*serviceID))
 	}
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {

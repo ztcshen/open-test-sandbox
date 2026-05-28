@@ -107,6 +107,59 @@ func TestServerTestKitRunHonorsExpectedResponseContains(t *testing.T) {
 	}
 }
 
+func TestServerTestKitRunFailsFastForBodylessWriteRequest(t *testing.T) {
+	ctx := context.Background()
+	targetCalled := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	s := openTestKitSQLiteStore(t, ctx, "sandbox.sqlite")
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: time.Now().UTC(),
+		APICases: []store.CatalogAPICase{
+			{ID: "case.bodyless", DisplayName: "Bodyless Case", NodeID: "node.alpha", Status: "active"},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.case.bodyless",
+				TemplateID: "template.case.bodyless",
+				NodeID:     "node.alpha",
+				Status:     "active",
+				ConfigJSON: `{
+					"caseId":"case.bodyless",
+					"caseExecution":{
+						"method":"POST",
+						"nodeId":"node.alpha",
+						"path":"/submit",
+						"expectedHttpCodes":[200]
+					}
+				}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	var result map[string]any
+	postJSONInto(t, server.URL+"/api/test-kit/run", fmt.Sprintf(`{
+		"caseId":"case.bodyless",
+		"baseUrl":%q
+	}`, target.URL), http.StatusOK, &result)
+	if targetCalled {
+		t.Fatal("bodyless write request should fail before sending HTTP")
+	}
+	if result["ok"] != false || !strings.Contains(fmt.Sprint(result["error"]), "POST caseExecution.body") {
+		t.Fatalf("test kit result = %#v", result)
+	}
+}
+
 func TestServerExecutesTestKitRunFromStoreRegisteredServicePort(t *testing.T) {
 	ctx := context.Background()
 	var receivedPath string

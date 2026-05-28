@@ -11,6 +11,9 @@ agent-native, API-operated, Store-first, and local-first.
   Multica issue.
 - Do not post Multica comments, change issue status, or fetch issue context for
   ordinary local AgentTestBench questions and implementation tasks.
+- When a session discovers AgentTestBench usability or workflow feedback that is
+  not immediately fixed, register it with `skills/agent-testbench-feedback`
+  instead of writing temporary notes under `/tmp`.
 
 ## Core Rules
 

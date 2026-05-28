@@ -3,6 +3,7 @@ package casesuite
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -200,54 +201,160 @@ func RecordsForCaseIDs(ctx context.Context, runtime RecordStore, caseIDs []strin
 
 func ExecutionConfigSet(ctx context.Context, bundle profile.Bundle, runtime RecordStore) map[string]bool {
 	out := map[string]bool{}
-	addProfileTemplateConfigs(out, bundle.TemplateConfigs)
+	addProfileTemplateConfigs(out, bundle.TemplateConfigs, profileExecutionBodySources(bundle.APICases, bundle.RequestTemplates))
 	if catalogRuntime, ok := runtime.(interface {
 		GetProfileCatalog(context.Context) (domaincatalog.ProfileCatalog, error)
 	}); ok {
 		if catalog, err := catalogRuntime.GetProfileCatalog(ctx); err == nil {
-			addCatalogTemplateConfigs(out, catalog.TemplateConfigs)
+			addCatalogTemplateConfigs(out, catalog.TemplateConfigs, catalogExecutionBodySources(catalog.APICases, catalog.RequestTemplates))
 		}
 	}
 	return out
 }
 
-func addProfileTemplateConfigs(out map[string]bool, configs []profile.TemplateConfig) {
+func addProfileTemplateConfigs(out map[string]bool, configs []profile.TemplateConfig, bodySources executionConfigBodySources) {
 	for _, config := range configs {
-		addExecutionTemplateConfig(out, config.Status, config.ScopeType, config.ScopeID, config.ConfigJSON)
+		addExecutionTemplateConfig(out, config.Status, config.ScopeType, config.ScopeID, config.ConfigJSON, bodySources)
 	}
 }
 
-func addCatalogTemplateConfigs(out map[string]bool, configs []domaincatalog.TemplateConfig) {
+func addCatalogTemplateConfigs(out map[string]bool, configs []domaincatalog.TemplateConfig, bodySources executionConfigBodySources) {
 	for _, config := range configs {
-		addExecutionTemplateConfig(out, config.Status, config.ScopeType, config.ScopeID, config.ConfigJSON)
+		addExecutionTemplateConfig(out, config.Status, config.ScopeType, config.ScopeID, config.ConfigJSON, bodySources)
 	}
 }
 
-func addExecutionTemplateConfig(out map[string]bool, status string, scopeType string, scopeID string, configJSON string) {
+func addExecutionTemplateConfig(out map[string]bool, status string, scopeType string, scopeID string, configJSON string, bodySources executionConfigBodySources) {
 	if !activeStatus(status) {
 		return
 	}
-	if scopeType == "case" && strings.TrimSpace(scopeID) != "" {
-		out[strings.TrimSpace(scopeID)] = true
-		return
-	}
-	if caseID := executionConfigCaseID(configJSON); caseID != "" {
+	if caseID := executionConfigCaseID(scopeType, scopeID, configJSON, bodySources); caseID != "" {
 		out[caseID] = true
 	}
 }
 
-func executionConfigCaseID(configJSON string) string {
+func executionConfigCaseID(scopeType string, scopeID string, configJSON string, bodySources executionConfigBodySources) string {
 	var payload struct {
-		CaseID        string         `json:"caseId"`
-		CaseExecution map[string]any `json:"caseExecution"`
+		CaseID        string `json:"caseId"`
+		CaseExecution struct {
+			Method string          `json:"method"`
+			NodeID string          `json:"nodeId"`
+			Path   string          `json:"path"`
+			Body   json.RawMessage `json:"body"`
+		} `json:"caseExecution"`
 	}
 	if json.Unmarshal([]byte(configJSON), &payload) != nil {
 		return ""
 	}
-	if strings.TrimSpace(payload.CaseID) == "" || len(payload.CaseExecution) == 0 {
+	caseID := strings.TrimSpace(payload.CaseID)
+	if caseID == "" && scopeType == "case" {
+		caseID = strings.TrimSpace(scopeID)
+	}
+	if caseID == "" {
 		return ""
 	}
-	return strings.TrimSpace(payload.CaseID)
+	execution := payload.CaseExecution
+	if execution.Method == "" && execution.NodeID == "" && execution.Path == "" {
+		return ""
+	}
+	if executionConfigMethodNeedsBody(execution.Method) && !executionConfigBodyPresent(execution.Body) && !bodySources[caseID] {
+		return ""
+	}
+	return caseID
+}
+
+type executionConfigBodySources map[string]bool
+
+func profileExecutionBodySources(cases []profile.APICase, templates []profile.RequestTemplate) executionConfigBodySources {
+	return collectExecutionBodySources(cases, templates, func(item profile.APICase) executionCaseBodySource {
+		return executionCaseBodySource{
+			ID:                  item.ID,
+			RenderMode:          item.RenderMode,
+			PatchJSON:           item.PatchJSON,
+			PayloadTemplateJSON: item.PayloadTemplateJSON,
+			RequestTemplateID:   item.RequestTemplateID,
+		}
+	}, func(item profile.RequestTemplate) executionTemplateBodySource {
+		return executionTemplateBodySource{ID: item.ID, TemplateJSON: item.TemplateJSON}
+	})
+}
+
+func catalogExecutionBodySources(cases []domaincatalog.APICase, templates []domaincatalog.RequestTemplate) executionConfigBodySources {
+	return collectExecutionBodySources(cases, templates, func(item domaincatalog.APICase) executionCaseBodySource {
+		return executionCaseBodySource{
+			ID:                  item.ID,
+			RenderMode:          item.RenderMode,
+			PatchJSON:           item.PatchJSON,
+			PayloadTemplateJSON: item.PayloadTemplateJSON,
+			RequestTemplateID:   item.RequestTemplateID,
+		}
+	}, func(item domaincatalog.RequestTemplate) executionTemplateBodySource {
+		return executionTemplateBodySource{ID: item.ID, TemplateJSON: item.TemplateJSON}
+	})
+}
+
+type executionCaseBodySource struct {
+	ID                  string
+	RenderMode          string
+	PatchJSON           string
+	PayloadTemplateJSON string
+	RequestTemplateID   string
+}
+
+type executionTemplateBodySource struct {
+	ID           string
+	TemplateJSON string
+}
+
+func collectExecutionBodySources[Case any, Template any](cases []Case, templates []Template, caseSource func(Case) executionCaseBodySource, templateSource func(Template) executionTemplateBodySource) executionConfigBodySources {
+	templateBodies := map[string]bool{}
+	for _, item := range templates {
+		source := templateSource(item)
+		if executionConfigBodyPresent(json.RawMessage(source.TemplateJSON)) {
+			templateBodies[strings.TrimSpace(source.ID)] = true
+		}
+	}
+	out := executionConfigBodySources{}
+	for _, item := range cases {
+		source := caseSource(item)
+		caseID := strings.TrimSpace(source.ID)
+		if caseID == "" {
+			continue
+		}
+		if apiCaseCanRenderBody(source.RenderMode, source.PatchJSON, source.PayloadTemplateJSON, source.RequestTemplateID, templateBodies) {
+			out[caseID] = true
+		}
+	}
+	return out
+}
+
+func apiCaseCanRenderBody(renderMode string, patchJSON string, payloadTemplateJSON string, requestTemplateID string, templateBodies map[string]bool) bool {
+	if strings.TrimSpace(renderMode) != "template_patch" || !executionConfigBodyPatchPresent(patchJSON) {
+		return false
+	}
+	if executionConfigBodyPresent(json.RawMessage(payloadTemplateJSON)) {
+		return true
+	}
+	return templateBodies[strings.TrimSpace(requestTemplateID)]
+}
+
+func executionConfigMethodNeedsBody(method string) bool {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		return true
+	default:
+		return false
+	}
+}
+
+func executionConfigBodyPresent(body json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(body))
+	return trimmed != "" && trimmed != "null"
+}
+
+func executionConfigBodyPatchPresent(patchJSON string) bool {
+	trimmed := strings.TrimSpace(patchJSON)
+	return trimmed != "" && trimmed != "null" && trimmed != "[]"
 }
 
 func activeStatus(status string) bool {

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	domaincatalog "agent-testbench/internal/domain/catalog"
 	"agent-testbench/internal/domain/execution"
 	"agent-testbench/internal/domain/profile"
 )
@@ -57,6 +58,7 @@ func containsString(values []string, want string) bool {
 
 type recordStore struct {
 	records []execution.APICaseRunRecord
+	catalog *domaincatalog.ProfileCatalog
 }
 
 func (s recordStore) ListAPICaseRunRecordsForCaseIDs(context.Context, []string) ([]execution.APICaseRunRecord, error) {
@@ -69,6 +71,13 @@ func (s recordStore) ListRuns(context.Context) ([]execution.Run, error) {
 
 func (s recordStore) ListAPICaseRuns(context.Context, string) ([]execution.APICaseRun, error) {
 	return nil, nil
+}
+
+func (s recordStore) GetProfileCatalog(context.Context) (domaincatalog.ProfileCatalog, error) {
+	if s.catalog == nil {
+		return domaincatalog.ProfileCatalog{}, nil
+	}
+	return *s.catalog, nil
 }
 
 func record(runID string, caseID string, status string, at time.Time) execution.APICaseRunRecord {

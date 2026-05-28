@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,6 +148,28 @@ func TestEnvironmentRestoreFailsWhenHealthProbeFails(t *testing.T) {
 	inspectOut := runCLI(t, "environment", "inspect", "--store", fixture.StoreDSN, "--json", "env.health.fail")
 	if !strings.Contains(inspectOut, `"phase": "health-check"`) {
 		t.Fatalf("health failure should persist health-check phase: %s", inspectOut)
+	}
+}
+
+func TestEnvironmentRestoreHealthWaitReportsProgress(t *testing.T) {
+	var progress strings.Builder
+	ctx := contextWithEnvironmentRestoreProgress(context.Background(), &progress)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer target.Close()
+
+	check := waitEnvironmentRestoreURLHealthCheck(ctx, environmentRestoreHealthCheckReport{
+		ID:   "app-ready",
+		Kind: "url",
+		URL:  target.URL + "/ready",
+	}, 20*time.Millisecond)
+	if check.OK {
+		t.Fatalf("health check should fail")
+	}
+	logs := progress.String()
+	if !strings.Contains(logs, "restore health checking") || !strings.Contains(logs, target.URL+"/ready") || !strings.Contains(logs, "HTTP 503") {
+		t.Fatalf("progress logs = %q", logs)
 	}
 }
 

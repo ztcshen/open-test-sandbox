@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/casesuite"
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/store"
 )
@@ -82,7 +82,7 @@ func caseList(ctx context.Context, bundle profile.Bundle, runtime store.Store, f
 		}
 		return cases[i].ID < cases[j].ID
 	})
-	executionConfigs := caseExecutionConfigSet(ctx, runtime)
+	executionConfigs := casesuite.ExecutionConfigSet(ctx, bundle, runtime)
 	report := caseListReport{OK: true, ProfileID: bundle.ID, Filters: normalizeCaseListFilter(filters)}
 	for _, item := range cases {
 		if !matchesCaseFilters(item, filters) {
@@ -162,28 +162,4 @@ func caseHasAllTags(actual []string, required []string) bool {
 		}
 	}
 	return true
-}
-
-func caseExecutionConfigSet(ctx context.Context, runtime store.Store) map[string]bool {
-	out := map[string]bool{}
-	if runtime == nil {
-		return out
-	}
-	catalog, err := runtime.GetProfileCatalog(ctx)
-	if err != nil {
-		return out
-	}
-	for _, config := range catalog.TemplateConfigs {
-		if config.ScopeType == "case" && strings.TrimSpace(config.ScopeID) != "" {
-			out[strings.TrimSpace(config.ScopeID)] = true
-			continue
-		}
-		var payload struct {
-			CaseID string `json:"caseId"`
-		}
-		if json.Unmarshal([]byte(config.ConfigJSON), &payload) == nil && strings.TrimSpace(payload.CaseID) != "" {
-			out[strings.TrimSpace(payload.CaseID)] = true
-		}
-	}
-	return out
 }

@@ -7,6 +7,13 @@ should be called out in this file and in the relevant docs.
 
 ## Unreleased
 
+- Added local AgentTestBench feedback registration skill support so future
+  sessions can persist usability findings in-repo instead of temporary notes.
+- Improved case execution readiness diagnostics: bodyless write-method cases now
+  fail fast, while suite and discovery readiness still honor case-scoped configs
+  and bodies rendered from API case or request-template models.
+- Added visible health-wait progress for non-JSON environment restore runs and
+  clarified the registry boundary in `sandbox start --service` errors.
 - Added local-first Store, configuration, workflow, API case, Evidence, report, and
   Control plane foundations.
 - Added external configuration installation, audit, verification, packing, and

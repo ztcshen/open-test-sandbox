@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	domaincatalog "agent-testbench/internal/domain/catalog"
 	"agent-testbench/internal/domain/execution"
 	"agent-testbench/internal/domain/profile"
 )
@@ -98,7 +99,7 @@ func TestInspectReportsReadinessAndLatestState(t *testing.T) {
 			{ID: "case.paused", DisplayName: "Paused Case", NodeID: "node.alpha", Tags: []string{"regression"}, Status: "paused", SortOrder: 4},
 		},
 		TemplateConfigs: []profile.TemplateConfig{
-			{ID: "config.case.config", ScopeType: "case", ScopeID: "case.config", Status: "active", ConfigJSON: `{"caseId":"case.config","caseExecution":{"method":"POST","path":"/items"}}`},
+			{ID: "config.case.config", ScopeType: "case", ScopeID: "case.config", Status: "active", ConfigJSON: `{"caseId":"case.config","caseExecution":{"method":"POST","path":"/items","body":{"id":"item-001"}}}`},
 		},
 	}
 	records := []execution.APICaseRunRecord{
@@ -129,6 +130,64 @@ func TestInspectReportsReadinessAndLatestState(t *testing.T) {
 	}
 	if byCase["case.paused"].Ready || byCase["case.paused"].SuggestedAction != "review-status" {
 		t.Fatalf("paused case = %#v", byCase["case.paused"])
+	}
+}
+
+func TestExecutionConfigSetDoesNotMarkBodylessWriteConfigRunnable(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		APICases: []profile.APICase{
+			{ID: "case.post.payload", RenderMode: "template_patch", PayloadTemplateJSON: `{"id":"item-001"}`, PatchJSON: `[{"op":"add","path":"$.mode","value":"ok"}]`},
+			{ID: "case.post.template", RequestTemplateID: "tpl.post", RenderMode: "template_patch", PatchJSON: `[{"op":"add","path":"$.mode","value":"ok"}]`},
+			{ID: "case.post.no-patch", PayloadTemplateJSON: `{"id":"item-003"}`},
+		},
+		RequestTemplates: []profile.RequestTemplate{
+			{ID: "tpl.post", Method: "POST", Path: "/items", TemplateJSON: `{"id":"item-002"}`},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.post.empty", ScopeType: "case", ScopeID: "case.post.empty", Status: "active", ConfigJSON: `{"caseId":"case.post.empty","caseExecution":{"method":"POST","path":"/items"}}`},
+			{ID: "cfg.case.post.body", ScopeType: "case", ScopeID: "case.post.body", Status: "active", ConfigJSON: `{"caseId":"case.post.body","caseExecution":{"method":"POST","path":"/items","body":{"id":"item-001"}}}`},
+			{ID: "cfg.case.post.payload", ScopeType: "case", ScopeID: "case.post.payload", Status: "active", ConfigJSON: `{"caseId":"case.post.payload","caseExecution":{"method":"POST","path":"/items"}}`},
+			{ID: "cfg.case.post.template", ScopeType: "case", ScopeID: "case.post.template", Status: "active", ConfigJSON: `{"caseId":"case.post.template","caseExecution":{"method":"POST","path":"/items"}}`},
+			{ID: "cfg.case.post.no-patch", ScopeType: "case", ScopeID: "case.post.no-patch", Status: "active", ConfigJSON: `{"caseId":"case.post.no-patch","caseExecution":{"method":"POST","path":"/items"}}`},
+			{ID: "cfg.case.scoped.get", ScopeType: "case", ScopeID: "case.scoped.get", Status: "active", ConfigJSON: `{"caseExecution":{"method":"GET","path":"/items"}}`},
+			{ID: "cfg.case.get.empty", ScopeType: "case", ScopeID: "case.get.empty", Status: "active", ConfigJSON: `{"caseId":"case.get.empty","caseExecution":{"method":"GET","path":"/items"}}`},
+		},
+	}
+
+	configs := ExecutionConfigSet(context.Background(), bundle, recordStore{})
+	for _, caseID := range []string{"case.post.empty", "case.post.no-patch"} {
+		if configs[caseID] {
+			t.Fatalf("bodyless POST config %s should not be treated as runnable: %#v", caseID, configs)
+		}
+	}
+	for _, caseID := range []string{"case.post.body", "case.post.payload", "case.post.template", "case.scoped.get", "case.get.empty"} {
+		if !configs[caseID] {
+			t.Fatalf("usable execution config %s missing: %#v", caseID, configs)
+		}
+	}
+}
+
+func TestExecutionConfigSetUsesCatalogCaseScopeAndBodySources(t *testing.T) {
+	runtime := recordStore{
+		catalog: &domaincatalog.ProfileCatalog{
+			APICases: []domaincatalog.APICase{
+				{ID: "case.catalog.payload", PayloadTemplateJSON: `{"id":"item-001"}`, RenderMode: "template_patch", PatchJSON: `[{"op":"add","path":"$.mode","value":"ok"}]`},
+			},
+			TemplateConfigs: []domaincatalog.TemplateConfig{
+				{ID: "cfg.catalog.scoped.get", ScopeType: "case", ScopeID: "case.catalog.scoped", Status: "active", ConfigJSON: `{"caseExecution":{"method":"GET","path":"/items"}}`},
+				{ID: "cfg.catalog.payload", ScopeType: "case", ScopeID: "case.catalog.payload", Status: "active", ConfigJSON: `{"caseId":"case.catalog.payload","caseExecution":{"method":"POST","path":"/items"}}`},
+				{ID: "cfg.catalog.empty", ScopeType: "case", ScopeID: "case.catalog.empty", Status: "active", ConfigJSON: `{"caseId":"case.catalog.empty","caseExecution":{"method":"POST","path":"/items"}}`},
+			},
+		},
+	}
+
+	configs := ExecutionConfigSet(context.Background(), profile.Bundle{ID: "sample"}, runtime)
+	if !configs["case.catalog.scoped"] || !configs["case.catalog.payload"] {
+		t.Fatalf("usable execution configs missing: %#v", configs)
+	}
+	if configs["case.catalog.empty"] {
+		t.Fatalf("bodyless catalog POST config should not be treated as runnable: %#v", configs)
 	}
 }
 
