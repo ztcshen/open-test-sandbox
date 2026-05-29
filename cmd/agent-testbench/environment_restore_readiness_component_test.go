@@ -47,6 +47,24 @@ func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreRejectsRequiredComposeServiceGaps(t *testing.T) {
+	compose := `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"services":["mysql","service-alpha"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n  service-alpha:\n    image: alpine:3.20\n"}}`
+	env := newEnvironmentRestoreReadinessEnv("env.component.compose-gap", compose, `[]`)
+	report := buildEnvironmentRestoreReadinessReport(t, env, t.TempDir(), environmentRestoreWorkflowOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			environmentRestoreReadinessComponent("mysql", "middleware", "database", "mysql", environmentRestoreReadinessComposeHealth("mysql")),
+			environmentRestoreReadinessAppComponent("service.alpha", "service-alpha", "http://127.0.0.1:18080/service-alpha/health"),
+			environmentRestoreReadinessAppComponent("service.beta", "service-beta", "http://127.0.0.1:18081/service-beta/health"),
+		},
+	})
+	if report.OK || report.Readiness.OK {
+		t.Fatalf("required compose service gap should fail readiness: %#v", report.Readiness)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "compose-services-and-middleware", false, "service-beta") {
+		t.Fatalf("readiness should name the missing required compose service: %#v", report.Readiness.Items)
+	}
+}
+
 func TestEnvironmentRestoreRequiresComponentGraphForSQLOneClick(t *testing.T) {
 	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
 		t.Run(backend.name, func(t *testing.T) {

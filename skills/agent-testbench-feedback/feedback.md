@@ -6,10 +6,11 @@ Durable feedback registered by local Codex sessions. Use
 ## 2026-05-28 - Environment component graph and compose plan can diverge
 - Area: environment restore
 - Severity: P2
-- Status: backlog
+- Status: fixed
 - Source: local AgentTestBench usability note from 2026-05-28
 - Evidence: `environment components inspect` showed required dependency components and app nodes, but the recorded compose execution plan only started the app compose files. Restore generated dependency assets and later failed because a required dependency service was not running.
-- Suggestion: Add a restore/bootstrap readiness item that compares required component `composeService` values with the compose service allow-list and compose files, then prints a concrete `agent-testbench environment register ... --compose-file ... --compose-service ...` repair hint.
+- Suggestion: Add a restore readiness item that compares required component `composeService` values with the compose service allow-list and compose files, then prints a concrete repair hint before Docker starts.
+- Verification: `go test ./cmd/agent-testbench -run TestEnvironmentRestoreRejectsRequiredComposeServiceGaps`
 
 ## 2026-05-28 - Sandbox start and environment component graph use different registries
 - Area: sandbox cli

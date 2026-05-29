@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"agent-testbench/internal/domain/redaction"
@@ -176,14 +177,7 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	environmentRestoreAddRepositoryReadiness(&builder, report, specs)
 	dockerPlanOK := report.Docker.OK && (report.Docker.Action == "plan-docker-compose" || report.Docker.Action == "run-docker-compose" || report.Docker.Action == "plan-start-command" || report.Docker.Action == "run-start-command" || report.Docker.Action == "plan-use-existing-containers" || report.Docker.Action == "use-existing-containers" || report.Docker.Action == "skipped-after-repository-preparation")
 	builder.add("docker-start-plan", true, dockerPlanOK, environmentRestoreReadinessDockerDetail(report))
-	composeServices := stringSliceFromAny(report.Compose["services"])
-	if strings.TrimSpace(valueString(report.Compose["composeFile"])) != "" {
-		detail := "Docker Compose will start all services in the recorded file, including middleware images such as Apollo or MySQL when present"
-		if len(composeServices) > 0 {
-			detail = "Docker Compose service allow-list: " + strings.Join(composeServices, ", ")
-		}
-		builder.add("compose-services-and-middleware", true, true, detail)
-	}
+	environmentRestoreAddComposeServiceReadiness(&builder, report)
 	healthProbeCount := len(report.HealthChecks)
 	builder.add("health-probes", true, healthProbeCount > 0, fmt.Sprintf("%d Store-backed health probe(s) recorded for post-start readiness", healthProbeCount))
 	environmentRestoreAddCleanupReadiness(&builder, report, cleanupOptions)
@@ -284,6 +278,98 @@ func environmentRestoreAddRepositoryReadiness(builder *environmentRestoreReadine
 	default:
 		builder.add("component-repositories", true, repoOK, fmt.Sprintf("%d component repository checkout(s) will be cloned or validated before Docker startup", len(specs)))
 	}
+}
+
+func environmentRestoreAddComposeServiceReadiness(builder *environmentRestoreReadinessBuilder, report environmentRestoreReport) {
+	composeFiles := environmentRestoreComposeFiles(report.Compose)
+	if len(composeFiles) == 0 {
+		return
+	}
+	ok, detail := environmentRestoreComposeServiceReadinessDetail(report, composeFiles)
+	builder.add("compose-services-and-middleware", true, ok, detail)
+}
+
+func environmentRestoreComposeServiceReadinessDetail(report environmentRestoreReport, composeFiles []string) (bool, string) {
+	required := environmentRestoreRequiredComposeServices(report)
+	selected := dedupeStrings(stringSliceFromAny(report.Compose["services"]))
+	known, _, inspected := environmentRestoreComposeServiceDefinitions(report.Compose, report.Workspace, composeFiles)
+	missingSelected := []string{}
+	if len(selected) > 0 {
+		missingSelected = environmentRestoreMissingStrings(required, environmentRestoreStringSet(selected))
+	}
+	missingDefinitions := []string{}
+	if inspected {
+		missingDefinitions = environmentRestoreMissingStrings(required, known)
+	}
+	if len(missingSelected) > 0 || len(missingDefinitions) > 0 {
+		details := []string{}
+		if len(required) > 0 {
+			details = append(details, "component graph requires Compose services: "+strings.Join(required, ", "))
+		}
+		if len(missingSelected) > 0 {
+			details = append(details, "missing from recorded compose service allow-list: "+strings.Join(missingSelected, ", "))
+		}
+		if len(missingDefinitions) > 0 {
+			details = append(details, "missing from recorded compose file definitions: "+strings.Join(missingDefinitions, ", "))
+		}
+		details = append(details, "update the Store compose startup file and compose service allow-list before rerunning environment restore")
+		return false, strings.Join(details, "; ")
+	}
+	if len(selected) > 0 {
+		detail := "Docker Compose service allow-list covers required component services, including middleware: " + strings.Join(selected, ", ")
+		if len(required) > 0 {
+			detail = fmt.Sprintf("Docker Compose service allow-list covers %d required component service(s), including middleware: %s", len(required), strings.Join(selected, ", "))
+		}
+		return true, detail
+	}
+	detail := "Docker Compose will start all services in the recorded file, including middleware images such as Apollo or MySQL when present"
+	if len(required) == 0 {
+		return true, detail
+	}
+	if inspected {
+		return true, fmt.Sprintf("%s; compose files define %d required component service(s): %s", detail, len(required), strings.Join(required, ", "))
+	}
+	return true, fmt.Sprintf("%s; %d required component service(s) will be checked once compose files are generated or present", detail, len(required))
+}
+
+func environmentRestoreRequiredComposeServices(report environmentRestoreReport) []string {
+	seen := map[string]bool{}
+	for _, batch := range report.ComponentStartupPlan.Batches {
+		for _, component := range batch.Components {
+			service := strings.TrimSpace(component.ComposeService)
+			if !component.Required || service == "" {
+				continue
+			}
+			seen[service] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for service := range seen {
+		out = append(out, service)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func environmentRestoreStringSet(values []string) map[string]bool {
+	out := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out[value] = true
+		}
+	}
+	return out
+}
+
+func environmentRestoreMissingStrings(required []string, available map[string]bool) []string {
+	missing := []string{}
+	for _, value := range required {
+		if !available[value] {
+			missing = append(missing, value)
+		}
+	}
+	return missing
 }
 
 func environmentRestoreAddCleanupReadiness(builder *environmentRestoreReadinessBuilder, report environmentRestoreReport, cleanupOptions environmentRestoreDockerCleanupOptions) {

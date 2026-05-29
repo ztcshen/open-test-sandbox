@@ -271,7 +271,12 @@ for recorded health checks. If the environment records `startCommand` without a
 compose file, restore reports and can execute that command as the local start
 plan. Store-backed compose facts may include a project name, env files,
 profiles, a service allow-list, and `skipPull`/`skipBuild` when an environment
-should start from existing local images. Add `--pull` with `--execute` to update
+should start from existing local images. When a component graph is recorded,
+restore readiness compares each required component `composeService` with both
+the recorded service allow-list and the generated or local Compose service
+definitions. If a workflow component is missing from either place, restore
+fails before Docker starts and tells the operator to update the Store compose
+startup file or service allow-list. Add `--pull` with `--execute` to update
 existing checkouts using `git pull --ff-only`. Repository
 facts may also record `--repo-ref SERVICE=REF`; restore checks out that tag,
 commit, or ref after cloning with detached HEAD semantics. Existing checkouts
@@ -299,9 +304,10 @@ for a colleague-machine simulation. It checks that the sandbox SQL Store
 is outside the target Docker environment, the restore is anchored to a
 verification workflow, all recorded component repositories can be cloned or
 validated before Docker, a Compose/start plan exists, recorded Compose services
-cover the application services and middleware images, at least one health probe is
-recorded, cleanup commands are reviewable when requested, and the operator pause
-is preserved before container/image deletion or long downloads. If a workflow
+cover the required component graph services and middleware images, at least one
+health probe is recorded, cleanup commands are reviewable when requested, and
+the operator pause is preserved before container/image deletion or long
+downloads. If a workflow
 needs several application services, those services should appear as repository
 items or existing checkout items and must pass before Docker pull/build/up can
 start. Middleware such as config services or databases normally appears through the recorded

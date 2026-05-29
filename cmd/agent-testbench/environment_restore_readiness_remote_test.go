@@ -64,7 +64,7 @@ func newEnvironmentRestoreRemoteRepoFixture(t *testing.T) environmentRestoreRemo
 		"--verification-workflow", "workflow.core-10",
 	)
 	sourceCompose := filepath.Join(t.TempDir(), "docker-compose.yml")
-	writeFile(t, sourceCompose, "services: {}\n")
+	writeFile(t, sourceCompose, "services:\n  entry-gateway:\n    image: alpine:3.20\n")
 	runCLI(t, "environment", "startup-file", "put",
 		"--store", "sqlite://"+storePath,
 		"--file", "docker-compose.yml="+sourceCompose,

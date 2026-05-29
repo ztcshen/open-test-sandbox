@@ -38,7 +38,7 @@ func TestEnvironmentRestoreAssumeCleanDockerIgnoresLocalContainerConflicts(t *te
 
 	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 		ID:                     "env.clean-machine",
-		ComposeJSON:            `{"composeFile":"compose.yml","generatedFiles":{"compose.yml":"services:\n  mysql:\n    image: mysql:8\n    container_name: sandbox-mysql\n"}}`,
+		ComposeJSON:            `{"composeFile":"compose.yml","generatedFiles":{"compose.yml":"services:\n  mysql:\n    image: mysql:8\n    container_name: sandbox-mysql\n  gateway:\n    image: alpine:3.20\n"}}`,
 		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
 		VerificationWorkflowID: "workflow.core-10",
 	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{AssumeCleanDocker: true}, store.EnvironmentComponentGraph{

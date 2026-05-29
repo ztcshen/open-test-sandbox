@@ -403,8 +403,14 @@ func environmentRestoreComposeCommandServices(compose map[string]any, workspace 
 }
 
 func environmentRestoreComposeBuildServiceSet(compose map[string]any, workspace string, composeFiles []string) (map[string]bool, map[string]bool) {
+	known, builds, _ := environmentRestoreComposeServiceDefinitions(compose, workspace, composeFiles)
+	return known, builds
+}
+
+func environmentRestoreComposeServiceDefinitions(compose map[string]any, workspace string, composeFiles []string) (map[string]bool, map[string]bool, bool) {
 	known := map[string]bool{}
 	builds := map[string]bool{}
+	inspected := false
 	generated := stringMapFromAny(compose["generatedFiles"])
 	for _, file := range composeFiles {
 		content := generated[filepath.Clean(file)]
@@ -419,6 +425,7 @@ func environmentRestoreComposeBuildServiceSet(compose map[string]any, workspace 
 		if content == "" {
 			continue
 		}
+		inspected = true
 		fileKnown, fileBuilds := environmentRestoreComposeBuildServicesFromText(content)
 		for service := range fileKnown {
 			known[service] = true
@@ -428,7 +435,7 @@ func environmentRestoreComposeBuildServiceSet(compose map[string]any, workspace 
 			builds[service] = true
 		}
 	}
-	return known, builds
+	return known, builds, inspected
 }
 
 func environmentRestoreComposeBuildServicesFromText(content string) (map[string]bool, map[string]bool) {
