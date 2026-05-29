@@ -4,6 +4,7 @@ const helpTextContent = `AgentTestBench
 
 Usage:
   agent-testbench version
+  agent-testbench update [--repo PATH] [--remote NAME] [--branch NAME] [--check] [--force] [--output PATH] [--json]
   agent-testbench commands [--filter TEXT] [--json]
   agent-testbench store config set NAME --url postgres://...
   agent-testbench store config set NAME --url mysql://...
@@ -36,7 +37,7 @@ Usage:
   agent-testbench environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
   agent-testbench runtime mysql endpoints [--include-tables] [--json]
   agent-testbench sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--dry-run] [--json]
-  agent-testbench sandbox service list [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--status STATUS] [--json]
+  agent-testbench sandbox service list [--store NAME_OR_DSN] [--environment ENV_ID] [--include-components] [--service ID] [--kind KIND] [--status STATUS] [--json]
   agent-testbench sandbox service register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--kind KIND] [--service-port N] [--health-url URL] [--json]
   agent-testbench sandbox interface register --id ID --service-id ID --path PATH [--store NAME_OR_DSN] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
   agent-testbench template-package install --from PATH [--profile-home PATH] [--force]
@@ -68,6 +69,10 @@ Usage:
   agent-testbench replay evidence --trace-id ID [--json]
   agent-testbench workflow discover [--store NAME_OR_DSN] [--filter TEXT] [--json]
   agent-testbench workflow discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
+  agent-testbench workflow register --id ID [--store NAME_OR_DSN] [--profile ID] [--display-name NAME] [--description TEXT] [--base-step-timeout-ms N] [--timeout-offset-ms N] [--audit] [--json]
+  agent-testbench workflow upsert --id ID [--store NAME_OR_DSN] [--profile ID] [--display-name NAME] [--description TEXT] [--base-step-timeout-ms N] [--timeout-offset-ms N] [--audit] [--json]
+  agent-testbench workflow binding register --workflow ID --step ID --node ID [--case ID] [--store NAME_OR_DSN] [--profile ID] [--required] [--sort-order N] [--audit] [--json]
+  agent-testbench workflow binding upsert --workflow ID --step ID --node ID [--case ID] [--store NAME_OR_DSN] [--profile ID] [--required] [--sort-order N] [--audit] [--json]
   agent-testbench workflow plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --workflow ID [--json]
   agent-testbench workflow audit --workflow ID [--store NAME_OR_DSN] [--json]
   agent-testbench workflow audit --profile PATH --offline-template-package --workflow ID [--store NAME_OR_DSN] [--json]

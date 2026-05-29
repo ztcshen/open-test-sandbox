@@ -53,6 +53,32 @@ example data, not in the core runner.
 If an assertion list is empty, that assertion type is skipped. A live run fails
 when any configured assertion fails.
 
+Do not use HTTP `200` alone as a success signal. If the target returns an
+application result field, assert it explicitly with `responseContains`:
+
+```json
+{
+  "assertions": {
+    "expectedStatusCodes": [200],
+    "responseContains": ["\"state\":\"ready\""]
+  }
+}
+```
+
+Store catalog cases can carry the same rule in `expectedJson`, and
+Store-backed execution configs can carry it in `caseExecution`:
+
+```json
+{
+  "expectedJson": "{\"expectedHttpCodes\":[200],\"expectedResponseContains\":[\"\\\"state\\\":\\\"ready\\\"\"]}"
+}
+```
+
+For state that is not returned by the API under test, add a follow-up query API
+case or workflow step that reads the application-visible state and asserts its
+response body. This keeps the green signal tied to observable business state
+rather than transport success.
+
 ## Evidence Contract
 
 The runner writes Evidence under:

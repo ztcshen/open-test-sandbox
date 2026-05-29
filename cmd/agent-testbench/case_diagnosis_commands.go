@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -32,10 +35,13 @@ type caseDiagnosisSignal struct {
 }
 
 type caseDiagnosisArtifacts struct {
-	AssertionErrors []string
-	HTTPStatus      int
-	Warnings        []string
+	AssertionErrors      []string
+	HTTPStatus           int
+	Warnings             []string
+	MissingLocalEvidence []string
 }
+
+const caseDiagnosisEvidenceKindAssertions = "assertions"
 
 func runCaseDiagnose(ctx context.Context, args []string) error {
 	return runCaseEvidenceReport(ctx, args, "case diagnose", diagnoseCaseEvidence, printCaseDiagnosis)
@@ -79,12 +85,12 @@ func diagnoseCaseEvidence(ctx context.Context, runtime store.Store, caseRunID st
 	report.Category = caseDiagnosisCategory(report.Status, assertionStatus, errorCount, httpStatus)
 	report.PrimaryFinding = caseDiagnosisPrimaryFinding(report.Category, report.AssertionErrors, httpStatus, report.Status)
 	report.Signals = caseDiagnosisSignals(report, assertionStatus, errorCount, httpStatus)
-	report.NextActions = caseDiagnosisNextActions(report, httpStatus, errorCount)
+	report.NextActions = caseDiagnosisNextActions(report, httpStatus, errorCount, artifacts.MissingLocalEvidence)
 	return report, nil
 }
 
 func readCaseDiagnosisArtifacts(ctx context.Context, runtime store.Store, runID string, caseRunID string) (caseDiagnosisArtifacts, error) {
-	out := caseDiagnosisArtifacts{AssertionErrors: []string{}, Warnings: []string{}}
+	out := caseDiagnosisArtifacts{AssertionErrors: []string{}, Warnings: []string{}, MissingLocalEvidence: []string{}}
 	if strings.TrimSpace(runID) == "" || strings.TrimSpace(caseRunID) == "" {
 		out.Warnings = append(out.Warnings, "case run evidence identity is incomplete")
 		return out, nil
@@ -93,21 +99,42 @@ func readCaseDiagnosisArtifacts(ctx context.Context, runtime store.Store, runID 
 	if err != nil {
 		return caseDiagnosisArtifacts{}, err
 	}
+	evidenceRoot := ""
+	if run, err := runtime.GetRun(ctx, runID); err == nil {
+		evidenceRoot = run.EvidenceRoot
+	}
 	for _, record := range records {
 		if record.CaseRunID != caseRunID {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(record.Kind)) {
-		case "assertions":
+		kind := strings.ToLower(strings.TrimSpace(record.Kind))
+		readPath := record.URI
+		switch kind {
+		case "request", "response", caseDiagnosisEvidenceKindAssertions:
+			if path, missing, unreadable := caseDiagnosisLocalEvidenceState(record.URI, evidenceRoot); missing {
+				out.Warnings = append(out.Warnings, "local "+kind+" evidence file is missing: "+path)
+				out.MissingLocalEvidence = append(out.MissingLocalEvidence, path)
+				continue
+			} else if unreadable != "" {
+				out.Warnings = append(out.Warnings, "local "+kind+" evidence file is unreadable: "+unreadable)
+				continue
+			} else if path != "" {
+				readPath = path
+			}
+		default:
+			continue
+		}
+		switch kind {
+		case caseDiagnosisEvidenceKindAssertions:
 			var assertions apicase.AssertionEvidence
-			if err := readJSONFile(record.URI, &assertions); err != nil {
+			if err := readJSONFile(readPath, &assertions); err != nil {
 				out.Warnings = append(out.Warnings, "could not read assertions evidence: "+err.Error())
 				continue
 			}
 			out.AssertionErrors = append(out.AssertionErrors, assertions.Errors...)
 		case "response":
 			var response apicase.ResponseEvidence
-			if err := readJSONFile(record.URI, &response); err != nil {
+			if err := readJSONFile(readPath, &response); err != nil {
 				out.Warnings = append(out.Warnings, "could not read response evidence: "+err.Error())
 				continue
 			}
@@ -115,6 +142,44 @@ func readCaseDiagnosisArtifacts(ctx context.Context, runtime store.Store, runID 
 		}
 	}
 	return out, nil
+}
+
+func caseDiagnosisLocalEvidenceState(uri string, evidenceRoot string) (path string, missing bool, unreadable string) {
+	uri = strings.TrimSpace(uri)
+	if uri == "" || !caseDiagnosisURIIsLocalFile(uri) {
+		return "", false, ""
+	}
+	path = caseDiagnosisLocalEvidencePath(uri, evidenceRoot)
+	if _, err := os.Stat(path); err == nil {
+		return path, false, ""
+	} else if errors.Is(err, os.ErrNotExist) {
+		return path, true, ""
+	} else {
+		return path, false, err.Error()
+	}
+}
+
+func caseDiagnosisURIIsLocalFile(uri string) bool {
+	return strings.HasPrefix(uri, "file://") || !strings.Contains(uri, "://")
+}
+
+func caseDiagnosisLocalEvidencePath(uri string, evidenceRoot string) string {
+	path := filepath.Clean(strings.TrimPrefix(strings.TrimSpace(uri), "file://"))
+	if filepath.IsAbs(path) {
+		return path
+	}
+	root := strings.TrimSpace(evidenceRoot)
+	if root == "" {
+		return path
+	}
+	root = filepath.Clean(strings.TrimPrefix(root, "file://"))
+	if root == "." || root == "" {
+		return path
+	}
+	if path == root || strings.HasPrefix(path, root+string(os.PathSeparator)) {
+		return path
+	}
+	return filepath.Join(root, path)
 }
 
 func caseDiagnosisCategory(status string, assertionStatus string, errorCount int, httpStatus int) string {
@@ -173,10 +238,13 @@ func caseDiagnosisSignals(report caseDiagnosisReport, assertionStatus string, er
 	return signals
 }
 
-func caseDiagnosisNextActions(report caseDiagnosisReport, httpStatus int, errorCount int) []string {
+func caseDiagnosisNextActions(report caseDiagnosisReport, httpStatus int, errorCount int, missingLocalEvidence []string) []string {
 	actions := []string{}
 	if report.CaseRunID != "" {
 		actions = append(actions, "agent-testbench case evidence --case-run "+report.CaseRunID+" --json")
+	}
+	if len(missingLocalEvidence) > 0 {
+		actions = append(actions, "Rerun the case with --evidence-dir pointing to a durable directory, or copy/export local Evidence before temporary files are cleaned up; missing: "+strings.Join(missingLocalEvidence, ", "))
 	}
 	if errorCount > 0 {
 		actions = append(actions, "Inspect request.json, response.json, and assertions.json under "+firstNonEmpty(report.EvidencePath, "the Evidence directory"))

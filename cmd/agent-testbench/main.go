@@ -32,6 +32,7 @@ func (e unknownRootCommandError) Error() string {
 
 var rootCommands = map[string]rootCommand{
 	"commands":           runCommands,
+	"update":             func(args []string) error { return runUpdate(context.Background(), args) },
 	"store":              func(args []string) error { return runStore(context.Background(), args) },
 	"sandbox":            func(args []string) error { return runSandbox(context.Background(), args) },
 	"environment":        func(args []string) error { return runEnvironment(context.Background(), args) },

@@ -23,6 +23,10 @@ func runWorkflow(args []string) error {
 	switch args[0] {
 	case "discover":
 		return runWorkflowDiscover(context.Background(), args[1:])
+	case "register", "upsert":
+		return runWorkflowRegister(context.Background(), args[1:])
+	case "binding":
+		return runWorkflowBinding(context.Background(), args[1:])
 	case "plan":
 		return runWorkflowPlan(args[1:])
 	case "audit":

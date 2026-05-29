@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"agent-testbench/internal/domain/redaction"
@@ -201,13 +202,13 @@ func caseIDForWorkflowStep(summaryJSON string, stepID string) string {
 }
 
 func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.APICaseRun, records []store.EvidenceRecord, catalog store.ProfileCatalog, topologies []store.TraceTopology) map[string]any {
-	request := caseEvidenceRequest(records, item.ID, jsonObject(item.RequestSummaryJSON))
+	request := caseEvidenceRequest(records, item.ID, run.EvidenceRoot, jsonObject(item.RequestSummaryJSON))
 	assertions := jsonObject(item.AssertionSummaryJSON)
-	response := caseEvidenceResponse(records, item.ID)
+	response := caseEvidenceResponse(records, item.ID, run.EvidenceRoot)
 	saved := jsonObject(run.SummaryJSON)
 	trace := mapFromAny(saved["trace"])
 	fixture := caseEvidenceSeedData(item.CaseID, catalog, run, caseRuns)
-	logs := caseEvidenceLogs(records, item)
+	logs := caseEvidenceLogs(records, item, run.EvidenceRoot)
 	topology := topologyEvidenceViewForCase(topologyEvidenceViewInput{
 		RunID:        run.ID,
 		CaseID:       item.CaseID,
@@ -253,7 +254,7 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 	return evidence
 }
 
-func caseEvidenceLogs(records []store.EvidenceRecord, item store.APICaseRun) []map[string]any {
+func caseEvidenceLogs(records []store.EvidenceRecord, item store.APICaseRun, evidenceRoot string) []map[string]any {
 	request := jsonObject(item.RequestSummaryJSON)
 	stepID := strings.TrimSpace(valueString(request["stepId"]))
 	out := []map[string]any{}
@@ -269,13 +270,13 @@ func caseEvidenceLogs(records []store.EvidenceRecord, item store.APICaseRun) []m
 			"mediaType": record.MediaType,
 			"summary":   summary,
 		}
-		if attachment := evidenceAttachmentMetadata(record); len(attachment) > 0 {
+		if attachment := evidenceAttachmentMetadata(record, evidenceRoot); len(attachment) > 0 {
 			payload["attachment"] = attachment
 		}
 		if !record.CreatedAt.IsZero() {
 			payload["createdAt"] = record.CreatedAt
 		}
-		if body, ok := evidenceRecordObject(record); ok {
+		if body, ok := evidenceRecordObject(record, evidenceRoot); ok {
 			if systems := listFromAny(body["systems"]); len(systems) > 0 {
 				payload["systems"] = systems
 			} else if lines := listFromAny(body["lines"]); len(lines) > 0 {
@@ -319,19 +320,19 @@ func mapFromAny(value any) map[string]any {
 	}
 }
 
-func caseEvidenceRequest(records []store.EvidenceRecord, caseRunID string, defaultValue map[string]any) map[string]any {
+func caseEvidenceRequest(records []store.EvidenceRecord, caseRunID string, evidenceRoot string, defaultValue map[string]any) map[string]any {
 	request := copyMap(defaultValue)
 	for _, record := range records {
 		if record.CaseRunID != caseRunID || record.Kind != "request" {
 			continue
 		}
-		if body, ok := evidenceRecordObject(record); ok {
+		if body, ok := evidenceRecordObject(record, evidenceRoot); ok {
 			for key, value := range body {
 				request[key] = value
 			}
 		}
 		request["evidence_uri"] = record.URI
-		if attachment := evidenceAttachmentMetadata(record); len(attachment) > 0 {
+		if attachment := evidenceAttachmentMetadata(record, evidenceRoot); len(attachment) > 0 {
 			request["attachment"] = attachment
 		}
 		break
@@ -339,7 +340,7 @@ func caseEvidenceRequest(records []store.EvidenceRecord, caseRunID string, defau
 	return request
 }
 
-func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string) map[string]any {
+func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string, evidenceRoot string) map[string]any {
 	response := map[string]any{}
 	for _, record := range records {
 		if record.CaseRunID != caseRunID || record.Kind != "response" {
@@ -352,7 +353,7 @@ func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string) map[
 		if bytes, ok := summary["bodyBytes"]; ok {
 			response["body_bytes"] = bytes
 		}
-		if body, ok := evidenceRecordObject(record); ok {
+		if body, ok := evidenceRecordObject(record, evidenceRoot); ok {
 			if code, ok := body["statusCode"]; ok {
 				response["http_code"] = code
 			}
@@ -364,7 +365,7 @@ func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string) map[
 			}
 		}
 		response["evidence_uri"] = record.URI
-		if attachment := evidenceAttachmentMetadata(record); len(attachment) > 0 {
+		if attachment := evidenceAttachmentMetadata(record, evidenceRoot); len(attachment) > 0 {
 			response["attachment"] = attachment
 		}
 		break
@@ -372,7 +373,7 @@ func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string) map[
 	return response
 }
 
-func evidenceAttachmentMetadata(record store.EvidenceRecord) map[string]any {
+func evidenceAttachmentMetadata(record store.EvidenceRecord, evidenceRoot string) map[string]any {
 	out := map[string]any{
 		"id":        record.ID,
 		"runId":     record.RunID,
@@ -402,11 +403,82 @@ func evidenceAttachmentMetadata(record store.EvidenceRecord) map[string]any {
 	if len(labels) > 0 {
 		out["labels"] = labels
 	}
+	if lifecycle := evidenceRecordLifecycle(record, evidenceRoot); len(lifecycle) > 0 {
+		out["lifecycle"] = lifecycle
+	}
 	return out
 }
 
-func evidenceRecordObject(record store.EvidenceRecord) (map[string]any, bool) {
-	raw, err := os.ReadFile(record.URI)
+func evidenceRecordLifecycle(record store.EvidenceRecord, evidenceRoot string) map[string]any {
+	uri := strings.TrimSpace(record.URI)
+	if uri == "" || !evidenceURIIsLocalFile(uri) {
+		return nil
+	}
+	path := evidenceResolvedLocalFilePath(uri, evidenceRoot)
+	out := map[string]any{
+		"kind": "local-file",
+		"path": path,
+	}
+	if _, err := os.Stat(path); err == nil {
+		out[evidenceLifecycleAvailable] = true
+		out["state"] = evidenceLifecycleAvailable
+		return out
+	} else if errors.Is(err, os.ErrNotExist) {
+		out[evidenceLifecycleAvailable] = false
+		out["state"] = "missing"
+		out["nextAction"] = "Rerun the case with --evidence-dir pointing to a durable directory, or copy/export local Evidence before temporary files are cleaned up."
+		return out
+	} else {
+		out[evidenceLifecycleAvailable] = false
+		out["state"] = "unreadable"
+		out["error"] = err.Error()
+		out["nextAction"] = "Check local file permissions, then rerun the case with --evidence-dir pointing to a durable directory if the file cannot be recovered."
+		return out
+	}
+}
+
+const evidenceLifecycleAvailable = "available"
+
+func evidenceURIIsLocalFile(uri string) bool {
+	uri = strings.TrimSpace(uri)
+	if uri == "" {
+		return false
+	}
+	if strings.HasPrefix(uri, "file://") {
+		return true
+	}
+	return !strings.Contains(uri, "://")
+}
+
+func evidenceLocalFilePath(uri string) string {
+	return strings.TrimPrefix(strings.TrimSpace(uri), "file://")
+}
+
+func evidenceResolvedLocalFilePath(uri string, evidenceRoot string) string {
+	path := filepath.Clean(evidenceLocalFilePath(uri))
+	if filepath.IsAbs(path) {
+		return path
+	}
+	root := strings.TrimSpace(evidenceRoot)
+	if root == "" {
+		return path
+	}
+	root = filepath.Clean(evidenceLocalFilePath(root))
+	if root == "." || root == "" {
+		return path
+	}
+	if path == root || strings.HasPrefix(path, root+string(os.PathSeparator)) {
+		return path
+	}
+	return filepath.Join(root, path)
+}
+
+func evidenceRecordObject(record store.EvidenceRecord, evidenceRoot string) (map[string]any, bool) {
+	path := record.URI
+	if evidenceURIIsLocalFile(path) {
+		path = evidenceResolvedLocalFilePath(path, evidenceRoot)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, false
 	}

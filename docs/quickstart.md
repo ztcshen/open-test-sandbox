@@ -52,6 +52,29 @@ Demo output is kept under the system temp directory so you can inspect it after
 the command exits. Set `AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.
 
+## Update the Local Runtime
+
+Use `update --check` first when you want to ask whether the upstream remote has
+a newer build without mutating the checkout:
+
+```sh
+./bin/agent-testbench.sh update --check --json
+```
+
+To pull the latest upstream commit from the checkout's configured GitHub or
+GitLab remote and rebuild the local runtime binary:
+
+```sh
+./bin/agent-testbench.sh update
+```
+
+By default the command uses the current branch's upstream remote/branch and
+writes the rebuilt binary to `.runtime/bin/agent-testbench`. Pass
+`--remote github --branch main`, `--remote origin --branch main`, or
+`--repo /path/to/agent-testbench` when the checkout does not have an upstream
+tracking branch. Tracked local edits stop the update unless `--force` is set;
+untracked runtime artifacts are ignored.
+
 ## Configure a SQL Store
 
 ```sh
@@ -215,6 +238,23 @@ one-off read:
 ./bin/agent-testbench.sh workflow discover --store team-verified --filter "smoke"
 ./bin/agent-testbench.sh interface-node discover --store local-personal --filter "POST /orders"
 ```
+
+For a small Store-first workflow addition, register the workflow and its step
+binding directly instead of exporting and re-importing the whole profile
+catalog:
+
+```sh
+./bin/agent-testbench.sh workflow register --store local-personal --id workflow.smoke --display-name "Smoke Workflow" --audit --json
+./bin/agent-testbench.sh workflow binding register --store local-personal --workflow workflow.smoke --step smoke --node node.alpha --case case.alpha --required --audit --json
+./bin/agent-testbench.sh workflow plan --store local-personal --workflow workflow.smoke --json
+```
+
+`workflow register` and `workflow binding register` are idempotent upserts:
+running the same command again updates the matching workflow id or
+workflow+step binding without creating duplicates. Add `--audit` when you want
+the command result to include the same reference checks used by
+`workflow audit`; missing node or case references are reported in JSON before a
+run is attempted.
 
 ## Register and Verify an Environment
 

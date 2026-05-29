@@ -437,7 +437,7 @@ func runEnvironmentRestoreUsesNamedActiveStore(t *testing.T, suffixLabel string,
 	}))
 	defer acceptanceServer.Close()
 	sourceCompose := filepath.Join(t.TempDir(), "compose.yml")
-	writeFile(t, sourceCompose, "services: {}\n")
+	writeFile(t, sourceCompose, "services:\n  app:\n    image: busybox\n")
 	runCLI(t, "environment", "register",
 		"--id", envID,
 		"--compose-file", "compose.yml",

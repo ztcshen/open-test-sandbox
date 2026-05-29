@@ -140,11 +140,15 @@ func cachedWorkflowStepRuntimeLogs(ctx context.Context, runtime store.Store, run
 	if err != nil {
 		return nil, false
 	}
+	evidenceRoot := ""
+	if run, err := runtime.GetRun(ctx, runID); err == nil {
+		evidenceRoot = run.EvidenceRoot
+	}
 	for _, record := range records {
 		if record.Kind != workflowStepRuntimeLogsKind || valueString(jsonObject(record.Summary)["stepId"]) != stepID {
 			continue
 		}
-		body, ok := evidenceRecordObject(record)
+		body, ok := evidenceRecordObject(record, evidenceRoot)
 		if !ok {
 			continue
 		}

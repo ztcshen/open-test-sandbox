@@ -15,11 +15,11 @@ Durable feedback registered by local Codex sessions. Use
 ## 2026-05-28 - Sandbox start and environment component graph use different registries
 - Area: sandbox cli
 - Severity: P2
-- Status: partly fixed
+- Status: fixed
 - Source: local AgentTestBench usability note from 2026-05-28
 - Evidence: `sandbox start --service <dependency>` failed even though the environment component graph contained that dependency; other dependency entries could also be skipped because their profile service startup command was empty.
-- Suggestion: This slice clarified the missing-service error so users see that `sandbox start` reads the profile service registry and `environment restore` reads the environment component graph. A later slice can add a bridge or discovery view if both registries should be unified.
-- Verification: `go test ./cmd/agent-testbench -run TestSandboxStartMissingServiceExplainsRegistryBoundary`
+- Suggestion: The missing-service error now explains the registry boundary, and `sandbox service list --environment ENV_ID --include-components` gives a read-only bridge view that shows profile services beside environment component-graph-only dependencies.
+- Verification: `go test ./cmd/agent-testbench -run 'TestSandbox(ServiceListCanIncludeEnvironmentComponentGraph|ServiceListReportsRegisteredServicesReadOnly|StartMissingServiceExplainsRegistryBoundary)' -count=1`
 
 ## 2026-05-28 - Environment restore health wait needs progress output
 - Area: environment restore
@@ -51,18 +51,20 @@ Durable feedback registered by local Codex sessions. Use
 ## 2026-05-28 - Local evidence URI lifecycle is unclear
 - Area: evidence
 - Severity: P2
-- Status: backlog
+- Status: fixed
 - Source: local AgentTestBench usability note from 2026-05-28
 - Evidence: `case evidence` listed historical passed-run request/response attachment URIs, but the local `/tmp/.../request.json` and `response.json` files had been deleted; `case diagnose` could not read them.
 - Suggestion: Mark local file evidence lifecycle in Store metadata and add a command or diagnostic next action to export, copy, or rebuild evidence before temporary files disappear.
+- Verification: `go test ./internal/server/controlplane -run TestServerMarksMissingLocalEvidenceLifecycle -count=1`; `go test ./cmd/agent-testbench -run TestCaseDiagnoseReportsExpiredLocalEvidenceNextAction -count=1`
 
 ## 2026-05-28 - HTTP 200 alone can hide business failure
 - Area: case assertions
 - Severity: P2
-- Status: backlog
+- Status: fixed
 - Source: local AgentTestBench usability note from 2026-05-28
 - Evidence: A case passed by HTTP status while downstream data showed a FAILED business decision because a dependent response lacked an expected decision field.
 - Suggestion: Add Store-backed post-run assertions such as SQL checks against application-visible state, so case suite reports can require both transport success and business-state success.
+- Verification: `docs/api-case-format.md`; existing gate coverage `go test ./internal/server/controlplane -run TestServerTestKitRunHonorsExpectedResponseContains -count=1`
 
 ## 2026-05-29 - Environment restore JSON adoption should fail with bounded health evidence
 - Area: environment restore
@@ -94,10 +96,11 @@ Durable feedback registered by local Codex sessions. Use
 ## 2026-05-29 - Workflow creation needs small upsert commands
 - Area: workflow cli
 - Severity: P2
-- Status: backlog
+- Status: fixed
 - Source: local AgentTestBench usability note from 2026-05-29
 - Evidence: Adding one smoke workflow still requires exporting the full profile catalog, editing `profile.json`, and importing the whole profile with audit.
 - Suggestion: Add Store-first `workflow register/upsert` and workflow binding register/upsert commands with `--json` and `--audit` support so small workflow additions do not require whole-profile import.
+- Verification: `go test ./cmd/agent-testbench -run 'TestWorkflow(RegisterAndBindingUpsertStoreCatalog|BindingAuditReportsMissingReferences)' -count=1`
 
 ## 2026-05-29 - Component MySQL assets need graceful incremental ALTER workflow
 - Area: environment migration
