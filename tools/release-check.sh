@@ -141,6 +141,13 @@ for tool in rg sqlite3; do
   fi
 done
 
+step "checking secret patterns"
+if [[ "$scoped_release_check" -eq 1 ]]; then
+  tools/guardrails/check_secrets.sh "${scope_paths[@]}"
+else
+  tools/guardrails/check_secrets.sh
+fi
+
 step "checking SQL smoke Store"
 if [[ -z "${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}" ]]; then
   echo "AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE is required for release-check." >&2
@@ -188,6 +195,9 @@ elif [[ -z "${AGENT_TESTBENCH_TRACE_GRAPHQL_URL:-}" ]]; then
 	echo "AGENT_TESTBENCH_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
 	echo "Set AGENT_TESTBENCH_TRACE_GRAPHQL_URL, AGENT_TESTBENCH_SMOKE_TRACE_IDS, and AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 for final live SkyWalking validation; synthetic smoke is not live topology proof." >&2
 fi
+
+step "checking dependency baseline"
+tools/guardrails/check_dependency_baseline.sh
 
 if [[ "${AGENT_TESTBENCH_SKIP_GO_LINT:-0}" == "1" ]]; then
 	step "skipping Go lint"

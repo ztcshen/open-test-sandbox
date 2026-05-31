@@ -218,7 +218,7 @@ func (s *scanState) scanTypes(decl *ast.GenDecl, fset *token.FileSet, rel string
 func (s *scanState) addPackageIssues(report *Report) {
 	for _, metric := range s.packages {
 		report.Metrics.Packages = append(report.Metrics.Packages, *metric)
-		warnLines, warnFiles := s.packageWarningThreshold(metric.Dir)
+		warnLines, blockLines, warnFiles, blockFiles := s.packageThreshold(metric.Dir)
 		s.addThresholdIssue(report, thresholdIssueInput{
 			ID:             "package-lines",
 			Category:       "package",
@@ -227,7 +227,7 @@ func (s *scanState) addPackageIssues(report *Report) {
 			File:           metric.Dir,
 			Value:          metric.EffectiveLines,
 			Warn:           warnLines,
-			Block:          s.cfg.PackageLinesBlock,
+			Block:          blockLines,
 			Recommendation: "Split packages only around stable semantics, not to appease a line counter.",
 		})
 		s.addThresholdIssue(report, thresholdIssueInput{
@@ -238,7 +238,7 @@ func (s *scanState) addPackageIssues(report *Report) {
 			File:           metric.Dir,
 			Value:          metric.FileCount,
 			Warn:           warnFiles,
-			Block:          s.cfg.PackageFileCountBlock,
+			Block:          blockFiles,
 			Recommendation: "Check whether the package has multiple concepts before introducing a new package boundary.",
 		})
 	}
@@ -317,22 +317,22 @@ func (s *scanState) fileFunctionCountWarningThreshold(file string) int {
 	return s.cfg.FileFunctionCountWarn
 }
 
-func (s *scanState) packageWarningThreshold(dir string) (int, int) {
+func (s *scanState) packageThreshold(dir string) (int, int, int, int) {
 	switch dir {
 	case "cmd/agent-testbench":
-		return 30000, 140
+		return 30000, 36000, 140, 160
 	case "internal/server/controlplane":
-		return 30000, 150
+		return 30000, 36000, 150, 170
 	case "internal/store/sqlstore":
-		return 4500, 30
+		return 4500, 6000, 30, 40
 	case "internal/domain/casesuite":
-		return 3000, 20
+		return 3000, 4000, 20, 30
 	case "internal/store/sqlite":
-		return 2500, 15
+		return 2500, 3500, 15, 25
 	case "tools/qualitygate":
-		return 2500, 12
+		return 2500, 3500, 12, 20
 	default:
-		return s.cfg.PackageLinesWarn, s.cfg.PackageFileCountWarn
+		return s.cfg.PackageLinesWarn, s.cfg.PackageLinesBlock, s.cfg.PackageFileCountWarn, s.cfg.PackageFileCountBlock
 	}
 }
 

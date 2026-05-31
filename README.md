@@ -92,6 +92,10 @@ Install dependencies and verify the checkout:
 ```sh
 npm ci
 ./bin/agent-testbench.sh version
+./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
+./bin/agent-testbench.sh status
+./bin/agent-testbench.sh doctor --fix
+./bin/agent-testbench.sh update --check --channel release --json
 # SQL Store examples:
 # PostgreSQL:
 AGENT_TESTBENCH_DEMO_STORE='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run demo:api-case
@@ -106,6 +110,14 @@ AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sq
 
 The primary CLI is `agent-testbench`; public configuration and smoke-test
 environment variables use the `AGENT_TESTBENCH_*` namespace.
+For daily operation, start with `status`, use `doctor` for setup diagnostics,
+run `setup --build-runtime` or `doctor --fix` on a clean machine when the local
+Store or runtime directory is missing, use `update --channel release` or
+`update --release latest` when you want the newest tagged runtime, and use
+`commands --area AREA --filter TEXT` to find exact Store, case, workflow, and
+Evidence commands without scrolling the full help text. `config show`,
+`config path`, `logs`, and `completion bash|zsh` cover the common operator
+checks around local configuration, runtime logs, and shell integration.
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or

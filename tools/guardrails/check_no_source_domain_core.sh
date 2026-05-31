@@ -26,7 +26,7 @@ fi
 
 while IFS= read -r -d '' path; do
   case "$path" in
-    .git/*|.idea/*|.runtime/*|node_modules/*)
+    .git/*|.idea/*|.runtime/*|.scratch/*|.understand-anything/*|node_modules/*)
       continue
       ;;
     docs/progress/*|docs/plans/*)

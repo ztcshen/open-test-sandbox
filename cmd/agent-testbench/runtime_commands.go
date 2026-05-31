@@ -18,6 +18,12 @@ func runConfig(ctx context.Context, args []string) error {
 		return errors.New("missing config command")
 	}
 	switch args[0] {
+	case "path":
+		return runConfigPath(args[1:])
+	case "show":
+		return runConfigShow(args[1:])
+	case "edit":
+		return runConfigEdit(ctx, args[1:])
 	case "publish", "apply":
 		return runConfigPublish(ctx, args[1:])
 	default:

@@ -20,6 +20,9 @@ npm ci
 
 ```sh
 ./bin/agent-testbench.sh version
+./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
+./bin/agent-testbench.sh status
+./bin/agent-testbench.sh doctor --fix
 # SQL Store examples:
 # PostgreSQL:
 AGENT_TESTBENCH_DEMO_STORE="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run demo:api-case
@@ -52,13 +55,39 @@ Demo output is kept under the system temp directory so you can inspect it after
 the command exits. Set `AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.
 
+## Daily CLI Orientation
+
+AgentTestBench follows the same operator pattern as mature local CLIs: start
+with a status summary, run diagnostics when something looks wrong, then use a
+searchable command catalog instead of scrolling the full help page.
+
+```sh
+# Show checkout, runtime binary, active Store, and next suggested commands.
+./bin/agent-testbench.sh status
+./bin/agent-testbench.sh status --deep --json
+./bin/agent-testbench.sh status --json
+
+# Check required tools and configuration. The command reports issues but does
+# not mutate files unless --fix is set.
+./bin/agent-testbench.sh doctor
+./bin/agent-testbench.sh doctor --fix
+./bin/agent-testbench.sh doctor --deep --json
+./bin/agent-testbench.sh doctor --json
+
+# Find commands by area, flag, or tag.
+./bin/agent-testbench.sh commands --filter "store"
+./bin/agent-testbench.sh commands --area workflow --filter "gate"
+./bin/agent-testbench.sh commands --filter "case gate" --json
+```
+
 ## Update the Local Runtime
 
 Use `update --check` first when you want to ask whether the upstream remote has
 a newer build without mutating the checkout:
 
 ```sh
-./bin/agent-testbench.sh update --check --json
+./bin/agent-testbench.sh update --check --channel main --json
+./bin/agent-testbench.sh update --check --channel release --json
 ```
 
 To pull the latest upstream commit from the checkout's configured GitHub or
@@ -68,12 +97,40 @@ GitLab remote and rebuild the local runtime binary:
 ./bin/agent-testbench.sh update
 ```
 
+To move from an installed release tag to the newest version tag on the remote,
+use release mode:
+
+```sh
+./bin/agent-testbench.sh update --release latest
+```
+
 By default the command uses the current branch's upstream remote/branch and
 writes the rebuilt binary to `.runtime/bin/agent-testbench`. Pass
-`--remote github --branch main`, `--remote origin --branch main`, or
-`--repo /path/to/agent-testbench` when the checkout does not have an upstream
-tracking branch. Tracked local edits stop the update unless `--force` is set;
-untracked runtime artifacts are ignored.
+`--channel main` for the main branch, `--channel release` for the latest
+version-like tag, `--remote github --branch main`, `--remote origin --branch
+main`, or `--repo /path/to/agent-testbench` when the checkout does not have an
+upstream tracking branch. Pass `--release v0.3.2` when you need a specific tag.
+Tracked local edits stop the update unless `--force` is set; untracked runtime
+artifacts are ignored. `update --check` prints the exact next update command
+when a newer target is available.
+
+## Local Operator Commands
+
+Use these when helping a colleague diagnose a clean workstation before diving
+into target-environment details:
+
+```sh
+./bin/agent-testbench.sh config path
+./bin/agent-testbench.sh config show --json
+./bin/agent-testbench.sh config edit
+./bin/agent-testbench.sh logs --json
+./bin/agent-testbench.sh logs agent-testbench -n 80
+./bin/agent-testbench.sh completion zsh
+```
+
+`config show` masks Store credentials, `logs` only reads files under
+`.runtime/logs`, and `completion bash|zsh` prints a shell snippet rather than
+modifying shell startup files.
 
 ## Configure a SQL Store
 

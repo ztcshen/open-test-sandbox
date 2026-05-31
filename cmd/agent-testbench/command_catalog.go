@@ -10,6 +10,7 @@ import (
 type commandCatalogReport struct {
 	OK       bool                 `json:"ok"`
 	Filter   string               `json:"filter,omitempty"`
+	Area     string               `json:"area,omitempty"`
 	Count    int                  `json:"count"`
 	Commands []commandCatalogItem `json:"commands"`
 }
@@ -27,11 +28,12 @@ func runCommands(args []string) error {
 	flags := flag.NewFlagSet("commands", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	filter := flags.String("filter", "", "Filter command catalog by command, area, usage, or tag")
+	area := flags.String("area", "", "Restrict command catalog to one area, such as store, case, workflow, or environment")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable command catalog")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	report := commandCatalog(*filter)
+	report := commandCatalogForArea(*filter, *area)
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
@@ -40,11 +42,19 @@ func runCommands(args []string) error {
 }
 
 func commandCatalog(filter string) commandCatalogReport {
+	return commandCatalogForArea(filter, "")
+}
+
+func commandCatalogForArea(filter string, area string) commandCatalogReport {
 	filter = strings.TrimSpace(filter)
-	report := commandCatalogReport{OK: true, Filter: filter, Commands: []commandCatalogItem{}}
+	area = strings.TrimSpace(area)
+	report := commandCatalogReport{OK: true, Filter: filter, Area: area, Commands: []commandCatalogItem{}}
 	for _, usage := range commandUsageLines() {
 		item := commandCatalogItemFromUsage(usage)
 		if len(item.Path) == 0 {
+			continue
+		}
+		if area != "" && item.Area != area {
 			continue
 		}
 		if !commandCatalogMatches(item, filter) {
@@ -59,8 +69,19 @@ func commandCatalog(filter string) commandCatalogReport {
 func commandUsageLines() []string {
 	lines := strings.Split(helpText(), "\n")
 	out := []string{}
+	inUsage := false
 	for _, line := range lines {
 		usage := strings.TrimSpace(line)
+		if usage == "Usage:" {
+			inUsage = true
+			continue
+		}
+		if inUsage && usage == "" {
+			break
+		}
+		if !inUsage {
+			continue
+		}
 		if strings.HasPrefix(usage, "agent-testbench ") {
 			out = append(out, usage)
 		}
@@ -148,6 +169,9 @@ func printCommandCatalog(report commandCatalogReport) {
 	fmt.Printf("Total: %d\n", report.Count)
 	if report.Filter != "" {
 		fmt.Printf("Filter: %s\n", report.Filter)
+	}
+	if report.Area != "" {
+		fmt.Printf("Area: %s\n", report.Area)
 	}
 	for _, item := range report.Commands {
 		fmt.Printf("- %s [%s]\n", item.Command, item.Area)

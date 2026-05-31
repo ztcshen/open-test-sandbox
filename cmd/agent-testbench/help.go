@@ -4,8 +4,16 @@ const helpTextContent = `AgentTestBench
 
 Usage:
   agent-testbench version
-  agent-testbench update [--repo PATH] [--remote NAME] [--branch NAME] [--check] [--force] [--output PATH] [--json]
-  agent-testbench commands [--filter TEXT] [--json]
+  agent-testbench setup [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--json]
+  agent-testbench status [--deep] [--json]
+  agent-testbench doctor [--fix] [--deep] [--trace-graphql-url URL] [--json]
+  agent-testbench update [--repo PATH] [--remote NAME] [--branch NAME] [--release TAG|latest] [--channel main|release] [--check] [--force] [--output PATH] [--json]
+  agent-testbench commands [--area AREA] [--filter TEXT] [--json]
+  agent-testbench completion [bash|zsh]
+  agent-testbench logs [NAME|list] [-n N] [--json]
+  agent-testbench config path
+  agent-testbench config show [--json]
+  agent-testbench config edit
   agent-testbench store config set NAME --url postgres://...
   agent-testbench store config set NAME --url mysql://...
   agent-testbench store config set NAME --url sqlite://PATH
@@ -121,6 +129,21 @@ Usage:
   agent-testbench case gate [--store NAME_OR_DSN] [--run ID] [--require-no-failures] [--require-evidence] [--min-passed N] [--json]
   agent-testbench serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
   agent-testbench help
+
+Examples:
+  agent-testbench setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
+  agent-testbench status
+  agent-testbench doctor --fix
+  agent-testbench update --check --channel release --json
+  agent-testbench update --release latest
+  agent-testbench commands --filter "case gate"
+  agent-testbench commands --area workflow --filter "gate"
+  agent-testbench logs agent-testbench -n 80
+  agent-testbench config show --json
+  agent-testbench store config set local --url sqlite://$PWD/.runtime/agent-testbench-local.sqlite
+  agent-testbench store use local
+  agent-testbench case run --case examples/api-cases/create-item.json --dry-run --json
+  agent-testbench serve --store local
 
 Serve reads profile catalog data from the local Store. When --profile is set,
 the external bundle is first published into the Store/read-model, then served
