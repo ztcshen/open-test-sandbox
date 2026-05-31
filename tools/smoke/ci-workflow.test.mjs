@@ -56,6 +56,25 @@ test("Go lint entrypoints use the PR-diff lint gate", () => {
   assert.match(makefile, /lint:\n\ttools\/go-lint\.sh/);
 });
 
+test("CI includes deterministic secret scan as an independent gate", () => {
+  const workflow = readFileSync(join(rootDir, ".github", "workflows", "ci.yml"), "utf8");
+  const packageJSON = readFileSync(join(rootDir, "package.json"), "utf8");
+
+  assert.match(workflow, /secret-scan:/);
+  assert.match(workflow, /Run deterministic secret scan/);
+  assert.match(workflow, /npm run guard:secrets/);
+  assert.match(packageJSON, /"guard:secrets": "bash tools\/guardrails\/check_secrets\.sh"/);
+});
+
+test("CI includes dependency baseline validation", () => {
+  const workflow = readFileSync(join(rootDir, ".github", "workflows", "ci.yml"), "utf8");
+  const packageJSON = readFileSync(join(rootDir, "package.json"), "utf8");
+
+  assert.match(workflow, /Run dependency baseline/);
+  assert.match(workflow, /npm run guard:dependencies/);
+  assert.match(packageJSON, /"guard:dependencies": "bash tools\/guardrails\/check_dependency_baseline\.sh"/);
+});
+
 test("pull request template asks for scoped release-check evidence", () => {
   const template = readFileSync(join(rootDir, ".github", "PULL_REQUEST_TEMPLATE.md"), "utf8");
 

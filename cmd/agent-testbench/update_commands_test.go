@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -108,6 +109,107 @@ func TestUpdateCheckDoesNotReportLocalAheadAsAvailable(t *testing.T) {
 	}
 }
 
+func TestUpdateReleaseLatestResolvesHighestRemoteTag(t *testing.T) {
+	remoteRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",
+		"go.mod":                      "module update-fixture\n",
+	})
+	checkout := cloneUpdateFixture(t, remoteRepo)
+	runGit(t, checkout, "tag", "v0.3.0")
+	runGit(t, checkout, "push", "origin", "v0.3.0")
+	remoteHead := pushUpdateFixtureCommit(t, remoteRepo, "main", "README.md", "# updated\n")
+	tagUpdateFixture(t, remoteRepo, "main", "v0.3.2")
+
+	out := runCLI(t, "update", "--repo", checkout, "--release", "latest", "--check", "--json")
+	var report struct {
+		OK              bool   `json:"ok"`
+		CheckOnly       bool   `json:"checkOnly"`
+		UpdateAvailable bool   `json:"updateAvailable"`
+		Release         string `json:"release"`
+		Branch          string `json:"branch"`
+		RemoteRevision  string `json:"remoteRevision"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode release update report: %v\n%s", err, out)
+	}
+	if !report.OK || !report.CheckOnly || !report.UpdateAvailable || report.Release != "v0.3.2" || report.Branch != "v0.3.2" {
+		t.Fatalf("release update report = %#v", report)
+	}
+	if report.RemoteRevision != remoteHead {
+		t.Fatalf("release remote revision = %s, want %s", report.RemoteRevision, remoteHead)
+	}
+}
+
+func TestUpdateReleaseTagComparisonUsesVersionOrder(t *testing.T) {
+	tags := []string{"v0.9.9", "v0.10.0-rc1", "v0.10.0", "legacy", "v0.10.0-rc.2", "v0.10.0-rc.10"}
+	sort.SliceStable(tags, func(i int, j int) bool {
+		return compareUpdateReleaseTags(tags[i], tags[j]) > 0
+	})
+	if strings.Join(tags, ",") != "v0.10.0,v0.10.0-rc.10,v0.10.0-rc.2,v0.10.0-rc1,v0.9.9,legacy" {
+		t.Fatalf("unexpected release tag order: %v", tags)
+	}
+}
+
+func TestUpdateChannelReleaseDefaultsToLatest(t *testing.T) {
+	remoteRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",
+		"go.mod":                      "module update-fixture\n",
+	})
+	checkout := cloneUpdateFixture(t, remoteRepo)
+	remoteHead := pushUpdateFixtureCommit(t, remoteRepo, "main", "README.md", "# updated\n")
+	tagUpdateFixture(t, remoteRepo, "main", "v0.4.0")
+
+	out := runCLI(t, "update", "--repo", checkout, "--channel", "release", "--check", "--json")
+	var report struct {
+		OK             bool   `json:"ok"`
+		Channel        string `json:"channel"`
+		Release        string `json:"release"`
+		Branch         string `json:"branch"`
+		RemoteRevision string `json:"remoteRevision"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode release channel report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Channel != "release" || report.Release != "v0.4.0" || report.Branch != "v0.4.0" || report.RemoteRevision != remoteHead {
+		t.Fatalf("release channel report = %#v, remote head %s", report, remoteHead)
+	}
+}
+
+func TestUpdateChannelMainDefaultsToMainBranch(t *testing.T) {
+	remoteRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",
+		"go.mod":                      "module update-fixture\n",
+	})
+	checkout := cloneUpdateFixture(t, remoteRepo)
+
+	out := runCLI(t, "update", "--repo", checkout, "--channel", "main", "--check", "--json")
+	var report struct {
+		OK      bool   `json:"ok"`
+		Channel string `json:"channel"`
+		Branch  string `json:"branch"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode main channel report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Channel != "main" || report.Branch != "main" {
+		t.Fatalf("main channel report = %#v", report)
+	}
+}
+
+func TestUpdateCheckTextShowsNextAction(t *testing.T) {
+	remoteRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",
+		"go.mod":                      "module update-fixture\n",
+	})
+	checkout := cloneUpdateFixture(t, remoteRepo)
+	pushUpdateFixtureCommit(t, remoteRepo, "main", "README.md", "# updated\n")
+
+	out := runCLI(t, "update", "--repo", checkout, "--check")
+	if !strings.Contains(out, "Update Available: true") || !strings.Contains(out, "Next: agent-testbench update") {
+		t.Fatalf("update check text should show next action:\n%s", out)
+	}
+}
+
 func TestUpdateRejectsTrackedLocalChangesWithoutForce(t *testing.T) {
 	remoteRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
 		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",
@@ -117,9 +219,17 @@ func TestUpdateRejectsTrackedLocalChangesWithoutForce(t *testing.T) {
 	writeFile(t, filepath.Join(checkout, "go.mod"), "module local-change\n")
 
 	out := runCLIFails(t, "update", "--repo", checkout, "--json")
-	if !strings.Contains(out, `"dirty": true`) || !strings.Contains(out, "tracked files have local changes") {
+	if !strings.Contains(out, `"dirty": true`) || !strings.Contains(out, "tracked files have local changes") || !strings.Contains(out, "Next: commit or stash") {
 		t.Fatalf("dirty checkout update output = %q", out)
 	}
+}
+
+func tagUpdateFixture(t *testing.T, remoteRepo string, branch string, tag string) {
+	t.Helper()
+	work := filepath.Join(t.TempDir(), "remote-work")
+	runGit(t, "", "clone", "--branch", branch, remoteRepo, work)
+	runGit(t, work, "tag", tag)
+	runGit(t, work, "push", "origin", tag)
 }
 
 func cloneUpdateFixture(t *testing.T, remoteRepo string) string {

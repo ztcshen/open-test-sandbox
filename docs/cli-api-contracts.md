@@ -46,7 +46,7 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
 
 | Area | CLI commands |
 | --- | --- |
-| General | `version`, `help` |
+| General | `version`, `help`, `setup`, `status`, `doctor`, `update`, `commands`, `completion`, `logs`, `config path/show/edit` |
 | Store | `store config set/list/remove`, `store use`, `store current`, `store status`, `store provision`, `store upgrade`, `store ddl`, `store copy` |
 | Environment catalog | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment migration ...`, `environment verify`, `environment publish-verified` |
 | Sandbox runtime | `sandbox start`, `sandbox service list`, `sandbox service register`, `sandbox interface register` |
@@ -62,6 +62,33 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
 | API case | `case discover`, `case run`, `case batch start`, `case batch report`, `case incomplete-batches` |
 | Case suite | `case suite report`, `case suite coverage`, `case suite stability`, `case suite priority`, `case suite brief`, `case suite quality`, `case suite quality-plan`, `case suite quality-report`, `case suite inspect`, `case suite plan`, `case suite impact`, `case suite impact-report` |
 | Server | `serve` |
+
+## Common CLI Flow
+
+The first few commands are intentionally similar to mature local CLIs: inspect
+state, diagnose setup, update the runtime, then discover the exact command you
+need.
+
+```sh
+agent-testbench status
+agent-testbench doctor --fix
+agent-testbench update --check --channel release --json
+agent-testbench update --release latest
+agent-testbench commands --area workflow --filter "gate"
+agent-testbench config show --json
+agent-testbench logs agent-testbench -n 80
+```
+
+`status` is read-only and summarizes the checkout, runtime binary, active
+Store, suggested next commands, and with `--deep` the active Store schema state.
+`doctor` is read-only by default; `doctor --fix` may create the local runtime
+directory and a local SQLite Store config, while `doctor --deep` adds Docker
+Compose, Store schema, and optional trace GraphQL reachability checks. `update
+--channel main` pins the mainline flow; `update --channel release` resolves the
+highest version-like remote tag; `update --check` reports the next command
+before mutating the checkout. `config show`, `config path`, `logs`, and
+`completion bash|zsh` are local operator conveniences and do not call the
+control-plane API.
 
 ## API Surface
 
@@ -196,7 +223,7 @@ and writes only when `--apply` is supplied.
 | Capability | CLI | API | Parity |
 | --- | --- | --- | --- |
 | Serve control plane | `serve` | Not applicable | CLI-only bootstrap. |
-| Version/help | `version`, `help`, `commands` | None | CLI-only. `commands --json` emits a searchable machine-readable command catalog derived from the same Usage source as `help`, including command path, area, usage, Store awareness, and tags. |
+| Version/help/operator diagnostics | `version`, `help`, `setup`, `status`, `doctor`, `update`, `commands`, `completion`, `logs`, `config path/show/edit` | None | CLI-only. `commands --json` emits a searchable machine-readable command catalog derived from the same Usage source as `help`, including command path, area, usage, Store awareness, and tags; `commands --area AREA` restricts discovery to one command family. `status --deep` and `doctor --deep` can inspect Store schema state, `doctor --fix` applies only low-risk local setup repairs, and `logs` is limited to `.runtime/logs` files. |
 | Store selection visibility | `store current` | `/api/store/current` | Paired as read-only visibility. CLI reports the active named Store; API reports the Store selected when `serve` started. Neither surface exposes raw DSN passwords. |
 | Store status, schema upgrade, DDL, and migration | `store status`, `store provision`, `store upgrade`, `store ddl`, `store copy` | None | CLI-only. `store status --json` emits masked, machine-readable backend/version/pending status for migration scripts; when a Store cannot be reached it still writes `ok=false` plus the masked target and error before exiting non-zero. `store provision --store NAME_OR_DSN --json` creates the named MySQL Store database when the server account is reachable and authorized; it does not host the sandbox Store in Docker and does not copy Store data. `store ddl --backend postgres` and `store ddl --backend mysql` print schema DDL for externally provisioned control-plane databases. `store copy --from SOURCE --to TARGET` promotes current restore-critical Store metadata from a local Store into a shared PostgreSQL or MySQL Store; `--require-environment ENV_ID --require-verification-workflow WORKFLOW_ID --require-verified-environment` turns the expected verified environment and acceptance workflow into a built-in copy gate, and optional component/dependency/asset minimum flags can gate the copied component graph size. Its JSON report lists copied environment ids, verification workflow ids, verification flags, component graph counts, asset counts, and inline asset bytes so operators can prove the restore catalog was copied. Historical runs, Evidence indexes, and topology rows are intentionally rerun on the target Store. |
 | Environment catalog lifecycle | `environment register`, `environment startup-file put`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment verify`, `environment publish-verified` | `/api/environments`, `/api/environments/{environmentId}`, `GET /api/environments/{environmentId}/bootstrap`, `/api/environments/{environmentId}/verify`, `/api/environments/{environmentId}/publish-verified` | Mostly paired. CLI and API use the active Store or `--store NAME_OR_DSN`; `startup-file put` updates compact Store-backed startup files for an existing environment without re-registering its workflow, services, repositories, or health checks; inspect and bootstrap expose component graph restore-readiness, including blocking dependency order, cycle status, health gate counts, and remote asset readiness; bootstrap and restore also expose `componentStartupPlan`, grouping components into provider-before-consumer startup batches with static health gates derived from Store component checks; `restore` is currently CLI-only local machine preparation anchored to the environment verification workflow. It dry-runs by default, can clone remote component repositories into a workspace with `--execute`, can lock cloned or clean existing repos to recorded `--repo-ref SERVICE=REF` values, gives recorded refs precedence over `--pull` for existing checkouts, validates existing checkouts against the recorded `origin` and clean work tree state, can generate compact Store-backed startup files and component-owned assets under the workspace before Docker starts, reports a readiness gate for Store boundary, remote component repositories, Store startup files/assets, Compose services/middleware, existing container-name conflicts, health probes, cleanup review, and operator pause, runs the recorded Docker Compose pull/build/up plan or recorded start command only after repository preparation and non-destructive preflight succeed, or explicitly adopts already-running fixed-name containers with `--use-existing-containers`, waits for recorded health checks, and can run the recorded verification workflow with `--execute --run-workflow`. Each restore attempt writes `summary.lastRestore` back to the selected Environment Catalog entry for inspect/API visibility, including readiness status. CLI restore can also plan Compose-scoped target cleanup with `--clean-docker-state`/`--clean-docker-images`; execution is blocked unless `--allow-destructive-docker-cleanup` is supplied. Cleanup is a local CLI operation only, not an API execution surface. `verify` records run status and completeness flags, while `publish-verified` inspects the selected Store for a passed run, indexed Evidence, and complete SkyWalking topology before verified discovery. |

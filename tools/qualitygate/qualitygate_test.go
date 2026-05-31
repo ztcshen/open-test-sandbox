@@ -91,8 +91,8 @@ func longEnough() {
 	}
 
 	assertIssue(t, report, "function-lines")
-	assertNoIssue(t, report, "struct-fields")
-	assertNoIssue(t, report, "interface-methods")
+	assertIssueSeverity(t, report, "struct-fields", SeverityWarning)
+	assertIssueSeverity(t, report, "interface-methods", SeverityWarning)
 }
 
 func TestAnalyzeGoFileKeepsLineOnlyFunctionBlock(t *testing.T) {
@@ -141,7 +141,27 @@ func TestAnalyzeGoFileKeepsPackageBudgetWarnings(t *testing.T) {
 		t.Fatalf("analyze: %v", err)
 	}
 
-	assertIssue(t, report, "package-file-count")
+	assertIssueSeverity(t, report, "package-file-count", SeverityWarning)
+}
+
+func TestAnalyzeGoFileBlocksPackageBudgetOverLimits(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 36; i++ {
+		path := filepath.Join(root, "internal", "domain", "sample", "file_"+strconv.Itoa(i)+".go")
+		writeFile(t, path, "package sample\n\nconst Value"+strconv.Itoa(i)+" = 1\n")
+	}
+	for i := 0; i < 6; i++ {
+		path := filepath.Join(root, "internal", "domain", "sample", "large_"+strconv.Itoa(i)+".go")
+		writeFile(t, path, "package sample\n\n"+strings.Repeat("const LargeValue = 1\n", 430))
+	}
+
+	report, err := Analyze(Options{Root: root, ReportDir: filepath.Join(root, "reports")})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	assertIssueSeverity(t, report, "package-file-count", SeverityBlock)
+	assertIssueSeverity(t, report, "package-lines", SeverityBlock)
 }
 
 func TestAnalyzeGoFileReportsVeryWideStructs(t *testing.T) {

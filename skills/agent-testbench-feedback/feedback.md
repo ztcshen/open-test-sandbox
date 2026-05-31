@@ -110,3 +110,30 @@ Durable feedback registered by local Codex sessions. Use
 - Evidence: Component-to-MySQL edges could execute SQL assets during restore, but adding one ALTER required whole-graph editing and manual idempotency; there was no small versioned migration command, target history table, checksum guard, or baseline path.
 - Suggestion: Add Store-first versioned MySQL migration assets linked from component dependency edges, with add/list/plan/apply/baseline CLI commands and restore integration.
 - Verification: `go test ./cmd/agent-testbench -run 'TestEnvironment(Migration|RestoreAppliesMySQLMigration)'`
+
+## 2026-05-30 - Hermes-style CLI P0 operator entrypoints
+- Area: cli
+- Severity: P1
+- Status: fixed
+- Source: User requested Hermes CLI transformation checklist on 2026-05-30
+- Evidence: The CLI needed top-level status, doctor, update release mode, searchable commands, and copyable examples so new operators can start without reading the full help output.
+- Suggestion: P0 is fixed by status and doctor commands, update --release latest, help Examples, command catalog example filtering, README/quickstart/CLI docs, and tests under cmd/agent-testbench.
+- Verification: `go test ./cmd/agent-testbench -run 'Test(StatusReportsRepoRuntimeAndStoreSummary|DoctorReportsMissingActiveStoreWithoutFailing|UpdateReleaseLatestResolvesHighestRemoteTag|TopLevelHelpShowsStoreFlagNotLegacyStoreURL|CommandsCommandEmitsSearchableCommandCatalog)' -count=1`; `go test ./... -count=1`; `make quality`
+
+## 2026-05-30 - Hermes-style CLI P1 setup and repair workflow
+- Area: cli
+- Severity: P2
+- Status: fixed
+- Source: User requested Hermes CLI transformation checklist on 2026-05-30
+- Evidence: After P0, the next usability gap is helping a clean machine self-repair common setup issues without manual doc spelunking.
+- Suggestion: P1 is fixed by `setup`, `doctor --fix`, `update --channel main|release`, clearer `update --check` next actions, dirty-check repair guidance, `commands --area`, and quickstart/contract docs for clean-machine operation.
+- Verification: `go test ./cmd/agent-testbench -run 'Test(CommandsCanFilterByArea|UpdateChannel|UpdateCheckText|UpdateRejectsTrackedLocalChangesWithoutForce|DoctorFix|StatusDeep|SetupConfigures)' -count=1`; `go test ./... -count=1`; `make quality`
+
+## 2026-05-30 - Hermes-style CLI P2 operational depth
+- Area: cli
+- Severity: P3
+- Status: fixed
+- Source: User requested Hermes CLI transformation checklist on 2026-05-30
+- Evidence: Longer-term operator ergonomics need deeper diagnostics and shell integration once the basic entrypoints are stable.
+- Suggestion: P2 is fixed for the Hermes CLI baseline by shell completion, `logs`, `doctor --deep`, stable doctor check codes, `config path/show/edit`, `status --deep`, and documentation that points operators at existing run/case/workflow/evidence query commands instead of chat-session instructions.
+- Verification: `go test ./cmd/agent-testbench -run 'Test(CompletionPrints|Logs|Config|MainHelpIncludesP2|DoctorFix|StatusDeep)' -count=1`; `go test ./... -count=1`; `make quality`

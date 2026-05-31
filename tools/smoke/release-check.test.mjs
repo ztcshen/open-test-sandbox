@@ -127,6 +127,24 @@ test("release-check runs repository Go lint gate", () => {
   assert.match(script, /AGENT_TESTBENCH_SKIP_GO_LINT/);
 });
 
+test("release-check runs dependency baseline gate before expensive smoke", () => {
+  const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
+
+  const storeIndex = script.indexOf('step "checking SQL smoke Store"');
+  const skywalkingIndex = script.indexOf('step "checking SkyWalking smoke provider mode"');
+  const dependencyIndex = script.indexOf('step "checking dependency baseline"');
+  const goTestIndex = script.indexOf('step "running Go tests"');
+
+  assert.notEqual(storeIndex, -1);
+  assert.notEqual(skywalkingIndex, -1);
+  assert.notEqual(dependencyIndex, -1);
+  assert.notEqual(goTestIndex, -1);
+  assert.ok(storeIndex < dependencyIndex);
+  assert.ok(skywalkingIndex < dependencyIndex);
+  assert.ok(dependencyIndex < goTestIndex);
+  assert.match(script, /tools\/guardrails\/check_dependency_baseline\.sh/);
+});
+
 test("Store-first guardrail scans split CLI command files", () => {
   const script = readFileSync(path.join(rootDir, "tools", "guardrails", "check_store_first_contracts.sh"), "utf8");
 
@@ -142,6 +160,18 @@ test("Store-first guardrail scans split CLI command files", () => {
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Store-first contract scan passed/);
+});
+
+test("source-domain guardrail ignores local scratch artifacts", () => {
+  const result = spawnSync("bash", ["tools/guardrails/check_no_source_domain_core.sh"], {
+    cwd: rootDir,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /core scan passed/);
+  assert.doesNotMatch(result.stderr, /\.scratch\/github-profile/);
 });
 
 test("release-check rejects mixed full and scoped modes", () => {
@@ -290,6 +320,7 @@ test("release-check missing Store guidance lists every supported smoke Store env
   assert.match(result.stderr, /SQLite: AGENT_TESTBENCH_SMOKE_STORE='sqlite:\/\/\/tmp\/agent-testbench-smoke\.sqlite' npm run release-check -- --scope PATH/);
   assert.doesNotMatch(result.stderr, /also supported/i);
   assert.doesNotMatch(result.stdout, /checking SkyWalking smoke provider mode/);
+  assert.doesNotMatch(result.stdout, /checking dependency baseline/);
 });
 
 test("release-check refuses unsafe MySQL smoke database names before expensive gates", () => {
@@ -300,6 +331,7 @@ test("release-check refuses unsafe MySQL smoke database names before expensive g
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Refusing to run release-check against MySQL database 'business_prod'/);
   assert.doesNotMatch(result.stderr, /secret/);
+  assert.doesNotMatch(result.stdout, /checking dependency baseline/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
 
@@ -310,6 +342,7 @@ test("release-check real SkyWalking mode requires a GraphQL URL before expensive
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /requires AGENT_TESTBENCH_TRACE_GRAPHQL_URL/);
+  assert.doesNotMatch(result.stdout, /checking dependency baseline/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
 

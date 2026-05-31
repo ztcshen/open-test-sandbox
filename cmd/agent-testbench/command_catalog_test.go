@@ -18,6 +18,10 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if strings.Contains(catalogOut, "research ") {
 		t.Fatalf("command catalog should not expose feature radar as an AgentTestBench command:\n%s", catalogOut)
 	}
+	exampleOut := runCLI(t, "commands", "--filter", "store config set local", "--json")
+	if strings.Contains(exampleOut, `"command": "store config set local"`) {
+		t.Fatalf("command catalog should not index copyable examples as command definitions:\n%s", exampleOut)
+	}
 	if !strings.Contains(out, "case run --case PATH") || !strings.Contains(out, "--dry-run") {
 		t.Fatalf("top-level help should expose case run dry-run preflight:\n%s", out)
 	}
@@ -35,6 +39,12 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	}
 	if !strings.Contains(out, "agent-testbench update") || !strings.Contains(out, "--check") || !strings.Contains(out, "--output PATH") {
 		t.Fatalf("top-level help should expose self-update command:\n%s", out)
+	}
+	if !strings.Contains(out, "agent-testbench status [--deep] [--json]") || !strings.Contains(out, "agent-testbench doctor [--fix] [--deep]") {
+		t.Fatalf("top-level help should expose Hermes-style status and doctor commands:\n%s", out)
+	}
+	if !strings.Contains(out, "Examples:") || !strings.Contains(out, "agent-testbench commands --filter \"case gate\"") {
+		t.Fatalf("top-level help should include copyable common CLI examples:\n%s", out)
 	}
 	if !strings.Contains(out, "agent-testbench store config set NAME --url postgres://...") || !strings.Contains(out, "agent-testbench store config set NAME --url mysql://...") {
 		t.Fatalf("top-level help should show copyable PostgreSQL and MySQL Store setup commands:\n%s", out)
@@ -106,5 +116,29 @@ func TestCommandsCommandEmitsSearchableCommandCatalog(t *testing.T) {
 	textOut := runCLI(t, "commands", "--filter", "workflow gate")
 	if !strings.Contains(textOut, "workflow gate") || !strings.Contains(textOut, "--require-evidence") {
 		t.Fatalf("commands text output = %q", textOut)
+	}
+}
+
+func TestCommandsCanFilterByArea(t *testing.T) {
+	out := runCLI(t, "commands", "--area", "workflow", "--filter", "gate", "--json")
+
+	var report struct {
+		OK       bool   `json:"ok"`
+		Area     string `json:"area"`
+		Commands []struct {
+			Command string `json:"command"`
+			Area    string `json:"area"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode commands area report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Area != "workflow" || len(report.Commands) == 0 {
+		t.Fatalf("commands area report = %#v", report)
+	}
+	for _, item := range report.Commands {
+		if item.Area != "workflow" {
+			t.Fatalf("area filter returned non-workflow command: %#v", item)
+		}
 	}
 }
